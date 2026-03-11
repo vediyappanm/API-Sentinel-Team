@@ -1,0 +1,227 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Base Colors - Dark Professional Navy */
+    --bg-base: #0A0F1E;
+    --bg-surface: #111827;
+    --bg-elevated: #1C2537;
+    --bg-sidebar: #0A0F1E;
+    --bg-hover: #1F2D3D;
+    --bg-selected: rgba(249, 115, 22, 0.1);
+
+    /* Brand Accent - Refined Orange */
+    --brand: #F97316;
+    --brand-light: #FB923C;
+    --brand-dark: #EA6C0A;
+    --brand-glow: rgba(249, 115, 22, 0.12);
+    --brand-border: rgba(249, 115, 22, 0.35);
+
+    /* Severity Color System */
+    --sev-critical: #EF4444;
+    --sev-high: #F97316;
+    --sev-medium: #EAB308;
+    --sev-low: #22C55E;
+    --sev-info: #3B82F6;
+
+    /* Text Hierarchy */
+    --text-primary: #F9FAFB;
+    --text-secondary: #9CA3AF;
+    --text-muted: #4B5563;
+    --text-disabled: #374151;
+    --text-brand: #F97316;
+
+    /* Borders and Separators */
+    --border-subtle: #1F2D3D;
+    --border-default: #2D3D50;
+
+    /* Shadcn/UI HSL Variables (Converted for Dark Theme) */
+    --background: 226 50% 8%;
+    --foreground: 210 20% 98%;
+    --card: 222 47% 11%;
+    --card-foreground: 210 20% 98%;
+    --popover: 222 47% 11%;
+    --popover-foreground: 210 20% 98%;
+    --primary: 25 95% 53%;
+    --primary-foreground: 210 20% 98%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 20% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 217 33% 25%;
+    --accent-foreground: 210 20% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 20% 98%;
+    --border: 215 32% 17%;
+    --input: 215 32% 17%;
+    --ring: 25 95% 53%;
+    --radius: 0.5rem;
+
+    --severity-critical: 0 84% 60%;
+    --severity-high: 25 95% 53%;
+    --severity-medium: 45 93% 47%;
+    --severity-low: 142 71% 45%;
+    --severity-info: 217 91% 60%;
+
+    --status-open: 0 84% 60%;
+    --status-false-positive: 25 95% 53%;
+    --status-analyzed: 45 93% 47%;
+    --status-risk-accepted: 262 83% 58%;
+    --status-resolved: 142 71% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0A0F1E;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1C2537;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #F97316;
+}
+
+/* Animations */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+/* Brand gradient text */
+.text-gradient-brand {
+  background: linear-gradient(135deg, #F97316 0%, #FB923C 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Card hover */
+.card-hover {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.card-hover:hover {
+  border-color: rgba(249, 115, 22, 0.35) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3) !important;
+  background: var(--bg-elevated) !important;
+}
+
+/* Glass card */
+.glass-card {
+  background: rgba(17, 24, 39, 0.7);
+  border: 1px solid rgba(31, 45, 61, 0.5);
+  backdrop-filter: blur(12px);
+}
+
+/* Stat number */
+.stat-number {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sidebar nav active bar */
+.nav-active-bar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  background: linear-gradient(180deg, #F97316, #EA580C);
+  border-radius: 0 3px 3px 0;
+}
+
+/* Table row hover */
+.table-row-hover:hover {
+  background-color: rgba(249, 115, 22, 0.05);
+}
+
+/* Pulse dot */
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22C55E;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
+}
+
+/* Section header */
+.section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Card base */
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* Table */
+.data-table thead th {
+  background: #0D1424;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.data-table tbody tr {
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background 0.15s;
+}
+
+.data-table tbody tr:hover {
+  background: rgba(249, 115, 22, 0.03);
+}
