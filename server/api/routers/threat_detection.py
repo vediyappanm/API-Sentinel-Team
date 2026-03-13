@@ -9,6 +9,7 @@ Maps every proto RPC operation to a REST endpoint:
 """
 import time
 import json
+import uuid
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlalchemy.future import select
@@ -17,8 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.modules.persistence.database import get_db
 from server.modules.auth.rbac import RBAC
+from server.modules.ingestion.queue import ingestion_queue, IngestionJobItem
+from server.modules.quotas.tenant_quota import check_ingest_quota
 from server.models.core import (
-    MaliciousEventRecord, AgenticSession, ThreatConfig,
+    IngestionJob, MaliciousEventRecord, AgenticSession, ThreatConfig,
     ThreatActor, MaliciousEvent, RequestLog,
 )
 from server.modules.threat_detection.schemas import (
@@ -961,68 +964,45 @@ async def ingest_http_traffic(
       method, path, requestHeaders, responseHeaders, requestPayload,
       responsePayload, statusCode, sourceIp, destIp, time, apiCollectionId
     """
-    method = body.get("method", "GET")
-    path = body.get("path", "/")
-    source_ip = body.get("sourceIp", body.get("source_ip", ""))
-    status_code = body.get("statusCode", body.get("status_code", 200))
-    request_payload = body.get("requestPayload", body.get("request_payload", ""))
-    response_payload = body.get("responsePayload", body.get("response_payload", ""))
-    request_headers = body.get("requestHeaders", body.get("request_headers", {}))
-    response_headers = body.get("responseHeaders", body.get("response_headers", {}))
-    api_collection_id = body.get("apiCollectionId", body.get("api_collection_id", 0))
+    account_id = payload.get("account_id")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    if "method" not in body or "path" not in body:
+        raise HTTPException(status_code=422, detail="method and path are required")
 
-    # Log to RequestLog for anomaly detection
-    log = RequestLog(
-        source_ip=source_ip,
-        method=method,
-        path=path,
-        response_code=status_code,
-    )
-    db.add(log)
-
-    # Basic threat detection: check for suspicious patterns
-    threat_indicators = []
-    payload_combined = (request_payload or "") + " " + (path or "")
-    sql_patterns = ["'", "OR 1=1", "UNION SELECT", "--", "DROP TABLE"]
-    cmd_patterns = [";ls", "|cat", "&&id", "`whoami`", "$(id)"]
-    xss_patterns = ["<script", "javascript:", "onerror=", "alert("]
-
-    for p in sql_patterns:
-        if p.lower() in payload_combined.lower():
-            threat_indicators.append(("SQL_INJECTION", "HIGH"))
-            break
-    for p in cmd_patterns:
-        if p.lower() in payload_combined.lower():
-            threat_indicators.append(("COMMAND_INJECTION", "CRITICAL"))
-            break
-    for p in xss_patterns:
-        if p.lower() in payload_combined.lower():
-            threat_indicators.append(("XSS", "MEDIUM"))
-            break
-
-    created_events = []
-    for category, severity in threat_indicators:
-        rec = MaliciousEventRecord(
-            account_id=account_id,
-            actor=source_ip,
-            ip=source_ip,
-            url=path,
-            method=method,
-            payload=request_payload[:2000] if request_payload else "",
-            event_type="EVENT_TYPE_SINGLE",
-            category=category,
-            sub_category=category,
-            severity=severity,
-            detected_at=_now_ms(),
-            status="OPEN",
-            api_collection_id=api_collection_id,
+    quota = await check_ingest_quota(account_id, cost=1)
+    if not quota.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Ingestion rate limit exceeded",
         )
-        db.add(rec)
-        created_events.append({"category": category, "severity": severity})
 
+    job_id = str(uuid.uuid4())
+    job = IngestionJob(
+        id=job_id,
+        account_id=account_id,
+        job_type="http_traffic",
+        status="QUEUED",
+        accepted_count=1,
+    )
+    db.add(job)
     await db.commit()
+
+    queued = await ingestion_queue.enqueue(
+        IngestionJobItem(
+            job_id=job_id,
+            account_id=account_id,
+            job_type="http_traffic",
+            payload=body,
+        )
+    )
+    if not queued:
+        job.status = "FAILED"
+        job.error_message = "Queue full"
+        await db.commit()
+        raise HTTPException(status_code=429, detail="Ingestion queue is full")
+
     return {
-        "status": "ingested",
-        "threat_events_created": len(created_events),
-        "threats": created_events,
+        "status": "queued",
+        "job_id": job_id,
     }

@@ -19,6 +19,11 @@ from server.modules.integrations.datadog_client import DatadogClient
 from server.modules.integrations.azure_boards_client import AzureBoardsClient
 from server.modules.integrations.pagerduty_client import PagerDutyClient
 from server.modules.integrations.webhook_client import WebhookClient
+from server.modules.integrations.sentinel_client import SentinelClient
+from server.modules.integrations.qradar_client import QRadarClient
+from server.modules.integrations.elastic_client import ElasticClient
+from server.modules.integrations.chronicle_client import ChronicleClient
+from server.modules.integrations.dispatcher import dispatch_event
 from server.modules.integrations.postman_importer import PostmanImporter
 from server.modules.integrations.burp_importer import BurpImporter
 import logging
@@ -26,7 +31,10 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Integrations"])
 
-SUPPORTED_TYPES = {"slack", "jira", "splunk", "datadog", "azure_boards", "pagerduty", "webhook", "bigquery"}
+SUPPORTED_TYPES = {
+    "slack", "jira", "splunk", "datadog", "azure_boards", "pagerduty", "webhook", "bigquery",
+    "sentinel", "qradar", "elastic", "chronicle",
+}
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
@@ -66,6 +74,10 @@ async def create_integration(
     - pagerduty:    {"routing_key": "..."}
     - webhook:      {"url": "...", "secret": "...", "method": "POST"}
     - bigquery:     {"project_id": "...", "dataset_id": "...", "credentials_json": {...}}
+    - sentinel:     {"endpoint_url": "...", "headers": {"x-api-key": "..."}}
+    - qradar:       {"endpoint_url": "...", "format": "LEEF|JSON"}
+    - elastic:      {"endpoint_url": "...", "api_key": "..."}
+    - chronicle:    {"endpoint_url": "...", "api_key": "..."}
     """
     if type not in SUPPORTED_TYPES:
         raise HTTPException(400, f"Unsupported type. Supported: {sorted(SUPPORTED_TYPES)}")
@@ -207,6 +219,18 @@ async def test_integration(
                                 cfg.get("credentials_json"))
         ok = client.is_available()
         detail = "BigQuery client ready" if ok else "Unavailable — install google-cloud-bigquery or check credentials"
+    elif i.type == "sentinel":
+        ok = await SentinelClient(cfg.get("endpoint_url", ""), cfg.get("headers")).send_event({"test": True})
+        detail = "Sentinel event delivered" if ok else "Failed — check endpoint_url"
+    elif i.type == "qradar":
+        ok = await QRadarClient(cfg.get("endpoint_url", ""), cfg.get("format", "LEEF")).send_event({"test": True})
+        detail = "QRadar event delivered" if ok else "Failed — check endpoint_url"
+    elif i.type == "elastic":
+        ok = await ElasticClient(cfg.get("endpoint_url", ""), cfg.get("api_key", "")).send_event({"test": True})
+        detail = "Elastic event delivered" if ok else "Failed — check endpoint_url/api_key"
+    elif i.type == "chronicle":
+        ok = await ChronicleClient(cfg.get("endpoint_url", ""), cfg.get("api_key", "")).send_event({"test": True})
+        detail = "Chronicle event delivered" if ok else "Failed — check endpoint_url/api_key"
 
     return {"integration_id": integration_id, "type": i.type, "success": ok, "detail": detail}
 
@@ -250,6 +274,7 @@ async def import_burp(
     except Exception as e:
         raise HTTPException(400, f"Invalid file: {e}")
 
+    account_id = payload.get("account_id")
     parsed = BurpImporter.parse_xml(xml_content, account_id=account_id, collection_id=collection_id)
     from server.models.core import APIEndpoint, SampleData
     for ep_data in parsed["endpoints"]:
@@ -265,26 +290,4 @@ async def import_burp(
 
 async def fire_event(event_name: str, payload: dict, account_id: int, db: AsyncSession):
     """Call from other routers to notify enabled integrations subscribed to event_name."""
-    result = await db.execute(
-        select(Integration).where(Integration.account_id == account_id, Integration.enabled == True)
-    )
-    for i in result.scalars().all():
-        if event_name not in (i.events or []):
-            continue
-        cfg = i.config or {}
-        try:
-            if i.type == "slack":
-                await SlackClient(cfg.get("webhook_url", "")).send_alert(
-                    payload.get("type", event_name), str(payload.get("description", ""))[:500],
-                    payload.get("severity", "MEDIUM"))
-            elif i.type == "splunk":
-                await SplunkClient(cfg.get("hec_url", ""), cfg.get("hec_token", "")).send_event(
-                    {**payload, "event_name": event_name})
-            elif i.type == "datadog":
-                await DatadogClient(cfg.get("api_key", ""), cfg.get("app_key", "")).send_vulnerability_event(payload)
-            elif i.type == "pagerduty":
-                await PagerDutyClient(cfg.get("routing_key", "")).trigger_vulnerability(payload)
-            elif i.type == "webhook":
-                await WebhookClient(cfg.get("url", ""), cfg.get("secret", "")).send(payload, event_type=event_name)
-        except Exception as e:
-            logger.error(f"Integration {i.id} ({i.type}) fire_event error: {e}")
+    await dispatch_event(event_name, payload, account_id, db)

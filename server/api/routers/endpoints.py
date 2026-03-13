@@ -3,10 +3,12 @@ import uuid
 from fastapi import APIRouter, Depends, Query, Body, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, and_
-from server.modules.persistence.database import get_db
-from server.models.core import APIEndpoint
+from server.modules.persistence.database import get_db, get_read_db
+from server.models.core import APIEndpoint, EndpointRevision
 from server.modules.auth.rbac import RBAC
 from server.api.rate_limiter import limiter
+from server.modules.cache.redis_cache import get_cache_version, get_json, set_json, bump_cache_version
+from server.config import settings
 
 router = APIRouter()
 
@@ -20,7 +22,7 @@ async def get_endpoints(
     collection_id: str = Query(None),
     limit: int = Query(200),
     offset: int = Query(0),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
     user: dict = Depends(RBAC.require_auth),
 ):
     """List all discovered API endpoints with optional filters."""
@@ -33,6 +35,12 @@ async def get_endpoints(
     if collection_id:
         filters.append(APIEndpoint.collection_id == collection_id)
 
+    cache_version = await get_cache_version(account_id)
+    cache_key = f"endpoints:{account_id}:{cache_version}:{host}:{method}:{collection_id}:{limit}:{offset}"
+    cached = await get_json(cache_key)
+    if cached:
+        return cached
+
     result = await db.execute(
         select(APIEndpoint)
         .where(and_(*filters))
@@ -42,7 +50,7 @@ async def get_endpoints(
     )
     endpoints = result.scalars().all()
 
-    return {
+    response = {
         "total": len(endpoints),
         "endpoints": [
             {
@@ -56,12 +64,16 @@ async def get_endpoints(
                 "collection_id": e.collection_id,
                 "last_response_code": e.last_response_code,
                 "private_variable_count": e.private_variable_count,
+                "risk_score": e.risk_score,
+                "api_type": e.api_type,
                 "last_seen": e.last_seen.isoformat() if e.last_seen else None,
                 "created_at": str(e.created_at),
             }
             for e in endpoints
         ],
     }
+    await set_json(cache_key, response, ttl_seconds=settings.ENDPOINTS_CACHE_TTL)
+    return response
 
 
 @router.get("/hosts")
@@ -93,8 +105,41 @@ async def get_endpoint(endpoint_id: str, db: AsyncSession = Depends(get_db), use
         "last_request_body": ep.last_request_body,
         "last_query_string": ep.last_query_string,
         "private_variable_count": ep.private_variable_count,
+        "risk_score": ep.risk_score,
+        "api_type": ep.api_type,
         "tags": ep.tags,
         "last_seen": str(ep.last_seen) if ep.last_seen else None,
+    }
+
+
+@router.get("/{endpoint_id}/revisions")
+async def list_endpoint_revisions(
+    endpoint_id: str,
+    limit: int = Query(20, le=200),
+    db: AsyncSession = Depends(get_read_db),
+    user: dict = Depends(RBAC.require_auth),
+):
+    account_id = user["account_id"]
+    result = await db.execute(
+        select(EndpointRevision)
+        .where(
+            EndpointRevision.endpoint_id == endpoint_id,
+            EndpointRevision.account_id == account_id,
+        )
+        .order_by(EndpointRevision.created_at.desc())
+        .limit(limit)
+    )
+    revisions = result.scalars().all()
+    return {
+        "total": len(revisions),
+        "revisions": [
+            {
+                "id": r.id,
+                "version_hash": r.version_hash,
+                "created_at": str(r.created_at),
+            }
+            for r in revisions
+        ],
     }
 
 
@@ -122,6 +167,7 @@ async def create_endpoint(
     )
     db.add(ep)
     await db.commit()
+    await bump_cache_version(account_id)
     return {"status": "created", "id": ep.id, "method": ep.method, "path": ep.path}
 
 
@@ -147,6 +193,7 @@ async def update_endpoint(
             and_(APIEndpoint.id == endpoint_id, APIEndpoint.account_id == account_id)
         ).values(**values))
         await db.commit()
+        await bump_cache_version(account_id)
     return {"status": "updated", "id": endpoint_id}
 
 
@@ -162,4 +209,5 @@ async def delete_endpoint(endpoint_id: str, db: AsyncSession = Depends(get_db), 
         
     await db.execute(delete(APIEndpoint).where(APIEndpoint.id == endpoint_id))
     await db.commit()
+    await bump_cache_version(account_id)
     return {"status": "deleted", "id": endpoint_id}

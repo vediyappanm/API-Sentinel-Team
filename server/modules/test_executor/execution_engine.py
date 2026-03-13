@@ -13,12 +13,13 @@ class ExecutionEngine:
     """
     Orchestrates the parallel execution of mutated requests with context handling.
     """
-    def __init__(self, concurrency: int = 10):
+    def __init__(self, concurrency: int = 10, test_id: str | None = None):
         self.mutator = RequestMutator()
         self.validator = ResponseValidator()
         self.baseliner = BaselineCapturer()
         self.auth_rotator = AuthRotator()
         self.limit = asyncio.Semaphore(concurrency)
+        self.test_id = test_id or "test-run"
 
     async def execute_test(self, endpoint: dict, template: dict) -> dict:
         """
@@ -68,6 +69,7 @@ class ExecutionEngine:
                     req_rules = [{}]
 
                 auth_cfg = template.get('auth', {})
+                allow_state_change = execute_cfg.get('allow_state_change', False)
                 is_validation_node = (
                     node.data.get('validation_node', False)
                     or (node.id == list(graph.nodes.keys())[-1])
@@ -79,6 +81,20 @@ class ExecutionEngine:
                         # Substitute ${var} placeholders before mutation
                         current_rule = context_manager.substitute_recursive(current_rule)
                         mutated_req = self.mutator.mutate(endpoint, current_rule)
+                        method = (mutated_req.get("method") or "").upper()
+                        if method in {"DELETE", "PUT", "PATCH"} and not allow_state_change:
+                            final_results.append({
+                                "node_id": node.id,
+                                "rule_idx": rule_idx,
+                                "vulnerable": False,
+                                "error": "state_change_blocked",
+                            })
+                            continue
+
+                        # Mark test traffic so it can be excluded from production logs.
+                        headers = mutated_req.get("headers") or {}
+                        headers.setdefault("X-APISecurity-Test-ID", self.test_id)
+                        mutated_req["headers"] = headers
 
                         # Auth Override (BOLA/BFLA pattern)
                         if auth_cfg.get('type') == 'override':

@@ -19,6 +19,7 @@ from server.modules.persistence.database import get_db
 from server.modules.traffic_capture.sample_data_writer import SampleDataWriter
 from server.modules.parsers.postman import PostmanParser
 from server.modules.api_inventory.openapi_generator import OpenAPIGenerator
+from server.modules.cache.redis_cache import bump_cache_version
 from server.models.core import (
     APIEndpoint, SampleData, RequestLog,
     MaliciousEventRecord, MaliciousEvent, ThreatActor, WAFEvent,
@@ -179,6 +180,7 @@ async def upload_har(file: UploadFile = File(...), db: AsyncSession = Depends(ge
         saved_samples += 1
 
     await db.commit()
+    await bump_cache_version(ACCOUNT_ID)
     return {
         "status": "ok",
         "entries_processed": len(pairs),
@@ -259,6 +261,7 @@ async def import_postman(file: UploadFile = File(...), db: AsyncSession = Depend
             saved_samples += 1
 
     await db.commit()
+    await bump_cache_version(ACCOUNT_ID)
     return {
         "status": "ok",
         "requests_parsed": len(items),
@@ -270,7 +273,7 @@ async def import_postman(file: UploadFile = File(...), db: AsyncSession = Depend
 @router.get("/openapi")
 async def export_openapi(collection_name: str = Query("Discovered API")):
     """Export an OpenAPI 3.0 spec generated from all discovered endpoints."""
-    spec = await _openapi_gen.generate_spec(collection_name)
+    spec = await _openapi_gen.generate_spec(collection_name, account_id=ACCOUNT_ID)
     return spec
 
 
@@ -434,6 +437,7 @@ async def import_nginx_log(file: UploadFile = File(...), db: AsyncSession = Depe
             actor.last_seen = entry["ts"]
 
     await db.commit()
+    await bump_cache_version(ACCOUNT_ID)
     return {
         "status": "ok",
         **stats,

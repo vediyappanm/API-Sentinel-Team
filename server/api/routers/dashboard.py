@@ -2,17 +2,29 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
-from server.modules.persistence.database import get_db
+from server.modules.persistence.database import get_read_db
 from server.models.core import (
     Vulnerability, TestRun, APIEndpoint, RequestLog, WAFEvent, TestResult
 )
+from server.modules.auth.rbac import RBAC
+from server.modules.cache.redis_cache import get_cache_version, get_json, set_json
+from server.config import settings
 
 router = APIRouter()
 
 
 @router.get("/")
-async def get_dashboard(account_id: int = 1000000, db: AsyncSession = Depends(get_db)):
+async def get_dashboard(
+    db: AsyncSession = Depends(get_read_db),
+    payload: dict = Depends(RBAC.require_auth),
+):
     """Returns all dashboard statistics in a single call."""
+    account_id = payload.get("account_id")
+    cache_version = await get_cache_version(account_id)
+    cache_key = f"dashboard:{account_id}:{cache_version}"
+    cached = await get_json(cache_key)
+    if cached:
+        return cached
 
     # Total endpoints
     ep_count = await db.scalar(
@@ -70,7 +82,7 @@ async def get_dashboard(account_id: int = 1000000, db: AsyncSession = Depends(ge
     medium = severity_counts.get("MEDIUM", 0)
     risk_score = min(100, critical * 20 + high * 10 + medium * 3)
 
-    return {
+    response = {
         "account_id": account_id,
         "summary": {
             "total_endpoints": ep_count,
@@ -88,16 +100,29 @@ async def get_dashboard(account_id: int = 1000000, db: AsyncSession = Depends(ge
         "top_vulnerability_types": type_counts,
         "recent_test_runs": runs,
     }
+    await set_json(cache_key, response, ttl_seconds=settings.DASHBOARD_CACHE_TTL)
+    return response
 
 
 @router.get("/activity")
-async def get_activity(limit: int = 20, db: AsyncSession = Depends(get_db)):
+async def get_activity(
+    limit: int = 20,
+    db: AsyncSession = Depends(get_read_db),
+    payload: dict = Depends(RBAC.require_auth),
+):
     """Recent activity feed: vulnerabilities + WAF events + test runs."""
+    account_id = payload.get("account_id")
     vulns = await db.execute(
-        select(Vulnerability).order_by(desc(Vulnerability.created_at)).limit(limit // 2)
+        select(Vulnerability)
+        .where(Vulnerability.account_id == account_id)
+        .order_by(desc(Vulnerability.created_at))
+        .limit(limit // 2)
     )
     waf = await db.execute(
-        select(WAFEvent).order_by(desc(WAFEvent.created_at)).limit(limit // 2)
+        select(WAFEvent)
+        .where(WAFEvent.account_id == account_id)
+        .order_by(desc(WAFEvent.created_at))
+        .limit(limit // 2)
     )
 
     activity = []

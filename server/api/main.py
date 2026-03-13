@@ -8,6 +8,15 @@ from server.models import Base
 from server.api.routers import router
 from server.modules.test_executor.wordlist_manager import WordlistManager
 from server.modules.scheduler.test_scheduler import TestScheduler
+from server.modules.ingestion.queue import ingestion_queue
+from server.modules.analytics.processor import AnalyticsProcessor
+from server.modules.storage.archiver import ArchiveProcessor
+from server.modules.storage.warm_exporter import WarmStoreExporter
+from server.modules.api_inventory.lifecycle import EndpointLifecycleProcessor
+from server.modules.streaming.pipeline import StreamPipeline
+from server.modules.recon.scheduler import ReconScheduler
+from server.modules.response.default_playbooks import ensure_default_playbooks
+from server.modules.streaming.kafka_alert_consumer import KafkaAlertConsumer
 
 DEMO_ACCOUNT_ID = 1000000
 
@@ -18,6 +27,13 @@ from slowapi.errors import RateLimitExceeded
 from server.api.rate_limiter import limiter
 logger = structlog.get_logger()
 _scheduler = TestScheduler()
+_analytics = AnalyticsProcessor(interval_sec=60, account_id=DEMO_ACCOUNT_ID)
+_archiver = ArchiveProcessor(interval_sec=3600, account_id=DEMO_ACCOUNT_ID)
+_warm_exporter = WarmStoreExporter(interval_sec=settings.WARM_EXPORT_INTERVAL_SECONDS)
+_lifecycle = EndpointLifecycleProcessor(interval_sec=settings.LIFECYCLE_SWEEP_INTERVAL_SECONDS)
+_stream_pipeline = StreamPipeline()
+_recon_scheduler = ReconScheduler(interval_sec=settings.RECON_SCHEDULER_INTERVAL_SECONDS)
+_kafka_alert_consumer = KafkaAlertConsumer()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -43,8 +59,30 @@ async def lifespan(app: FastAPI):
     wm = WordlistManager.get_instance(settings.TESTS_LIBRARY_PATH)
     wm.refresh_templates()
 
+    # Ensure default playbooks for recon/lifecycle events
+    async with AsyncSessionLocal() as db:
+        await ensure_default_playbooks(db, DEMO_ACCOUNT_ID)
+        await db.commit()
+
     # Start APScheduler for cron-based test scheduling
     _scheduler.start()
+    # Start ingestion workers
+    await ingestion_queue.start()
+    # Start analytics processor
+    await _analytics.start()
+    # Start archival processor
+    await _archiver.start()
+    # Start warm store exporter (ClickHouse)
+    await _warm_exporter.start()
+    # Start endpoint lifecycle sweeper
+    await _lifecycle.start()
+    # Start recon scheduler
+    await _recon_scheduler.start()
+    # Start stream processing pipeline
+    await _stream_pipeline.start()
+    # If Flink is enabled, start Kafka alert consumer
+    if settings.STREAM_ENGINE.upper() == "FLINK":
+        await _kafka_alert_consumer.start()
 
     logger.info("startup", templates_loaded=len(wm.templates), scheduler_started=True)
     
@@ -52,6 +90,14 @@ async def lifespan(app: FastAPI):
     
     # --- Shutdown ---
     _scheduler.stop()
+    await _analytics.stop()
+    await _archiver.stop()
+    await _warm_exporter.stop()
+    await _lifecycle.stop()
+    await _recon_scheduler.stop()
+    await _stream_pipeline.stop()
+    await _kafka_alert_consumer.stop()
+    await ingestion_queue.stop()
     await engine.dispose()
     logger.info("shutdown", message="Shutdown complete.")
 

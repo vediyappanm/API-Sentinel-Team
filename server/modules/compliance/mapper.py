@@ -55,6 +55,39 @@ HIPAA_MAP = {
     "SSRF":             "§164.312(e)(1) — Transmission Security",
 }
 
+# -- PCI DSS v4 (selected mappings)
+PCI_MAP = {
+    "NO_AUTH":          "Req 6.3 - Access Control",
+    "BOLA":             "Req 6.3 - Access Control",
+    "BFLA":             "Req 6.3 - Access Control",
+    "SM":               "Req 6.4 - Secure Configuration",
+    "SSRF":             "Req 11.3 - Penetration Testing",
+    "INJECT":           "Req 6.2 - Secure Development",
+}
+
+# -- SOC 2 (selected Trust Services Criteria)
+SOC2_MAP = {
+    "NO_AUTH":          "CC6.1 - Logical Access",
+    "BOLA":             "CC6.1 - Logical Access",
+    "SM":               "CC7.1 - Vulnerability Management",
+    "INJECT":           "CC7.1 - Vulnerability Management",
+}
+
+# -- NIST SP 800-204C (API controls - simplified)
+NIST_API_MAP = {
+    "NO_AUTH":          "Control 3.2 - Authentication",
+    "BOLA":             "Control 3.3 - Authorization",
+    "BFLA":             "Control 3.3 - Authorization",
+    "SM":               "Control 3.6 - Configuration",
+}
+
+# -- EU AI Act (Article 9 - risk management)
+EU_AI_ACT_MAP = {
+    "PROMPT_INJECTION": "Article 9 - Risk Management System",
+    "DATA_EXFILTRATION":"Article 9 - Risk Management System",
+    "MCP_PERMISSION_DRIFT": "Article 9 - Risk Management System",
+}
+
 
 class ComplianceMapper:
     """Maps vulnerability findings to compliance frameworks and generates reports."""
@@ -65,6 +98,10 @@ class ComplianceMapper:
             "owasp_api": OWASP_MAP.get(cat, {"id": "UNKNOWN", "name": "Unclassified"}),
             "gdpr":      GDPR_MAP.get(cat, "No direct mapping"),
             "hipaa":     HIPAA_MAP.get(cat, "No direct mapping"),
+            "pci":       PCI_MAP.get(cat, "No direct mapping"),
+            "soc2":      SOC2_MAP.get(cat, "No direct mapping"),
+            "nist":      NIST_API_MAP.get(cat, "No direct mapping"),
+            "eu_ai_act": EU_AI_ACT_MAP.get(cat, "No direct mapping"),
         }
 
     async def generate_report(self, account_id: int, db: AsyncSession) -> dict:
@@ -79,6 +116,10 @@ class ComplianceMapper:
         owasp_summary = {}
         gdpr_violations = []
         hipaa_violations = []
+        pci_violations = []
+        soc2_violations = []
+        nist_violations = []
+        eu_ai_act_violations = []
         total_vulns = 0
 
         for category, count in rows:
@@ -105,6 +146,22 @@ class ComplianceMapper:
             if hipaa != "No direct mapping" and hipaa not in hipaa_violations:
                 hipaa_violations.append(hipaa)
 
+            pci = mapping["pci"]
+            if pci != "No direct mapping" and pci not in pci_violations:
+                pci_violations.append(pci)
+
+            soc2 = mapping["soc2"]
+            if soc2 != "No direct mapping" and soc2 not in soc2_violations:
+                soc2_violations.append(soc2)
+
+            nist = mapping["nist"]
+            if nist != "No direct mapping" and nist not in nist_violations:
+                nist_violations.append(nist)
+
+            eu_ai = mapping["eu_ai_act"]
+            if eu_ai != "No direct mapping" and eu_ai not in eu_ai_act_violations:
+                eu_ai_act_violations.append(eu_ai)
+
         return {
             "account_id": account_id,
             "total_open_vulnerabilities": total_vulns,
@@ -119,5 +176,21 @@ class ComplianceMapper:
             "hipaa": {
                 "compliant": len(hipaa_violations) == 0,
                 "safeguards_violated": hipaa_violations,
+            },
+            "pci_dss_v4": {
+                "compliant": len(pci_violations) == 0,
+                "requirements_violated": pci_violations,
+            },
+            "soc2": {
+                "compliant": len(soc2_violations) == 0,
+                "controls_violated": soc2_violations,
+            },
+            "nist_sp_800_204c": {
+                "compliant": len(nist_violations) == 0,
+                "controls_violated": nist_violations,
+            },
+            "eu_ai_act": {
+                "compliant": len(eu_ai_act_violations) == 0,
+                "articles_violated": eu_ai_act_violations,
             },
         }

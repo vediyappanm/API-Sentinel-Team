@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from server.modules.persistence.database import get_db
 from server.models.core import Alert
+from server.modules.integrations.dispatcher import dispatch_event
+from server.modules.response.playbook_executor import execute_playbooks
 
 router = APIRouter()
 ACCOUNT_ID = 1000000
@@ -72,6 +74,22 @@ async def create_alert(body: AlertCreate, db: AsyncSession = Depends(get_db)):
     db.add(alert)
     await db.commit()
     await db.refresh(alert)
+    await dispatch_event(
+        "alert.created",
+        {
+            "id": alert.id,
+            "title": alert.title,
+            "description": alert.message,
+            "severity": alert.severity,
+            "category": alert.category,
+            "source_ip": alert.source_ip,
+            "endpoint": alert.endpoint,
+        },
+        ACCOUNT_ID,
+        db,
+    )
+    await execute_playbooks(db, alert, evidence={"summary": alert.message or ""})
+    await db.commit()
     return _serialize(alert)
 
 

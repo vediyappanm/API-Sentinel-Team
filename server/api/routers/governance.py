@@ -5,7 +5,8 @@ from sqlalchemy import update, delete, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from server.modules.persistence.database import get_db
 from server.modules.auth.rbac import RBAC
-from server.models.core import GovernanceRule, APIEndpoint
+from server.models.core import GovernanceRule, APIEndpoint, PolicyViolation
+from server.modules.auth.audit import log_action
 
 router = APIRouter()
 
@@ -89,6 +90,16 @@ async def create_rule(
     )
     db.add(rule)
     await db.commit()
+    await log_action(
+        db=db,
+        account_id=account_id,
+        action="POLICY_CREATED",
+        user_id=payload.get("user_id"),
+        resource_type="governance_rule",
+        resource_id=rule.id,
+        details={"name": name, "rule_type": rule_type.upper(), "action": action.upper()},
+    )
+    await db.commit()
     return {"status": "created", "id": rule.id}
 
 
@@ -106,6 +117,16 @@ async def toggle_rule(
         ).values(enabled=enabled)
     )
     await db.commit()
+    await log_action(
+        db=db,
+        account_id=account_id,
+        action="POLICY_TOGGLED",
+        user_id=payload.get("user_id"),
+        resource_type="governance_rule",
+        resource_id=rule_id,
+        details={"enabled": enabled},
+    )
+    await db.commit()
     return {"status": "updated", "id": rule_id, "enabled": enabled}
 
 
@@ -120,6 +141,15 @@ async def delete_rule(
         delete(GovernanceRule).where(
             and_(GovernanceRule.id == rule_id, GovernanceRule.account_id == account_id)
         )
+    )
+    await db.commit()
+    await log_action(
+        db=db,
+        account_id=account_id,
+        action="POLICY_DELETED",
+        user_id=payload.get("user_id"),
+        resource_type="governance_rule",
+        resource_id=rule_id,
     )
     await db.commit()
     return {"status": "deleted", "id": rule_id}
@@ -167,6 +197,20 @@ async def scan_endpoints(
                 violated = True
 
             if violated:
+                violation = PolicyViolation(
+                    account_id=account_id,
+                    rule_id=rule.id,
+                    endpoint_id=ep.id,
+                    rule_type=rule.rule_type,
+                    severity="MEDIUM",
+                    message=f"Rule '{rule.name}' violated for {ep.method} {ep.path}",
+                    metadata={
+                        "field": field,
+                        "actual_value": str(ep_val),
+                        "expected": f"{op} {value}",
+                    },
+                )
+                db.add(violation)
                 violations.append({
                     "rule_id": rule.id,
                     "rule_name": rule.name,
@@ -181,11 +225,51 @@ async def scan_endpoints(
                 rule.violation_count = (rule.violation_count or 0) + 1
 
     await db.commit()
+    await log_action(
+        db=db,
+        account_id=account_id,
+        action="POLICY_SCAN",
+        user_id=payload.get("user_id"),
+        resource_type="governance_rule",
+        details={"rules_applied": len(rules), "violations_found": len(violations)},
+    )
+    await db.commit()
     return {
         "total_endpoints_scanned": len(endpoints),
         "total_rules_applied": len(rules),
         "violations_found": len(violations),
         "violations": violations,
+    }
+
+
+@router.get("/violations")
+async def list_policy_violations(
+    payload: dict = Depends(RBAC.require_auth),
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(100, le=500),
+):
+    account_id = payload.get("account_id")
+    result = await db.execute(
+        select(PolicyViolation)
+        .where(PolicyViolation.account_id == account_id)
+        .order_by(PolicyViolation.created_at.desc())
+        .limit(limit)
+    )
+    violations = result.scalars().all()
+    return {
+        "total": len(violations),
+        "violations": [
+            {
+                "id": v.id,
+                "rule_id": v.rule_id,
+                "endpoint_id": v.endpoint_id,
+                "rule_type": v.rule_type,
+                "severity": v.severity,
+                "message": v.message,
+                "created_at": str(v.created_at),
+            }
+            for v in violations
+        ],
     }
 
 

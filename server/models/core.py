@@ -1,6 +1,6 @@
 import uuid
 from sqlalchemy.orm import declarative_base, Mapped, mapped_column
-from sqlalchemy import String, Integer, DateTime, Float, Boolean, JSON, BigInteger, Text, func
+from sqlalchemy import String, Integer, DateTime, Float, Boolean, JSON, BigInteger, Text, func, UniqueConstraint
 
 Base = declarative_base()
 
@@ -33,6 +33,7 @@ class APIEndpoint(Base):
     api_type: Mapped[str] = mapped_column(String(20), default="REST")  # REST, GRAPHQL, GRPC, SOAP
     access_type: Mapped[str] = mapped_column(String(20), default="PRIVATE") # PUBLIC, PRIVATE, PARTNER
     auth_types_found: Mapped[list] = mapped_column(JSON, default=list) # ["JWT", "BASIC"]
+    status: Mapped[str] = mapped_column(String(20), default="ACTIVE")  # ACTIVE|SHADOW|ROGUE|ZOMBIE|DEPRECATED
     
     last_seen = mapped_column(DateTime(timezone=True), nullable=True)
     last_tested = mapped_column(DateTime(timezone=True), nullable=True)
@@ -293,6 +294,163 @@ class AuditLog(Base):
     created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class IngestionJob(Base):
+    """Tracks async ingestion job status for backpressure + observability."""
+    __tablename__ = "ingestion_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    job_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="QUEUED", index=True)
+    accepted_count: Mapped[int] = mapped_column(Integer, default=0)
+    processed_count: Mapped[int] = mapped_column(Integer, default=0)
+    threats_detected: Mapped[int] = mapped_column(Integer, default=0)
+    error_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[str] = mapped_column(Text, nullable=True)
+    job_metadata: Mapped[dict] = mapped_column("metadata", JSON, nullable=True)
+    started_at = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class IngestionDeadLetter(Base):
+    """Stores failed ingestion payloads for inspection/replay."""
+    __tablename__ = "ingestion_dead_letters"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    job_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[str] = mapped_column(Text, nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EndpointRevision(Base):
+    """Tracks endpoint schema revisions for drift detection."""
+    __tablename__ = "endpoint_revisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    endpoint_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    version_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    schema_json: Mapped[dict] = mapped_column(JSON, nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OpenAPISpec(Base):
+    """Stored OpenAPI spec per account for posture validation."""
+    __tablename__ = "openapi_specs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    version: Mapped[str] = mapped_column(String(50), default="1.0.0")
+    spec_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PolicyViolation(Base):
+    """Violation raised by governance/policy checks."""
+    __tablename__ = "policy_violations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    rule_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    endpoint_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    rule_type: Mapped[str] = mapped_column(String(50), nullable=True, index=True)
+    severity: Mapped[str] = mapped_column(String(20), default="MEDIUM")
+    status: Mapped[str] = mapped_column(String(20), default="OPEN")
+    message: Mapped[str] = mapped_column(Text, nullable=True)
+    violation_metadata: Mapped[dict] = mapped_column("metadata", JSON, nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TenantRetentionPolicy(Base):
+    """Per-tenant payload retention and redaction configuration."""
+    __tablename__ = "tenant_retention_policies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True, unique=True)
+    full_payload_retention: Mapped[bool] = mapped_column(Boolean, default=False)
+    retain_request_headers: Mapped[bool] = mapped_column(Boolean, default=False)
+    retain_response_bodies: Mapped[bool] = mapped_column(Boolean, default=False)
+    retention_encryption_key_id: Mapped[str] = mapped_column(String(255), nullable=True)
+    retention_period_days: Mapped[int] = mapped_column(Integer, default=90)
+    pii_categories_to_retain: Mapped[list] = mapped_column(JSON, default=list)
+    pii_vault_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ResponsePlaybook(Base):
+    """Automated response playbooks executed on alert creation."""
+    __tablename__ = "response_playbooks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    trigger: Mapped[str] = mapped_column(String(100), nullable=False, default="alert.created")
+    severity_threshold: Mapped[str] = mapped_column(String(20), default="MEDIUM")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    actions: Mapped[list] = mapped_column(JSON, default=list)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ResponseActionLog(Base):
+    """Execution log for response playbook actions."""
+    __tablename__ = "response_action_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    playbook_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    alert_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    action_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="SUCCESS")  # SUCCESS | FAILED | SKIPPED
+    details: Mapped[dict] = mapped_column(JSON, nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SensitiveDataFinding(Base):
+    """Persisted PII/sensitive data finding for inventory."""
+    __tablename__ = "sensitive_data_findings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    endpoint_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=True, index=True)
+    sample_value: Mapped[str] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String(20), nullable=True)  # request|response|header
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EvidenceRecord(Base):
+    """Evidence artifacts linked to violations, findings, or threats."""
+    __tablename__ = "evidence_records"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    evidence_type: Mapped[str] = mapped_column(String(50), nullable=False)  # policy|pii|threat
+    ref_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    endpoint_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    severity: Mapped[str] = mapped_column(String(20), default="MEDIUM")
+    summary: Mapped[str] = mapped_column(Text, nullable=True)
+    details: Mapped[dict] = mapped_column(JSON, nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EvidencePackage(Base):
+    """Replayable archive for alert/evidence events."""
+    __tablename__ = "evidence_packages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    detection_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    detection_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    path: Mapped[str] = mapped_column(String, nullable=False)
+    metadata_blob: Mapped[dict] = mapped_column("metadata", JSON, nullable=True)
+    digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class GovernanceRule(Base):
     """API governance policy rules (naming, security, schema enforcement)."""
     __tablename__ = "governance_rules"
@@ -365,6 +523,150 @@ class AgenticSession(Base):
     blocked_reason: Mapped[str] = mapped_column(String, nullable=True)
     created_at_ts: Mapped[int] = mapped_column(BigInteger, default=0)     # unix ms from proto
     updated_at_ts: Mapped[int] = mapped_column(BigInteger, default=0)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EndpointMetricHourly(Base):
+    """Hourly aggregates per endpoint for analytics."""
+    __tablename__ = "endpoint_metrics_hourly"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    endpoint_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    hour_ts: Mapped[int] = mapped_column(BigInteger, default=0, index=True)  # epoch hour start
+    request_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_count: Mapped[int] = mapped_column(Integer, default=0)
+    avg_latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
+    p95_latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ActorMetricHourly(Base):
+    """Hourly aggregates per actor for analytics."""
+    __tablename__ = "actor_metrics_hourly"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    actor_id: Mapped[str] = mapped_column(String(255), nullable=True, index=True)
+    hour_ts: Mapped[int] = mapped_column(BigInteger, default=0, index=True)
+    request_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_count: Mapped[int] = mapped_column(Integer, default=0)
+    avg_latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AlertMetricDaily(Base):
+    """Daily alert counts by severity."""
+    __tablename__ = "alert_metrics_daily"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    day: Mapped[str] = mapped_column(String(10), nullable=False, index=True)  # YYYY-MM-DD
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    critical: Mapped[int] = mapped_column(Integer, default=0)
+    high: Mapped[int] = mapped_column(Integer, default=0)
+    medium: Mapped[int] = mapped_column(Integer, default=0)
+    low: Mapped[int] = mapped_column(Integer, default=0)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WarmExportCursor(Base):
+    """Tracks last exported rows for warm store exports."""
+    __tablename__ = "warm_export_cursors"
+    __table_args__ = (
+        UniqueConstraint("account_id", "table_name", name="uq_warm_export_cursor"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    table_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    last_created_at = mapped_column(DateTime(timezone=True), nullable=True)
+    last_id: Mapped[str] = mapped_column(String(36), nullable=True)
+    updated_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ExternalReconFinding(Base):
+    """External recon-discovered endpoint candidate."""
+    __tablename__ = "external_recon_findings"
+    __table_args__ = (
+        UniqueConstraint("account_id", "source", "method", "host", "path_pattern", name="uq_recon_finding"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    method: Mapped[str] = mapped_column(String(10), default="GET")
+    url: Mapped[str] = mapped_column(String, nullable=False)
+    host: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    path: Mapped[str] = mapped_column(String, nullable=False)
+    path_pattern: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    status: Mapped[str] = mapped_column(String(20), default="NEW")  # NEW|CONFIRMED|IGNORED
+    endpoint_id: Mapped[str] = mapped_column(String(36), nullable=True)
+    first_seen_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ReconSourceConfig(Base):
+    """External recon source configuration."""
+    __tablename__ = "recon_sources"
+    __table_args__ = (
+        UniqueConstraint("account_id", "name", name="uq_recon_source_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    interval_seconds: Mapped[int] = mapped_column(Integer, default=86400)
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_run_at = mapped_column(DateTime(timezone=True), nullable=True)
+    next_run_at = mapped_column(DateTime(timezone=True), nullable=True)
+    last_status: Mapped[str] = mapped_column(String(20), default="NEVER")
+    last_error: Mapped[str] = mapped_column(Text, nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentIdentity(Base):
+    """Tracks agent identity and trust chain metadata."""
+    __tablename__ = "agent_identities"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    agent_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    agent_type: Mapped[str] = mapped_column(String(50), default="ORCHESTRATOR")
+    parent_agent_id: Mapped[str] = mapped_column(String(255), nullable=True)
+    declared_scope: Mapped[list] = mapped_column(JSON, default=list)
+    effective_scope: Mapped[list] = mapped_column(JSON, default=list)
+    human_principal: Mapped[str] = mapped_column(String(255), nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MCPToolInvocation(Base):
+    """Records MCP tool calls for agentic analysis."""
+    __tablename__ = "mcp_tool_invocations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    agent_id: Mapped[str] = mapped_column(String(255), nullable=True, index=True)
+    tool_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    parameters: Mapped[dict] = mapped_column(JSON, nullable=True)
+    result_excerpt: Mapped[str] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="OK")
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgenticViolation(Base):
+    """Agentic security violations (prompt injection, trust chain, etc.)."""
+    __tablename__ = "agentic_violations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    agent_id: Mapped[str] = mapped_column(String(255), nullable=True, index=True)
+    violation_type: Mapped[str] = mapped_column(String(100), nullable=True)
+    severity: Mapped[str] = mapped_column(String(20), default="MEDIUM")
+    details: Mapped[dict] = mapped_column(JSON, nullable=True)
     created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -570,6 +872,33 @@ class BlockedIP(Base):
     created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class EndpointBlock(Base):
+    """Endpoint-level circuit breaker blocks."""
+    __tablename__ = "endpoint_blocks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    endpoint_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    reason: Mapped[str] = mapped_column(String(255), nullable=True)
+    blocked_by: Mapped[str] = mapped_column(String(50), default="AUTO")
+    expires_at = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RateLimitOverride(Base):
+    """Dynamic rate-limit overrides for endpoints."""
+    __tablename__ = "rate_limit_overrides"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    endpoint_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    limit_rpm: Mapped[int] = mapped_column(Integer, default=60)
+    duration_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    reason: Mapped[str] = mapped_column(String(255), nullable=True)
+    expires_at = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Alert(Base):
     """Security alerts generated by the threat engine."""
     __tablename__ = "alerts"
@@ -585,6 +914,120 @@ class Alert(Base):
     acknowledged_by: Mapped[str] = mapped_column(String(100), nullable=True)
     resolved_at = mapped_column(DateTime(timezone=True), nullable=True)
     created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MLModel(Base):
+    """Registered ML model per account."""
+    __tablename__ = "ml_models"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    version: Mapped[str] = mapped_column(String(50), default="1.0.0")
+    status: Mapped[str] = mapped_column(String(20), default="SHADOW")  # SHADOW | ACTIVE | DEPRECATED
+    metrics: Mapped[dict] = mapped_column(JSON, nullable=True)
+    artifact_path: Mapped[str] = mapped_column(String, nullable=True)
+    feature_keys: Mapped[list] = mapped_column(JSON, default=list)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MLModelRun(Base):
+    """Stores inference runs for model monitoring and evaluation."""
+    __tablename__ = "ml_model_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    model_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    actor_id: Mapped[str] = mapped_column(String(255), nullable=True)
+    endpoint_id: Mapped[str] = mapped_column(String(36), nullable=True)
+    score: Mapped[float] = mapped_column(Float, default=0.0)
+    features: Mapped[dict] = mapped_column(JSON, nullable=True)
+    is_alert: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MLModelEvaluation(Base):
+    """Offline evaluation metrics for ML models."""
+    __tablename__ = "ml_model_evaluations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    model_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    sample_count: Mapped[int] = mapped_column(Integer, default=0)
+    metrics: Mapped[dict] = mapped_column(JSON, nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FeatureVector(Base):
+    """Feature vectors computed per actor/endpoint/time window."""
+    __tablename__ = "feature_vectors"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    actor_id: Mapped[str] = mapped_column(String(255), nullable=True, index=True)
+    endpoint_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    window_start: Mapped[int] = mapped_column(BigInteger, default=0, index=True)
+    features: Mapped[dict] = mapped_column(JSON, nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ActorProfile(Base):
+    """Stores behavioral telemetry per actor for detection baseline."""
+    __tablename__ = "actor_profiles"
+
+    actor_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    account_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=1000000, index=True)
+    endpoint_id: Mapped[str] = mapped_column(String(36), nullable=True)
+    first_seen = mapped_column(DateTime(timezone=True), nullable=True, server_default=func.now())
+    last_seen = mapped_column(DateTime(timezone=True), nullable=True)
+    total_events: Mapped[int] = mapped_column(Integer, default=0)
+    recent_events: Mapped[int] = mapped_column(Integer, default=0)
+    window_start = mapped_column(DateTime(timezone=True), nullable=True)
+    avg_response_ms: Mapped[float] = mapped_column(Float, default=0.0)
+    anomaly_score: Mapped[float] = mapped_column(Float, default=0.0)
+    last_alert_at = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ActorBaseline(Base):
+    """Baseline statistics for each actor to detect drift."""
+    __tablename__ = "actor_baselines"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    actor_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    endpoint_history: Mapped[list] = mapped_column(JSON, default=list)
+    anomaly_score: Mapped[float] = mapped_column(Float, default=0.0)
+    metadata_blob: Mapped[dict] = mapped_column("metadata", JSON, nullable=True)
+    last_seen = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class BusinessLogicGraph(Base):
+    """Auto-constructed business logic graph from traffic sequences."""
+    __tablename__ = "business_logic_graphs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    nodes_json: Mapped[list] = mapped_column(JSON, default=list)
+    edges_json: Mapped[list] = mapped_column(JSON, default=list)
+    built_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class BusinessLogicViolation(Base):
+    """Detected workflow anomaly compared to the learned graph."""
+    __tablename__ = "business_logic_violations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    actor_id: Mapped[str] = mapped_column(String(255), nullable=True, index=True)
+    from_path: Mapped[str] = mapped_column(String, nullable=True)
+    to_path: Mapped[str] = mapped_column(String, nullable=True)
+    violation_type: Mapped[str] = mapped_column(String(100), nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    details: Mapped[dict] = mapped_column(JSON, nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
 
 
 class Sensor(Base):

@@ -3,9 +3,10 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from server.api.main import app
-from server.modules.persistence.database import get_db
+from server.modules.persistence.database import get_db, get_read_db
 from server.models import Base
 from server.config import settings
+from server.modules.auth.jwt_issuer import JWTIssuer
 
 # Use an in-memory database for tests
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -38,9 +39,22 @@ async def db_session(test_engine):
 async def client(db_session):
     def override_get_db():
         yield db_session
+    def override_get_read_db():
+        yield db_session
     
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_read_db] = override_get_read_db
     from httpx import ASGITransport
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def auth_headers():
+    token = JWTIssuer.create_access_token({
+        "user_id": "test-user",
+        "account_id": 1000000,
+        "role": "ADMIN",
+    })
+    return {"Authorization": f"Bearer {token}"}

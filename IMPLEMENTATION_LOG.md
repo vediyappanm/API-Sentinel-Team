@@ -266,6 +266,478 @@ CREATE INDEX idx_jwt_revoked_tokens_account ON jwt_revoked_tokens(account_id);
 
 ---
 
+### 11. Response Playbooks & Retention Policy
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/models/core.py` - Added `TenantRetentionPolicy`, `ResponsePlaybook`, `ResponseActionLog`
+- `server/modules/response/playbook_executor.py` - Playbook execution engine
+- `server/api/routers/playbooks.py` - CRUD + action logs API
+- `server/api/routers/retention.py` - Retention policy API
+- `server/modules/privacy/retention.py` - Retention policy cache + redaction helper
+- `server/modules/ingestion/processors.py` - Policy-aware redaction
+
+**Capabilities:**
+- Automated playbook execution on `alert.created`
+- Action logs for auditability
+- Tenant retention controls for payload redaction
+
+---
+
+### 12. SIEM Integrations Expansion
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/integrations/dispatcher.py`
+- `server/modules/integrations/sentinel_client.py`
+- `server/modules/integrations/qradar_client.py`
+- `server/modules/integrations/elastic_client.py`
+- `server/modules/integrations/chronicle_client.py`
+- `server/api/routers/integrations.py` (new types + test support)
+
+**Capabilities:**
+- Microsoft Sentinel, IBM QRadar, Elastic SIEM, Google Chronicle outbound events
+- Unified dispatch for alert/webhook notifications
+
+---
+
+### 13. Analytics Aggregation + Evidence Details
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/models/core.py` - Added `EndpointMetricHourly`, `ActorMetricHourly`, `AlertMetricDaily`, `EvidenceRecord.details`
+- `server/modules/analytics/aggregator.py` - Hourly/daily aggregate computation
+- `server/modules/analytics/processor.py` - Background analytics processor
+- `server/api/routers/analytics.py` - Analytics API endpoints
+- `server/api/main.py` - Starts/stops analytics processor on lifecycle
+- `server/api/routers/evidence.py` - Returns evidence `details`
+- Migration `20260313_analytics_and_evidence_details.py`
+
+**Capabilities:**
+- Near-real-time endpoint and actor metrics
+- Daily alert severity rollups
+- Structured evidence details in API responses
+
+---
+
+### 14. Cold Store Archiver + Retention Sweeper
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/storage/archiver.py` - Gzip JSONL cold archive + retention delete
+- `server/api/routers/storage.py` - Manual archive trigger + archive listing
+- `server/api/main.py` - Starts/stops archive processor
+- `server/config.py` - Archive settings
+
+**Capabilities:**
+- Archives `RequestLog` and `EvidenceRecord` to per-tenant gzip JSONL files
+- Retention-aware deletion using tenant policy
+- Background archiver runs hourly
+
+---
+
+### 15. Enforcement Layer v1 (Inline Hooks)
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/enforcement/engine.py` - WAF rule push, rate-limit override, token invalidation, circuit breaker
+- `server/api/routers/enforcement.py` - Enforcement API
+- Models: `EndpointBlock`, `RateLimitOverride`
+- Migration: `20260313_enforcement_tables.py`
+- Playbooks: `server/modules/response/playbook_executor.py` now executes enforcement actions
+
+**Capabilities:**
+- Manual and automated enforcement hooks (playbooks + API)
+- Endpoint circuit breaker and rate-limit overrides
+- Token invalidation via JWT revocation table
+- WAF rule push logging (local stub)
+
+---
+
+### 16. Stream Processing Pipeline (In-Process)
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/streaming/event_bus.py` - per-tenant topic lanes
+- `server/modules/streaming/schema_registry.py` - JSON schema registry
+- `server/modules/streaming/pipeline.py` - rule evaluation + metrics flush
+- `server/api/main.py` - starts stream pipeline
+- `server/modules/ingestion/processors.py` - publishes enriched events
+
+**Capabilities:**
+- Per-tenant event lanes with in-memory bus (Kafka-ready)
+- Auth failure burst detection with alert + evidence + playbook execution
+- Streaming metrics aggregation (hourly)
+
+---
+
+### 17. Long-Window ML Scaffolding (Shadow Mode)
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/models/core.py` - `MLModel`, `MLModelRun`, `FeatureVector`
+- `server/modules/ml/model_registry.py` - registry + promotion
+- `server/modules/ml/feature_store.py` - feature vectors
+- `server/modules/ml/runner.py` - shadow-mode inference runner
+- `server/api/routers/ml_models.py` - model listing + promote
+- Migration `20260313_ml_tables.py`
+- Stream pipeline now runs shadow-mode ML per event
+
+**Capabilities:**
+- Shadow-mode inference with per-tenant model registry
+- Feature vectors stored per actor/endpoint/hour
+- Promotion flow for active models
+
+---
+
+### 18. Warm Store Exporter (ClickHouse)
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/storage/clickhouse_client.py` - ClickHouse HTTP client + table bootstrap
+- `server/modules/storage/warm_exporter.py` - Periodic export of aggregated metrics
+- `server/api/main.py` - Starts/stops warm exporter on lifecycle
+- `server/config.py` - ClickHouse + exporter settings
+
+**Capabilities:**
+- Exports hourly endpoint/actor metrics and daily alert rollups to ClickHouse
+- Configurable batch size and interval
+- Cursor-based export to avoid duplicate sends (persisted in DB)
+
+---
+
+### 19. External Recon Ingestion + Shadow Detection
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/recon/processor.py` - Ingests external recon findings
+- `server/api/routers/recon.py` - Recon API endpoints
+- `server/models/core.py` - `ExternalReconFinding` model
+- Migration `20260313_external_recon_findings.py`
+
+**Capabilities:**
+- Ingests external recon findings (Censys/Shodan/SwaggerHub/etc)
+- Flags non-inventory endpoints as shadow candidates
+- Tracks recon status: NEW / CONFIRMED / IGNORED
+
+---
+
+### 20. Endpoint Lifecycle Sweeper (Shadow/Zombie)
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/api_inventory/lifecycle.py` - Background lifecycle sweep
+- `server/api/main.py` - Starts/stops lifecycle processor
+- `server/models/core.py` - `APIEndpoint.status` column
+- `server/config.py` - Lifecycle sweep config
+- Migration `20260313_endpoint_lifecycle_status.py`
+
+**Capabilities:**
+- Marks inactive endpoints as `ZOMBIE` after `ZOMBIE_ENDPOINT_DAYS`
+- Revives endpoints to `ACTIVE` if traffic resumes
+- Shadow endpoints from recon are flagged with status `SHADOW`
+
+---
+
+### 21. Recon Source Scheduler + Adapters
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/recon/adapters.py` - Provider adapters (STATIC/URL + stubs)
+- `server/modules/recon/scheduler.py` - Background scheduler + runner
+- `server/api/routers/recon_sources.py` - CRUD + manual run API
+- `server/api/main.py` - Starts/stops recon scheduler
+- `server/models/core.py` - `ReconSourceConfig`
+- Migration `20260313_recon_sources.py`
+
+**Capabilities:**
+- Scheduled external recon ingestion with per-source intervals
+- Manual trigger endpoint for immediate runs
+- Provider stubs ready for Shodan/Censys/SwaggerHub/Git, plus URL/STATIC adapters
+
+---
+
+### 22. Recon/Lifecycle Event Dispatch to SIEM/SOAR
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/recon/scheduler.py` - Dispatches `endpoint.shadow_detected` events
+- `server/modules/api_inventory/lifecycle.py` - Dispatches zombie detect/revive events
+
+**Capabilities:**
+- Sends recon and lifecycle events through the unified integration dispatcher
+- Enables SIEM/SOAR export for shadow/zombie endpoint detection
+
+---
+
+### 23. Recon Provider Adapters (Shodan/Censys/SwaggerHub/Git)
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/recon/adapters.py` - Provider-specific adapters
+
+**Capabilities:**
+- Shodan host search adapter (query + api_key)
+- Censys host search adapter (api_id + api_secret)
+- SwaggerHub API catalog adapter (query + api_key)
+- GitHub/GitLab raw spec fetch (repo + paths or raw_urls)
+- Provider responses normalized into URL+method+confidence items
+
+---
+
+### 24. Recon & Lifecycle Evidence Artifacts
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/recon/processor.py` - EvidenceRecord on shadow discovery
+- `server/modules/api_inventory/lifecycle.py` - EvidenceRecord for zombie endpoints
+
+**Capabilities:**
+- Evidence artifacts for recon-detected shadow endpoints
+- Evidence artifacts for zombie lifecycle state changes
+
+---
+
+### 25. Recon/Lifecycle Playbook Actions
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/recon/scheduler.py` - Creates alert + playbook trigger on shadow detect
+- `server/modules/api_inventory/lifecycle.py` - Creates alert + playbook trigger on zombie detect/revive
+
+**Capabilities:**
+- Playbooks can now trigger on `endpoint.shadow_detected`, `endpoint.zombie_detected`, `endpoint.zombie_revived`
+- Generates structured alerts for recon/lifecycle events so playbooks have context
+
+---
+
+### 26. Default Playbooks for Recon/Lifecycle
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/response/default_playbooks.py` - Default playbook seeds
+- `server/modules/response/__init__.py` - Export helper
+- `server/api/main.py` - Ensures defaults on startup
+
+**Capabilities:**
+- Seeds default NOTIFY playbooks for shadow/zombie events
+- Provides immediate response automation without manual setup
+
+---
+
+### 27. Shadow/Zombie Policy Violations
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/recon/processor.py` - Creates `PolicyViolation` for shadow endpoints
+- `server/modules/api_inventory/lifecycle.py` - Creates `PolicyViolation` for zombie endpoints
+
+**Capabilities:**
+- Shadow endpoints are tracked as governance violations
+- Zombie endpoints create posture violations for compliance dashboards
+
+---
+
+### 28. Policy Resolution Automation
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/ingestion/processors.py` - Resolves shadow/zombie violations on activity
+- `server/modules/recon/processor.py` - Resolves shadow violation when confirmed
+- `server/modules/api_inventory/lifecycle.py` - Resolves zombie violations on revive
+
+**Capabilities:**
+- Shadow/Zombie policy violations auto-resolve when endpoint is active or confirmed
+
+---
+
+### 29. Playbook Ticket Actions (Jira/Azure Boards)
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/response/playbook_executor.py` - `CREATE_TICKET` action
+- `server/modules/response/default_playbooks.py` - Disabled ticket playbook templates
+
+**Capabilities:**
+- Playbooks can create Jira tickets or Azure Boards work items
+- Config resolved from integration config or inline action config
+
+---
+
+### 30. Kafka/Redpanda Event Bus Integration
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/streaming/kafka_bus.py` - Kafka event bus + topic manager
+- `server/modules/streaming/event_bus.py` - Backend selection (in-memory vs Kafka)
+- `server/config.py` - Kafka settings
+- `requirements.txt` - `aiokafka`
+
+**Capabilities:**
+- Per-tenant topic publishing to Kafka/Redpanda
+- Auto topic creation (configurable)
+- Producer/consumer ready for multi-tenant queueing
+
+---
+
+### 31. Flink Real-Time Pipeline (Skeleton)
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/streaming/flink_job.py` - PyFlink job skeleton
+- `server/modules/streaming/kafka_alert_consumer.py` - Kafka alert consumer
+- `server/config.py` - `STREAM_ENGINE` flag
+- `server/api/main.py` - Starts Kafka alert consumer when Flink enabled
+
+**Capabilities:**
+- Kafka-backed real-time processing path
+- Flink job emits alert events into Kafka
+- Backend consumes alerts into DB + playbooks
+
+---
+
+### 32. Tenant Isolation (Postgres RLS)
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/tenancy/context.py` - tenant context var
+- `server/modules/auth/rbac.py` - sets tenant context
+- `server/modules/persistence/database.py` - sets `SET LOCAL` for RLS
+- Migration `20260313_enable_rls_policies.py`
+
+**Capabilities:**
+- Row-level security enforced by Postgres
+- Per-request tenant isolation via session-local setting
+
+---
+
+### 33. MCP Deep Parsing + Inline Enforcement Hooks
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/agentic/mcp_parser.py` - JSON-RPC 2.0 parser
+- `server/modules/agentic/mcp_security.py` - inline enforcement hook
+- `server/modules/enforcement/inline_mcp.py` - enforcement action stub
+- `server/modules/ingestion/processors.py` - MCP parsing during ingestion
+- `server/config.py` - inline MCP setting
+
+**Capabilities:**
+- Parses MCP tool invocations from request/response bodies
+- Records tool invocations and triggers agentic violations
+- Optional inline enforcement fallback (WAF/circuit breaker)
+
+---
+
+### 34. eBPF Sensor Scaffold (Kernel + Rust Userspace)
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `sensor/ebpf/bpf/http_trace.bpf.c` - CO-RE eBPF program scaffold
+- `sensor/ebpf/userspace/` - Rust userspace agent (libbpf-rs)
+- `sensor/ebpf/README.md`, `sensor/ebpf/Makefile` - build/run docs
+
+**Capabilities:**
+- Kernel ring-buffer capture scaffold
+- Userspace agent with batching + ingestion to `/api/ingestion/v2/events`
+- Production-ready layout for CO-RE builds
+
+---
+
+### 35. ML Training Pipeline + Evaluation Dashboards
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `server/modules/ml/datasets.py` - Feature vector dataset loader
+- `server/modules/ml/training.py` - IsolationForest training + artifact save
+- `server/api/routers/ml_training.py` - Training + evaluation APIs
+- `server/models/core.py` - ML model artifacts + evaluation table
+- Migration `20260313_ml_training_pipeline.py`
+
+**Capabilities:**
+- Offline training pipeline with model artifacts
+- Evaluation metrics persisted for dashboards
+- API endpoints for training + evaluation listing
+
+---
+
+### 36. CI/CD + Load Testing Automation
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `.github/workflows/ci.yml` - Unit + integration CI
+- `.github/workflows/load-test.yml` - Manual load testing
+
+**Capabilities:**
+- Automated unit and integration test pipeline
+- On-demand load testing via workflow dispatch
+
+---
+
+### 37. Helm Chart + Terraform Cloud Infra
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `infra/helm/api-sentinel/` - Helm chart (deployment/service/hpa/ingress)
+- `infra/terraform/aws/` - Terraform scaffold (VPC + EKS + RDS)
+
+**Capabilities:**
+- Kubernetes deployment ready with HPA
+- Infrastructure as code scaffold for AWS
+
+---
+
+### 38. Cloud Infra Extensions (MSK/ElastiCache/S3) + Deploy Pipeline
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `infra/terraform/aws/msk.tf` - MSK Kafka cluster
+- `infra/terraform/aws/elasticache.tf` - Redis replication group
+- `infra/terraform/aws/s3.tf` - Archive bucket + lifecycle
+- `infra/terraform/aws/iam.tf` - S3 access policy
+- `infra/terraform/aws/outputs.tf` - New outputs
+- `.github/workflows/deploy.yml` - Build + Helm deploy
+- `infra/helm/api-sentinel/` - service account annotations + external service wiring
+
+**Capabilities:**
+- Production-grade managed Kafka, Redis, and S3
+- Deployment pipeline to Kubernetes via Helm
+
+---
+
+### 39. Helm Dependencies + Secrets + Env Deploy Pipeline
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `infra/helm/api-sentinel/Chart.yaml` - Bitnami dependency charts
+- `infra/helm/api-sentinel/values.yaml` - Subchart configs
+- `infra/helm/api-sentinel/templates/secret.yaml` - Secrets template
+- `.github/workflows/deploy-env.yml` - Environment-based deploy workflow
+
+**Capabilities:**
+- All-in-one Helm install (Postgres/Redis/Kafka/ClickHouse)
+- Secrets management via Helm templated secret
+- Environment deployment pipeline with staging/prod
+
+---
+
+### 40. IRSA + External Service Wiring (S3/MSK/Redis)
+
+**Status:** ✅ Complete  
+**Files Modified/Added:**
+- `infra/helm/api-sentinel/values.yaml` - IRSA + external service settings
+- `infra/helm/api-sentinel/templates/deployment.yaml` - Kafka/S3 env vars
+- `server/config.py` - ARCHIVE_BUCKET/REGION
+- `server/modules/storage/archiver.py` - S3 upload support
+- `.github/workflows/deploy-env.yml` - secret-driven wiring
+- `requirements.txt` - boto3
+
+**Capabilities:**
+- IRSA-ready Helm config
+- External service endpoints from secrets
+- S3 archive uploads
+
+---
+
 ## Database Migrations
 
 ### Migration History

@@ -6,6 +6,7 @@ from typing import List, Callable, Optional, Set
 from fastapi import HTTPException, Depends, Security, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from .jwt_issuer import JWTIssuer, TokenRevokedError
+from server.modules.tenancy.context import set_current_account_id
 import logging
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,7 @@ class RBAC:
             raise HTTPException(401, f"Invalid or expired token: {str(e)}")
             
         payload["_permissions"] = get_role_permissions(payload.get("role", "VIEWER"))
+        set_current_account_id(payload.get("account_id"))
         return payload
 
     @staticmethod

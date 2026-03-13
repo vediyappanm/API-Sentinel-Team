@@ -1,6 +1,7 @@
 import uuid
 import datetime
 from fastapi import APIRouter, Depends, BackgroundTasks, Query, HTTPException, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, and_
 from server.modules.persistence.database import get_db, AsyncSessionLocal
@@ -8,6 +9,7 @@ from server.modules.auth.rbac import RBAC
 from server.modules.test_executor.wordlist_manager import WordlistManager
 from server.modules.test_executor.execution_engine import ExecutionEngine
 from server.modules.test_executor.result_aggregator import ResultAggregator
+from server.modules.test_executor.reporting import build_sarif, build_junit
 from server.models.core import APIEndpoint, TestRun, TestResult, Vulnerability
 from server.api.websocket.manager import ws_manager
 from server.api.websocket.event_types import WSEventType
@@ -19,7 +21,7 @@ router = APIRouter()
 async def _run_security_tasks(run_id: str, template_ids: list[str], endpoint_ids: list[str], account_id: int):
     """Background task: execute templates against endpoints, persist results."""
     wm = WordlistManager.get_instance()
-    engine = ExecutionEngine()
+    engine = ExecutionEngine(test_id=run_id)
     aggregator = ResultAggregator()
     total = 0
     vuln_count = 0
@@ -260,3 +262,33 @@ async def get_run(
             for r in results
         ],
     }
+
+
+@router.get("/runs/{run_id}/findings")
+@limiter.limit("30/minute")
+async def get_run_findings(
+    request: Request,
+    run_id: str,
+    format: str = Query("sarif"),
+    db: AsyncSession = Depends(get_db),
+    payload: dict = Depends(RBAC.require_auth),
+):
+    account_id = payload["account_id"]
+    result = await db.execute(
+        select(TestRun).where(and_(TestRun.id == run_id, TestRun.account_id == account_id))
+    )
+    run = result.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    results_q = await db.execute(select(TestResult).where(TestResult.run_id == run_id))
+    results = results_q.scalars().all()
+
+    fmt = format.lower()
+    if fmt == "sarif":
+        sarif = build_sarif(run, results)
+        return JSONResponse(content=sarif, media_type="application/sarif+json")
+    if fmt == "junit":
+        xml = build_junit(run, results)
+        return PlainTextResponse(content=xml, media_type="application/xml")
+    return {"error": "unsupported format", "supported": ["sarif", "junit"]}

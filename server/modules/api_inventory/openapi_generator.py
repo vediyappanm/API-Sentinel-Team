@@ -11,7 +11,7 @@ class OpenAPIGenerator:
     """
     Generates a full OpenAPI 3.0.0 specification from the inventory.
     """
-    async def generate_spec(self, collection_name: str = "Discovered API") -> Dict[str, Any]:
+    async def generate_spec(self, collection_name: str = "Discovered API", account_id: int | None = None) -> Dict[str, Any]:
         """
         Gathers all endpoints and structured data to build the final spec.
         """
@@ -28,6 +28,8 @@ class OpenAPIGenerator:
 
         async with AsyncSessionLocal() as session:
             stmt = select(APIEndpoint)
+            if account_id is not None:
+                stmt = stmt.where(APIEndpoint.account_id == account_id)
             result = await session.execute(stmt)
             endpoints = result.scalars().all()
 
