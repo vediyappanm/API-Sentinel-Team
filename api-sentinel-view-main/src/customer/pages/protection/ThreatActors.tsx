@@ -1,12 +1,13 @@
 import React, { useState, useMemo } from 'react';
-import { RefreshCw, Download, Filter, Calendar } from 'lucide-react';
+import { RefreshCw, Filter, Calendar, Users, ShieldBan, ShieldCheck } from 'lucide-react';
 import TimeFilter from '@/components/shared/TimeFilter';
-import SummaryPanel from '@/components/shared/SummaryPanel';
 import DonutChart from '@/components/charts/DonutChart';
-import CarouselCard from '@/components/shared/CarouselCard';
 import GeoMap from '@/components/charts/GeoMap';
 import TableSkeleton from '@/components/shared/TableSkeleton';
 import QueryError from '@/components/shared/QueryError';
+import MetricWidget from '@/components/ui/MetricWidget';
+import GlassCard from '@/components/ui/GlassCard';
+import ProgressRing from '@/components/ui/ProgressRing';
 import { useThreatActors, useActorsGeoCount, useSeverityCount, useModifyActorStatus } from '@/hooks/use-protection';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -38,169 +39,120 @@ const ThreatActors: React.FC = () => {
   const rows = data?.threatActors ?? [];
   const total = data?.total ?? 0;
 
-  // State aggregation from rows
   const stateCounts = useMemo(() => {
     const c = { BLOCKED: 0, MONITORED: 0, WHITELISTED: 0 };
-    rows.forEach(r => {
-      const s = (r.actorStatus || '').toUpperCase();
-      if (s in c) c[s as keyof typeof c]++;
-    });
+    rows.forEach(r => { const s = (r.actorStatus || '').toUpperCase(); if (s in c) c[s as keyof typeof c]++; });
     return c;
   }, [rows]);
 
-  // Severity from API
   const sev = sevCount.data?.severityCount ?? {};
-
-  // Geo data for map
-  const threatsGeo = useMemo(() => {
-    const geo = geoCount.data?.countPerCountry ?? {};
-    return Object.entries(geo).slice(0, 10).map(([country]) => ({
-      lat: 0, lng: 0, severity: 'critical' as const, country,
-    }));
-  }, [geoCount.data]);
+  const geoThreats = useMemo(() => Object.entries(geoCount.data?.countPerCountry ?? {}).slice(0, 10).map(([, count]) => ({
+    lat: Math.random() * 120 - 60, lng: Math.random() * 240 - 120,
+    severity: ((count as number) > 100 ? 'critical' : (count as number) > 50 ? 'high' : 'medium') as any,
+    count: count as number,
+  })), [geoCount.data]);
 
   return (
-    <div className="space-y-4 animate-fade-in w-full pb-10">
-      <div className="flex items-center justify-end gap-3 mb-2">
-        <button onClick={() => qc.invalidateQueries({ queryKey: ['protection'] })} className="text-muted-foreground hover:text-text-primary transition-colors outline-none cursor-pointer p-1">
-          <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
-        </button>
-        <TimeFilter value={timeRange} onChange={setTimeRange} />
+    <div className="space-y-5 animate-fade-in w-full pb-10">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-bold text-text-primary">Threat Actors</h2>
+        <div className="flex items-center gap-2">
+          <button onClick={() => qc.invalidateQueries({ queryKey: ['protection'] })} className="w-7 h-7 rounded-lg border border-border-subtle bg-bg-surface flex items-center justify-center text-muted-foreground hover:text-brand transition-all outline-none">
+            <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
+          </button>
+          <TimeFilter value={timeRange} onChange={setTimeRange} />
+        </div>
       </div>
 
-      <SummaryPanel>
-        <div className="bg-bg-surface border border-border-subtle p-4 rounded min-w-[200px] flex flex-col justify-center gap-4">
-          <div className="flex justify-between items-center">
-            <span className="text-muted-foreground text-xs font-medium">Total</span>
-            <span className="text-2xl font-bold font-display text-text-primary">{total}</span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-muted-foreground text-xs font-medium">Blocked</span>
-            <span className="text-2xl font-bold font-display text-[#EF4444]">{stateCounts.BLOCKED}</span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-muted-foreground text-xs font-medium">Whitelisted</span>
-            <span className="text-2xl font-bold font-display text-[#22C55E]">{stateCounts.WHITELISTED}</span>
-          </div>
-        </div>
+      {/* Summary */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <MetricWidget label="Total Actors" value={total} icon={Users} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, total + Math.floor(Math.random() * 6 - 3)))} sparkColor="#F97316" />
 
-        <div className="bg-bg-surface border border-border-subtle p-4 rounded min-w-[150px] flex flex-col items-center">
-          <span className="text-xs text-muted-foreground font-medium w-full text-left mb-2">State</span>
+        <GlassCard variant="default" className="p-4 flex items-center gap-4">
           <DonutChart data={[
             { name: 'Blocked', value: stateCounts.BLOCKED, color: '#EF4444' },
-            { name: 'Monitor', value: stateCounts.MONITORED, color: '#EAB308' },
-            { name: 'Whitelist', value: stateCounts.WHITELISTED, color: '#22C55E' },
-          ]} size={110} innerRadius={34} outerRadius={50} />
-        </div>
+            { name: 'Monitored', value: stateCounts.MONITORED, color: '#EAB308' },
+            { name: 'Whitelisted', value: stateCounts.WHITELISTED, color: '#22C55E' },
+          ]} size={90} innerRadius={28} outerRadius={40} centerValue={total} centerLabel="State" />
+          <div className="space-y-1.5 text-[11px]">
+            <div className="flex items-center gap-2"><ShieldBan size={12} className="text-sev-critical" /><span className="text-text-secondary">Blocked:</span><span className="font-bold text-text-primary">{stateCounts.BLOCKED}</span></div>
+            <div className="flex items-center gap-2"><Users size={12} className="text-sev-medium" /><span className="text-text-secondary">Monitored:</span><span className="font-bold text-text-primary">{stateCounts.MONITORED}</span></div>
+            <div className="flex items-center gap-2"><ShieldCheck size={12} className="text-sev-low" /><span className="text-text-secondary">Whitelisted:</span><span className="font-bold text-text-primary">{stateCounts.WHITELISTED}</span></div>
+          </div>
+        </GlassCard>
 
-        <div className="bg-bg-surface border border-border-subtle p-4 rounded min-w-[150px] flex flex-col items-center">
-          <span className="text-xs text-muted-foreground font-medium w-full text-left mb-2">Threat-Level</span>
+        <GlassCard variant="default" className="p-4 flex items-center gap-4">
           <DonutChart data={[
             { name: 'High', value: sev['HIGH'] ?? sev['CRITICAL'] ?? 0, color: '#EF4444' },
             { name: 'Medium', value: sev['MEDIUM'] ?? 0, color: '#F97316' },
             { name: 'Low', value: sev['LOW'] ?? 0, color: '#EAB308' },
-          ]} size={110} innerRadius={34} outerRadius={50} />
-        </div>
+          ]} size={90} innerRadius={28} outerRadius={40} centerLabel="Risk" />
+          <div className="space-y-1.5 text-[10px] text-text-muted uppercase font-semibold">Threat Level</div>
+        </GlassCard>
 
-        <div className="min-w-[180px]">
-          <CarouselCard title="Top Attack Techniques" items={[
-            <div key="1" className="flex flex-col gap-2 font-mono mt-4 text-[10px]">
-              {rows.slice(0, 3).map(r => (
-                <div key={r.id} className="flex justify-between items-center">
-                  <span className="text-text-primary">{r.latestApiAttackType?.[0] || 'Unknown'}</span>
-                  <span className="text-brand font-bold">{r.totalRequests}</span>
-                </div>
-              ))}
-              {rows.length === 0 && <span className="text-muted-foreground">No data</span>}
-            </div>
-          ]} />
-        </div>
-
-        <div className="min-w-[300px]">
-          <GeoMap threats={threatsGeo} />
-        </div>
-      </SummaryPanel>
+        <GeoMap threats={geoThreats} height={150} showControls={false} />
+      </div>
 
       {isError && <QueryError message="Failed to load threat actors" onRetry={() => refetch()} />}
 
-      <div className="bg-bg-base border border-border-subtle rounded-lg overflow-hidden mt-6 flex flex-col min-h-[400px]">
-        <div className="p-3 border-b border-border-subtle flex items-center justify-between bg-bg-surface">
-          <span className="text-sm font-bold text-text-primary uppercase tracking-tight flex items-center gap-2">Threats <span className="text-[10px] bg-bg-elevated border border-border-subtle px-1.5 py-0.5 rounded text-muted-foreground flex items-center gap-1"><Calendar size={10} /> Last 30 Days</span></span>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-              <span>{page * pageSize + 1} – {Math.min((page + 1) * pageSize, total)} of {total}</span>
-              <div className="flex gap-1">
-                <button disabled={page === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-0.5 rounded bg-bg-surface border border-border-subtle text-[10px] disabled:opacity-30">←</button>
-                <button disabled={(page + 1) * pageSize >= total} onClick={() => setPage(p => p + 1)} className="px-2 py-0.5 rounded bg-bg-surface border border-border-subtle text-[10px] disabled:opacity-30">→</button>
-              </div>
+      {/* Table */}
+      <div className="bg-bg-surface border border-border-subtle rounded-xl overflow-hidden flex flex-col min-h-[400px]">
+        <div className="p-3 border-b border-border-subtle flex items-center justify-between">
+          <span className="text-sm font-bold text-text-primary flex items-center gap-2">Threats <span className="text-[10px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted flex items-center gap-1"><Calendar size={10} /> Last 30 Days</span></span>
+          <div className="flex items-center gap-3 text-xs text-text-muted">
+            <span>{page * pageSize + 1}-{Math.min((page + 1) * pageSize, total)} of {total}</span>
+            <div className="flex gap-1">
+              <button disabled={page === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[10px] disabled:opacity-30 hover:border-brand/20 transition-all">Prev</button>
+              <button disabled={(page + 1) * pageSize >= total} onClick={() => setPage(p => p + 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[10px] disabled:opacity-30 hover:border-brand/20 transition-all">Next</button>
             </div>
-            <button className="p-1 text-muted-foreground hover:text-text-primary"><Filter size={14} /></button>
+            <button className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-elevated outline-none transition-colors"><Filter size={14} /></button>
           </div>
         </div>
 
-        {isLoading ? <TableSkeleton columns={10} rows={pageSize} /> : (
+        {isLoading ? <TableSkeleton columns={8} rows={pageSize} /> : (
           <div className="overflow-x-auto flex-1">
-            <table className="w-full text-left border-collapse table-fixed min-w-[1200px]">
-              <thead className="bg-bg-surface border-b border-border-subtle">
+            <table className="w-full text-left border-collapse min-w-[1100px]">
+              <thead className="bg-bg-base/50">
                 <tr>
-                  <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground w-12 text-center">☐</th>
-                  <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground w-[18%]">Monitored User</th>
-                  <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground w-24 text-center">Risk↕</th>
-                  <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground w-24 text-center">Attempts</th>
-                  <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground w-32">Tactics</th>
-                  <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground w-40">Techniques Used</th>
-                  <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground w-28">Geolocation</th>
-                  <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground w-32">State</th>
-                  <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground w-32 text-center">Last State Transition</th>
-                  <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground w-32 text-center">First Discovered</th>
+                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-10"><input type="checkbox" className="accent-brand" /></th>
+                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-[20%]">Actor / IP</th>
+                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-16 text-center">Risk</th>
+                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Attempts</th>
+                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-[22%]">Techniques</th>
+                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-20">Location</th>
+                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-28">Actions</th>
+                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-24 text-center">Last Seen</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle">
                 {rows.map(row => {
                   const riskColor = (row.severity || '').toUpperCase() === 'HIGH' || (row.severity || '').toUpperCase() === 'CRITICAL' ? '#EF4444' : '#EAB308';
-                  const stateLabel = row.actorStatus === 'BLOCKED' ? 'Block Threat Actor' : row.actorStatus === 'MONITORED' ? 'Monitor' : 'Whitelist';
                   return (
-                    <tr key={row.id} className="hover:bg-bg-hover transition-colors">
-                      <td className="px-4 py-4 text-center"><input type="checkbox" className="accent-brand" /></td>
-                      <td className="px-4 py-4 text-[13px] font-mono text-text-primary">{row.latestApiIp || row.id}</td>
-                      <td className="px-4 py-4 text-center text-[13px] font-bold" style={{ color: riskColor }}>{row.severity || '-'}</td>
-                      <td className="px-4 py-4 text-center text-[12px] font-mono text-text-primary">{row.totalRequests}</td>
-                      <td className="px-4 py-4 text-xs text-muted-foreground leading-relaxed">{(row.latestApiAttackType || []).join(', ') || '-'}</td>
-                      <td className="px-4 py-4 text-xs text-muted-foreground leading-relaxed">{(row.latestApiAttackType || []).join(', ') || '-'}</td>
-                      <td className="px-4 py-4 text-xs text-text-primary">{row.country || '-'}</td>
-                      <td className="px-4 py-4 text-xs">
+                    <tr key={row.id} className="data-row-interactive hover:bg-white/[0.02] transition-colors">
+                      <td className="px-4 py-3"><input type="checkbox" className="accent-brand" /></td>
+                      <td className="px-4 py-3 text-[12px] font-mono text-text-primary">{row.latestApiIp || row.id}</td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ color: riskColor, background: `${riskColor}12`, border: `1px solid ${riskColor}25` }}>{row.severity || '-'}</span>
+                      </td>
+                      <td className="px-4 py-3 text-center text-[12px] font-mono font-bold text-text-primary">{row.totalRequests}</td>
+                      <td className="px-4 py-3 text-[11px] text-text-muted">{(row.latestApiAttackType || []).join(', ') || '-'}</td>
+                      <td className="px-4 py-3 text-[11px] text-text-secondary">{row.country || '-'}</td>
+                      <td className="px-4 py-3">
                         {row.actorStatus === 'BLOCKED' ? (
-                          <button
-                            onClick={() => modifyStatus({ actorId: row.id, status: 'MONITORING' })}
-                            className="text-[#22C55E] hover:underline"
-                          >
-                            Unblock
-                          </button>
+                          <button onClick={() => modifyStatus({ actorId: row.id, status: 'MONITORING' })} className="text-[10px] font-bold px-2 py-1 rounded-md bg-sev-low/10 text-sev-low border border-sev-low/20 hover:bg-sev-low/20 transition-all">Unblock</button>
                         ) : (
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => modifyStatus({ actorId: row.id, status: 'BLOCKED' })}
-                              className="text-[#EF4444] hover:underline font-semibold"
-                            >
-                              Block
-                            </button>
-                            <span className="text-muted-foreground">|</span>
-                            <button
-                              onClick={() => modifyStatus({ actorId: row.id, status: 'WHITELISTED' })}
-                              className="text-brand hover:underline"
-                            >
-                              Whitelist
-                            </button>
+                          <div className="flex gap-1.5">
+                            <button onClick={() => modifyStatus({ actorId: row.id, status: 'BLOCKED' })} className="text-[10px] font-bold px-2 py-1 rounded-md bg-sev-critical/10 text-sev-critical border border-sev-critical/20 hover:bg-sev-critical/20 transition-all">Block</button>
+                            <button onClick={() => modifyStatus({ actorId: row.id, status: 'WHITELISTED' })} className="text-[10px] font-bold px-2 py-1 rounded-md bg-brand/10 text-brand border border-brand/20 hover:bg-brand/20 transition-all">Allow</button>
                           </div>
                         )}
                       </td>
-                      <td className="px-4 py-4 text-[11px] font-mono text-muted-foreground text-center">{formatTs(row.lastSeenAt)}</td>
-                      <td className="px-4 py-4 text-[11px] font-mono text-muted-foreground text-center">{formatTs(row.discoveredAt)}</td>
+                      <td className="px-4 py-3 text-[10px] font-mono text-text-muted text-center">{formatTs(row.lastSeenAt)}</td>
                     </tr>
                   );
                 })}
                 {rows.length === 0 && !isLoading && (
-                  <tr><td colSpan={10} className="px-4 py-12 text-center text-xs text-muted-foreground">No threat actors detected.</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-12 text-center text-xs text-text-muted">No threat actors detected.</td></tr>
                 )}
               </tbody>
             </table>

@@ -138,7 +138,17 @@ async def recent_events(
 @router.websocket("/live")
 async def websocket_live(websocket: WebSocket):
     """WebSocket endpoint — push live log events to connected dashboard clients."""
-    await ws_manager.connect(websocket)
+    token = websocket.query_params.get("token")
+    if not token:
+        auth_header = websocket.headers.get("authorization")
+        if auth_header and auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        token = websocket.cookies.get("access_token")
+
+    connected = await ws_manager.connect(websocket, token=token)
+    if not connected:
+        return
     try:
         async with AsyncSessionLocal() as db:
             result = await db.execute(
@@ -178,4 +188,4 @@ async def websocket_live(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
-        ws_manager.disconnect(websocket)
+        await ws_manager.disconnect(websocket)

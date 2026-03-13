@@ -117,7 +117,7 @@ class RBAC:
             raise HTTPException(401, "Authorization header or cookie missing")
             
         try:
-            payload = JWTIssuer.verify_token(token_str)
+            payload = await JWTIssuer.verify_token(token_str)
         except TokenRevokedError:
             raise HTTPException(401, "Token has been revoked. Please log in again.")
         except Exception as e:

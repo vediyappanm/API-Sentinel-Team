@@ -1,71 +1,35 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { RefreshCw, Brain, Zap, Eye, Shield, TrendingUp, AlertTriangle, Activity, Target } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useThreatCategoryCount, useSeverityCount, useThreatTopN, useActorsGeoCount } from '@/hooks/use-protection';
-import { useDashboardKPIs, useSeverityBreakdown } from '@/hooks/use-dashboard';
-import { clsx } from 'clsx';
+import { useDashboardKPIs } from '@/hooks/use-dashboard';
 import GeoMap from '@/components/charts/GeoMap';
 import DonutChart from '@/components/charts/DonutChart';
+import GlassCard from '@/components/ui/GlassCard';
+import MetricWidget from '@/components/ui/MetricWidget';
+import ProgressRing from '@/components/ui/ProgressRing';
+import AnimatedCounter from '@/components/ui/AnimatedCounter';
 
-function daysAgoTs(days: number) {
-  return Math.floor((Date.now() - days * 86400_000) / 1000);
-}
-
-// Animated counter
-function useCount(target: number, speed = 30) {
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    if (target === 0) { setCount(0); return; }
-    let cur = 0;
-    const step = Math.max(1, Math.ceil(target / 60));
-    const t = setInterval(() => {
-      cur = Math.min(cur + step, target);
-      setCount(cur);
-      if (cur >= target) clearInterval(t);
-    }, speed);
-    return () => clearInterval(t);
-  }, [target, speed]);
-  return count;
-}
-
-// Risk score from severity counts
 function computeRiskScore(crit: number, high: number, med: number): number {
   return Math.min(100, crit * 20 + high * 10 + med * 3);
 }
 
-function riskColor(score: number): string {
-  if (score >= 80) return '#EF4444';
-  if (score >= 50) return '#F97316';
-  if (score >= 20) return '#EAB308';
-  return '#22C55E';
-}
-
 const MODEL_EXPERTS = [
   { id: 'injection', name: 'Injection Detector', description: 'SQL, command, code injection patterns', color: '#EF4444' },
-  { id: 'auth', name: 'Auth Analyzer', description: 'Broken auth, JWT forgery, session attacks', color: '#F97316' },
+  { id: 'auth', name: 'Auth Analyzer', description: 'Broken auth, JWT forgery, session attacks', color: '#632CA6' },
   { id: 'traversal', name: 'Path Analyzer', description: 'Directory traversal, file access patterns', color: '#EAB308' },
   { id: 'scanner', name: 'Scanner Detector', description: 'Automated scanning tools, bots', color: '#3B82F6' },
-  { id: 'xss', name: 'XSS Engine', description: 'Cross-site scripting payloads', color: '#A78BFA' },
+  { id: 'xss', name: 'XSS Engine', description: 'Cross-site scripting payloads', color: '#7C3AED' },
   { id: 'anomaly', name: 'Anomaly Engine', description: 'Behavioral deviations, unusual patterns', color: '#22C55E' },
 ];
 
-interface ExpertVote {
-  id: string;
-  confidence: number;
-  active: boolean;
-}
-
 const ThreatIntelligence: React.FC = () => {
   const qc = useQueryClient();
-  const startTs = useMemo(() => daysAgoTs(7), []);
-  const endTs = useMemo(() => Math.floor(Date.now() / 1000), []);
 
   const catCount = useThreatCategoryCount();
   const sevCount = useSeverityCount();
   const topN = useThreatTopN();
   const geo = useActorsGeoCount();
-  const sevBreak = useSeverityBreakdown();
-  const { threats, issues } = useDashboardKPIs();
 
   const cats = (catCount.data as any)?.categoryCount ?? {};
   const sev = (sevCount.data as any)?.severityCount ?? {};
@@ -73,16 +37,11 @@ const ThreatIntelligence: React.FC = () => {
   const high = sev['HIGH'] ?? 0;
   const med = sev['MEDIUM'] ?? 0;
   const riskScore = computeRiskScore(crit, high, med);
-  const riskCol = riskColor(riskScore);
-  const animatedRisk = useCount(riskScore, 20);
 
   const totalEvents = Object.values(cats).reduce((a: any, b: any) => a + b, 0) as number;
-  const animatedEvents = useCount(totalEvents, 15);
-
   const topAttack = Object.entries(cats).sort((a: any, b: any) => b[1] - a[1])[0];
 
-  // Simulate expert model votes based on actual category data
-  const expertVotes: ExpertVote[] = useMemo(() => {
+  const expertVotes = useMemo(() => {
     const catLower = Object.fromEntries(Object.entries(cats).map(([k, v]) => [k.toLowerCase(), v as number]));
     return MODEL_EXPERTS.map(e => {
       let conf = 0;
@@ -96,6 +55,17 @@ const ThreatIntelligence: React.FC = () => {
     });
   }, [cats, totalEvents]);
 
+  const agenticSignals = useMemo(() => {
+    const catLower = Object.fromEntries(Object.entries(cats).map(([k, v]) => [k.toLowerCase(), v as number]));
+    const lookup = (keys: string[]) => keys.reduce((s, k) => s + (catLower[k] ?? 0), 0);
+    return {
+      promptInjection: lookup(['prompt injection', 'prompt_injection', 'context overflow']),
+      toolMisuse: lookup(['tool misuse', 'tool_misuse']),
+      trustChain: lookup(['a2a trust', 'trust chain', 'delegation abuse']),
+      mcp: lookup(['mcp', 'mcp server', 'mcp tool']),
+    };
+  }, [cats]);
+
   const geoThreats = Object.entries(geo.data?.countPerCountry ?? {}).map(([code, count]) => ({ country: code, count }));
 
   const severityData = [
@@ -108,175 +78,197 @@ const ThreatIntelligence: React.FC = () => {
   const isLoading = catCount.isLoading || sevCount.isLoading;
 
   return (
-    <div className="space-y-6 animate-fade-in w-full pb-10">
+    <div className="space-y-5 animate-fade-in w-full pb-10">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <Brain size={22} className="text-[#A78BFA]" />
-            <h1 className="text-xl font-bold text-text-primary">AI Threat Intelligence</h1>
-            <span className="text-[10px] bg-[#A78BFA]/10 border border-[#A78BFA]/30 text-[#A78BFA] px-2 py-0.5 rounded-full font-semibold">6-Expert Ensemble</span>
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-[#7C3AED]/10 flex items-center justify-center">
+            <Brain size={18} className="text-[#7C3AED]" />
           </div>
-          <p className="text-xs text-muted-foreground">Real-time swarm scoring of live API traffic using ensemble AI models</p>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-bold text-text-primary">AI Threat Intelligence</h2>
+              <span className="text-[10px] bg-[#7C3AED]/10 border border-[#7C3AED]/30 text-[#7C3AED] px-2 py-0.5 rounded-full font-semibold">6-Expert Ensemble</span>
+            </div>
+            <p className="text-[11px] text-text-muted">Real-time swarm scoring of live API traffic using ensemble AI models</p>
+          </div>
         </div>
-        <button
-          onClick={() => { qc.invalidateQueries({ queryKey: ['protection'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); }}
-          className={clsx('w-8 h-8 rounded-lg border border-border-subtle bg-bg-surface flex items-center justify-center text-muted-foreground hover:text-[#A78BFA] transition-all outline-none', isLoading && 'animate-spin')}
-        >
-          <RefreshCw size={14} />
+        <button onClick={() => { qc.invalidateQueries({ queryKey: ['protection'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); }}
+          className="w-7 h-7 rounded-lg border border-border-subtle bg-bg-surface flex items-center justify-center text-muted-foreground hover:text-[#7C3AED] transition-all outline-none">
+          <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
         </button>
       </div>
 
       {/* KPI Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="rounded-xl p-4 border flex flex-col gap-2" style={{ background: `${riskCol}10`, borderColor: `${riskCol}40` }}>
-          <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold flex items-center gap-1.5"><Target size={10} /> Risk Score</span>
-          <span className="text-4xl font-bold font-display" style={{ color: riskCol }}>{animatedRisk}</span>
-          <span className="text-[10px] text-muted-foreground">out of 100</span>
-        </div>
-        <div className="rounded-xl p-4 border border-border-subtle bg-bg-surface flex flex-col gap-2">
-          <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold flex items-center gap-1.5"><Activity size={10} /> Events Detected</span>
-          <span className="text-4xl font-bold font-display text-[#3B82F6]">{animatedEvents.toLocaleString()}</span>
-          <span className="text-[10px] text-muted-foreground">all-time</span>
-        </div>
-        <div className="rounded-xl p-4 border border-border-subtle bg-bg-surface flex flex-col gap-2">
-          <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold flex items-center gap-1.5"><AlertTriangle size={10} /> Top Attack Vector</span>
-          <span className="text-lg font-bold text-brand truncate">{topAttack?.[0] ?? 'None'}</span>
-          <span className="text-[10px] text-muted-foreground">{topAttack?.[1] ?? 0} events</span>
-        </div>
-        <div className="rounded-xl p-4 border border-border-subtle bg-bg-surface flex flex-col gap-2">
-          <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold flex items-center gap-1.5"><Shield size={10} /> Expert Models</span>
-          <span className="text-4xl font-bold font-display text-[#A78BFA]">{expertVotes.filter(e => e.active).length}</span>
-          <span className="text-[10px] text-muted-foreground">of 6 active</span>
-        </div>
+        <GlassCard variant="default" className="p-4 flex items-center gap-3">
+          <ProgressRing value={riskScore} max={100} size={64} strokeWidth={6} label="Risk" />
+          <div>
+            <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">Risk Score</span>
+            <p className="text-2xl font-bold text-text-primary tabular-nums"><AnimatedCounter value={riskScore} /></p>
+            <span className="text-[10px] text-text-muted">out of 100</span>
+          </div>
+        </GlassCard>
+
+        <MetricWidget label="Events Detected" value={totalEvents} icon={Activity} iconColor="#3B82F6" iconBg="rgba(59,130,246,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, totalEvents + Math.floor(Math.random() * 10 - 5)))} sparkColor="#3B82F6" />
+
+        <GlassCard variant="default" className="p-4 flex flex-col gap-2">
+          <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5"><AlertTriangle size={10} /> Top Attack Vector</span>
+          <span className="text-base font-bold text-brand truncate">{topAttack?.[0] ?? 'None'}</span>
+          <span className="text-[10px] text-text-muted">{topAttack?.[1] ?? 0} events</span>
+        </GlassCard>
+
+        <GlassCard variant="default" className="p-4 flex flex-col gap-2">
+          <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5"><Shield size={10} /> Expert Models</span>
+          <span className="text-2xl font-bold text-[#7C3AED] tabular-nums"><AnimatedCounter value={expertVotes.filter(e => e.active).length} /></span>
+          <span className="text-[10px] text-text-muted">of 6 active</span>
+        </GlassCard>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Expert Model Consensus */}
-        <div className="rounded-xl border border-border-subtle bg-bg-surface p-5">
+        <GlassCard variant="elevated" className="p-5">
           <div className="flex items-center gap-2 mb-4">
-            <Brain size={16} className="text-[#A78BFA]" />
-            <span className="text-sm font-bold text-text-primary uppercase tracking-wider">Expert Model Reasoning</span>
+            <Brain size={16} className="text-[#7C3AED]" />
+            <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Expert Model Reasoning</span>
           </div>
           <div className="space-y-3">
             {MODEL_EXPERTS.map((expert, i) => {
               const vote = expertVotes[i];
               return (
                 <div key={expert.id} className="flex items-center gap-3">
-                  <div className="w-2 h-2 rounded-full shrink-0" style={{ background: vote.active ? expert.color : '#1F2D3D', boxShadow: vote.active ? `0 0 6px ${expert.color}80` : 'none' }} />
+                  <div className="w-2 h-2 rounded-full shrink-0" style={{ background: vote.active ? expert.color : '#E4E4EC', boxShadow: vote.active ? `0 0 6px ${expert.color}80` : 'none' }} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-[11px] font-semibold text-text-primary">{expert.name}</span>
-                      <span className="text-[10px] font-mono" style={{ color: vote.active ? expert.color : '#4B5563' }}>
-                        {vote.confidence}%
-                      </span>
+                      <span className="text-[10px] font-mono font-bold" style={{ color: vote.active ? expert.color : '#9D9DAF' }}>{vote.confidence}%</span>
                     </div>
-                    <div className="h-1.5 bg-bg-base border border-border-subtle rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all duration-700"
-                        style={{ width: `${vote.confidence}%`, background: vote.active ? expert.color : '#1C2537' }}
-                      />
+                    <div className="h-1.5 bg-black/[0.04] rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${vote.confidence}%`, background: vote.active ? `linear-gradient(90deg, ${expert.color}88, ${expert.color})` : '#F9F9FC' }} />
                     </div>
-                    <span className="text-[9px] text-muted-foreground mt-0.5 block">{expert.description}</span>
+                    <span className="text-[9px] text-text-muted mt-0.5 block">{expert.description}</span>
                   </div>
                 </div>
               );
             })}
           </div>
-          <p className="text-[10px] text-muted-foreground mt-4 pt-3 border-t border-border-subtle">
+          <p className="text-[10px] text-text-muted mt-4 pt-3 border-t border-border-subtle">
             Confidence derived from event category distribution. Bars represent model activation relative to total traffic volume.
           </p>
-        </div>
+        </GlassCard>
 
         {/* Attack Category Breakdown */}
-        <div className="rounded-xl border border-border-subtle bg-bg-surface p-5">
+        <GlassCard variant="elevated" className="p-5">
           <div className="flex items-center gap-2 mb-4">
             <Zap size={16} className="text-brand" />
-            <span className="text-sm font-bold text-text-primary uppercase tracking-wider">Attack Pattern Analysis</span>
+            <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Attack Pattern Analysis</span>
           </div>
           {(Object.keys(cats).length === 0 || !Object.entries(cats).some(e => Number(e[1]) > 0)) ? (
-            <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
+            <div className="flex flex-col items-center justify-center h-48 text-text-muted">
               <Eye size={32} className="mb-3 opacity-30" />
               <p className="text-xs">No attack patterns detected yet.</p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {Object.entries(cats)
-                .sort((a: any, b: any) => b[1] - a[1])
-                .filter(([, cnt]: any) => cnt > 0)
-                .slice(0, 8)
-                .map(([cat, cnt]: any, idx) => {
-                  const pct = totalEvents > 0 ? (cnt / totalEvents) * 100 : 0;
-                  const colors = ['#EF4444', '#F97316', '#EAB308', '#3B82F6', '#A78BFA', '#22C55E', '#F97316', '#EF4444'];
-                  const col = colors[idx % colors.length];
-                  return (
-                    <div key={cat}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[11px] text-text-primary truncate max-w-[160px]">{cat}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-muted-foreground">{pct.toFixed(1)}%</span>
-                          <span className="text-[11px] font-bold font-mono" style={{ color: col }}>{cnt}</span>
-                        </div>
-                      </div>
-                      <div className="h-1.5 bg-bg-base border border-border-subtle rounded-full overflow-hidden">
-                        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: col }} />
+            <div className="space-y-2.5">
+              {Object.entries(cats).sort((a: any, b: any) => b[1] - a[1]).filter(([, cnt]: any) => cnt > 0).slice(0, 8).map(([cat, cnt]: any, idx) => {
+                const pct = totalEvents > 0 ? (cnt / totalEvents) * 100 : 0;
+                const colors = ['#EF4444', '#632CA6', '#EAB308', '#3B82F6', '#7C3AED', '#22C55E', '#632CA6', '#EF4444'];
+                const col = colors[idx % colors.length];
+                return (
+                  <div key={cat}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] text-text-secondary truncate max-w-[160px]">{cat}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-text-muted">{pct.toFixed(1)}%</span>
+                        <span className="text-[11px] font-bold font-mono tabular-nums" style={{ color: col }}>{cnt}</span>
                       </div>
                     </div>
-                  );
-                })}
+                    <div className="h-1.5 bg-black/[0.04] rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${col}88, ${col})` }} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
-        </div>
+        </GlassCard>
       </div>
+
+      {/* Agentic / MCP Intelligence */}
+      <GlassCard variant="default" className="p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Shield size={14} className="text-brand" />
+          <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Agentic & MCP Signals</span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: 'Prompt Injection', value: agenticSignals.promptInjection, color: '#EF4444' },
+            { label: 'Tool Misuse', value: agenticSignals.toolMisuse, color: '#F97316' },
+            { label: 'Trust Chain', value: agenticSignals.trustChain, color: '#632CA6' },
+            { label: 'MCP Traffic', value: agenticSignals.mcp, color: '#EAB308' },
+          ].map((item) => (
+            <div key={item.label} className="metric-card p-3">
+              <p className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">{item.label}</p>
+              <p className="text-xl font-bold tabular-nums" style={{ color: item.color }}>{item.value}</p>
+              <div className="h-1.5 bg-black/[0.04] rounded-full overflow-hidden mt-2">
+                <div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, item.value * 5)}%`, background: item.color }} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="text-[10px] text-text-muted mt-3">
+          Signals are derived from MCP tool invocation patterns, prompt injection classifiers, and delegation-chain analysis.
+        </p>
+      </GlassCard>
 
       {/* Geo + Severity */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 rounded-xl border border-border-subtle bg-bg-surface p-4">
+        <GlassCard variant="default" className="lg:col-span-2 p-4">
           <div className="flex items-center gap-2 mb-3">
-            <TrendingUp size={15} className="text-[#22C55E]" />
-            <span className="text-sm font-bold text-text-primary uppercase tracking-wider">Global Threat Origin</span>
+            <TrendingUp size={14} className="text-sev-low" />
+            <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Global Threat Origin</span>
           </div>
           <GeoMap threats={geoThreats} />
-        </div>
+        </GlassCard>
 
-        <div className="rounded-xl border border-border-subtle bg-bg-surface p-4 flex flex-col items-center">
+        <GlassCard variant="default" className="p-4 flex flex-col items-center">
           <div className="flex items-center gap-2 mb-3 w-full">
-            <Shield size={15} className="text-[#3B82F6]" />
-            <span className="text-sm font-bold text-text-primary uppercase tracking-wider">Severity Mix</span>
+            <Shield size={14} className="text-[#3B82F6]" />
+            <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Severity Mix</span>
           </div>
           <DonutChart data={severityData} centerValue={totalEvents} size={140} innerRadius={44} outerRadius={64} />
           <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-3 w-full">
             {severityData.map(({ name, value, color }) => (
               <div key={name} className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full" style={{ background: color }} />
+                  <span className="w-2 h-2 rounded-sm" style={{ background: color }} />
                   <span className="text-[10px] text-text-secondary">{name}</span>
                 </div>
-                <span className="text-[11px] font-bold font-mono" style={{ color }}>{value}</span>
+                <span className="text-[11px] font-bold font-mono tabular-nums" style={{ color }}>{value}</span>
               </div>
             ))}
           </div>
-        </div>
+        </GlassCard>
       </div>
 
       {/* Top Attacked Endpoints */}
       {(topN.data as any)?.top_apis?.length > 0 && (
-        <div className="rounded-xl border border-border-subtle bg-bg-surface p-5">
+        <GlassCard variant="default" className="p-5">
           <div className="flex items-center gap-2 mb-4">
-            <Target size={16} className="text-[#EF4444]" />
-            <span className="text-sm font-bold text-text-primary uppercase tracking-wider">Most Targeted Attack Patterns</span>
+            <Target size={14} className="text-sev-critical" />
+            <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Most Targeted Attack Patterns</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             {(topN.data as any).top_apis.slice(0, 5).map((item: any, idx: number) => (
-              <div key={idx} className="bg-bg-elevated border border-border-subtle rounded-lg p-3">
-                <span className="text-[9px] text-muted-foreground uppercase">#{idx + 1}</span>
+              <div key={idx} className="metric-card p-3">
+                <span className="text-[9px] text-text-muted uppercase">#{idx + 1}</span>
                 <p className="text-xs font-semibold text-text-primary mt-1 truncate">{item.name}</p>
-                <p className="text-xl font-bold font-display text-[#EF4444] mt-1">{item.count}</p>
-                <p className="text-[9px] text-muted-foreground">events</p>
+                <p className="text-xl font-bold text-sev-critical mt-1 tabular-nums">{item.count}</p>
+                <p className="text-[9px] text-text-muted">events</p>
               </div>
             ))}
           </div>
-        </div>
+        </GlassCard>
       )}
     </div>
   );

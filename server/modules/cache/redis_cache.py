@@ -3,16 +3,16 @@ import logging
 from typing import Any, Optional
 
 try:
-    import aioredis
+    import redis.asyncio as redis
 except ImportError:
-    aioredis = None
+    redis = None
 
 from server.config import settings
 
 logger = logging.getLogger(__name__)
 
-if aioredis is not None:
-    RedisClientType = aioredis.Redis
+if redis is not None:
+    RedisClientType = redis.Redis
 else:
     RedisClientType = Any
 
@@ -20,10 +20,10 @@ _client: Optional[RedisClientType] = None
 _disabled_until: float = 0.0
 
 
-async def _get_client() -> Optional[aioredis.Redis]:
+async def _get_client() -> Optional[RedisClientType]:
     global _client
     global _disabled_until
-    if aioredis is None:
+    if redis is None:
         return None
     if _disabled_until and _disabled_until > __import__("time").time():
         return None
@@ -32,7 +32,7 @@ async def _get_client() -> Optional[aioredis.Redis]:
     if not settings.REDIS_URL:
         return None
     try:
-        _client = await aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        _client = redis.from_url(settings.REDIS_URL, decode_responses=True)
     except Exception as exc:
         logger.warning("redis_unavailable", extra={"error": str(exc)})
         _disabled_until = __import__("time").time() + 30

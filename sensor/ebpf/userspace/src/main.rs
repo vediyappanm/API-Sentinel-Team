@@ -6,8 +6,9 @@ use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::mem::size_of;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+use tokio::time;
 
 #[derive(Parser, Debug)]
 #[command(about = "API Security eBPF Sensor")]
@@ -87,7 +88,7 @@ struct TlsEvent {
     _pad8: u8,
     _pad16: u16,
     comm: [u8; 16],
-    data: [u8; 512],
+    data: [u8; 4096],  // Match BPF MAX_DATA (WARN-2)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,14 +120,17 @@ struct ParsedRequest {
 }
 
 const HTTP2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
+const MAX_STREAM_ENTRIES: usize = 10_000;  // BUG-4/5: LRU eviction threshold
+const STREAM_TTL_MS: u64 = 60_000;         // 60s TTL for idle connections
 
 struct StreamState {
     account_id: u64,
     role: TrafficRole,
     max_buffer: usize,
-    buffers: HashMap<StreamKey, Vec<u8>>,
+    buffers: HashMap<StreamKey, (Vec<u8>, u64)>,         // (data, last_seen_ms)
     pending: HashMap<ConnKey, VecDeque<ParsedRequest>>,
     http2_state: HashMap<ConnKey, Http2Conn>,
+    last_eviction_ms: u64,
 }
 
 #[derive(Default)]
@@ -148,6 +152,43 @@ impl StreamState {
             buffers: HashMap::new(),
             pending: HashMap::new(),
             http2_state: HashMap::new(),
+            last_eviction_ms: 0,
+        }
+    }
+
+    /// BUG-4/5 fix: evict stale entries from buffers, pending, and http2_state
+    fn evict_stale(&mut self, now_ms: u64) {
+        // Only run eviction every 10 seconds
+        if now_ms.saturating_sub(self.last_eviction_ms) < 10_000 {
+            return;
+        }
+        self.last_eviction_ms = now_ms;
+
+        // Evict stream buffers older than TTL
+        self.buffers.retain(|_, (_, last_seen)| now_ms.saturating_sub(*last_seen) < STREAM_TTL_MS);
+
+        // Evict http2 connections older than TTL
+        self.http2_state.retain(|_, conn| now_ms.saturating_sub(conn.last_event_ts) < STREAM_TTL_MS);
+
+        // Evict pending queues where no recent request
+        self.pending.retain(|_, queue| !queue.is_empty());
+
+        // Hard cap: if still too large, drain oldest
+        if self.buffers.len() > MAX_STREAM_ENTRIES {
+            let excess = self.buffers.len() - MAX_STREAM_ENTRIES;
+            let mut keys: Vec<_> = self.buffers.keys().cloned().collect();
+            keys.sort_by_key(|k| self.buffers.get(k).map(|(_, ts)| *ts).unwrap_or(0));
+            for k in keys.into_iter().take(excess) {
+                self.buffers.remove(&k);
+            }
+        }
+        if self.http2_state.len() > MAX_STREAM_ENTRIES {
+            let excess = self.http2_state.len() - MAX_STREAM_ENTRIES;
+            let mut keys: Vec<_> = self.http2_state.keys().cloned().collect();
+            keys.sort_by_key(|k| self.http2_state.get(k).map(|c| c.last_event_ts).unwrap_or(0));
+            for k in keys.into_iter().take(excess) {
+                self.http2_state.remove(&k);
+            }
         }
     }
 
@@ -155,7 +196,13 @@ impl StreamState {
         let mut output = Vec::new();
         let conn_key = ConnKey { pid: ev.pid, ssl_ptr: ev.ssl_ptr };
         let stream_key = StreamKey { pid: ev.pid, ssl_ptr: ev.ssl_ptr, direction: ev.direction };
-        let buf = self.buffers.entry(stream_key).or_insert_with(Vec::new);
+        let ts_ms = ev.ts_ns / 1_000_000;
+
+        // BUG-4/5: evict stale connections periodically
+        self.evict_stale(ts_ms);
+
+        let (buf, last_seen) = self.buffers.entry(stream_key).or_insert_with(|| (Vec::new(), ts_ms));
+        *last_seen = ts_ms;
         let data_len = ev.data_len as usize;
         if data_len == 0 {
             return output;
@@ -166,27 +213,14 @@ impl StreamState {
             buf.drain(0..drain);
         }
 
-        let ts_ms = ev.ts_ns / 1_000_000;
         let is_request_dir = match self.role {
             TrafficRole::Server => ev.direction == 0,
             TrafficRole::Client => ev.direction == 1,
         };
 
-        let http2_conn = self.http2_state.entry(conn_key.clone()).or_default();
-        http2_conn.buffer.extend_from_slice(&ev.data[..data_len]);
-        if !http2_conn.seen_preface && contains_http2_preface(&http2_conn.buffer) {
-            http2_conn.seen_preface = true;
-        }
-        if http2_conn.seen_preface {
+        if let Some(events) = self.process_http2_event(conn_key.clone(), ev, ts_ms, is_request_dir) {
             buf.clear();
-            output.extend(self.process_http2_event(
-                conn_key.clone(),
-                http2_conn,
-                ev,
-                ts_ms,
-                is_request_dir,
-            ));
-            return output;
+            return events;
         }
 
         let mut parsed = Vec::new();
@@ -244,11 +278,25 @@ impl StreamState {
     fn process_http2_event(
         &mut self,
         conn_key: ConnKey,
-        conn_state: &mut Http2Conn,
         ev: &TlsEvent,
         ts_ms: u64,
         is_request_dir: bool,
-    ) -> Vec<ApiTrafficEvent> {
+    ) -> Option<Vec<ApiTrafficEvent>> {
+        let conn_state = self.http2_state.entry(conn_key).or_default();
+        conn_state.last_event_ts = ts_ms;
+
+        let data_len = ev.data_len as usize;
+        if data_len == 0 {
+            return None;
+        }
+        conn_state.buffer.extend_from_slice(&ev.data[..data_len]);
+        if !conn_state.seen_preface && contains_http2_preface(&conn_state.buffer) {
+            conn_state.seen_preface = true;
+        }
+        if !conn_state.seen_preface {
+            return None;
+        }
+
         let mut output = Vec::new();
         if conn_state.buffer.len() > self.max_buffer * 2 {
             let drain = conn_state.buffer.len() - self.max_buffer;
@@ -301,7 +349,7 @@ impl StreamState {
                 conn_state.buffer.clear();
             }
         }
-        output
+        Some(output)
     }
 }
 
@@ -383,12 +431,81 @@ fn contains_http2_preface(buffer: &[u8]) -> bool {
 
 fn parse_http2_metadata(buffer: &[u8]) -> HashMap<String, String> {
     let mut map = HashMap::new();
+
+    // WARN-1: Try HPACK static table indices first for compressed HTTP/2 headers
+    hpack_static_scan(buffer, &mut map);
+
+    // Fallback: text-based scan for uncompressed / first-request headers
     for key in &[":method", ":path", ":authority", ":status", "content-type"] {
-        if let Some(value) = find_token_value(buffer, key) {
-            map.insert(key.to_string(), value);
+        if !map.contains_key(*key) {
+            if let Some(value) = find_token_value(buffer, key) {
+                map.insert(key.to_string(), value);
+            }
         }
     }
     map
+}
+
+/// WARN-1 fix: Minimal HPACK static table decoder.
+/// Scans for well-known static table index bytes in HTTP/2 HEADERS frames.
+/// HTTP/2 frame: 9-byte header, type=0x01 (HEADERS), then HPACK payload.
+/// Static table indices 2-7 = GET/POST/etc methods, 4-15 = common paths.
+fn hpack_static_scan(buffer: &[u8], map: &mut HashMap<String, String>) {
+    // HPACK static table (RFC 7541, Appendix A) — key entries for API traffic
+    const STATIC_TABLE: &[(u8, &str, &str)] = &[
+        (2, ":method", "GET"),
+        (3, ":method", "POST"),
+        (4, ":path", "/"),
+        (5, ":path", "/index.html"),
+        (8, ":status", "200"),
+        (9, ":status", "204"),
+        (10, ":status", "206"),
+        (11, ":status", "304"),
+        (12, ":status", "400"),
+        (13, ":status", "404"),
+        (14, ":status", "500"),
+    ];
+
+    // Scan for HTTP/2 HEADERS frames (type = 0x01)
+    let mut i = 0;
+    while i + 9 < buffer.len() {
+        // HTTP/2 frame header: length(3) + type(1) + flags(1) + stream_id(4)
+        let frame_len = ((buffer[i] as usize) << 16)
+            | ((buffer[i + 1] as usize) << 8)
+            | (buffer[i + 2] as usize);
+        let frame_type = buffer[i + 3];
+
+        if frame_type == 0x01 && frame_len > 0 {
+            // HEADERS frame — scan HPACK payload
+            let payload_start = i + 9;
+            let payload_end = (payload_start + frame_len).min(buffer.len());
+            let mut j = payload_start;
+            while j < payload_end {
+                let byte = buffer[j];
+                // Indexed header field (bit 7 set): index = byte & 0x7F
+                if byte & 0x80 != 0 {
+                    let index = byte & 0x7F;
+                    for &(idx, name, value) in STATIC_TABLE {
+                        if index == idx {
+                            map.entry(name.to_string()).or_insert_with(|| value.to_string());
+                        }
+                    }
+                }
+                j += 1;
+            }
+        }
+
+        if frame_len == 0 {
+            i += 9;
+        } else {
+            i += 9 + frame_len;
+        }
+
+        // Safety: stop scanning after 64KB
+        if i > 65536 {
+            break;
+        }
+    }
 }
 
 fn find_token_value(buffer: &[u8], key: &str) -> Option<String> {
@@ -538,17 +655,35 @@ async fn main() -> Result<()> {
 
     let (tx, mut rx) = mpsc::channel::<ApiTrafficEvent>(10000);
 
+    // BUG-2 fix: create one shared HTTP client instead of per-batch
+    let http_client = Arc::new(reqwest::Client::builder()
+        .pool_max_idle_per_host(4)
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("failed to create HTTP client"));
+
     let ingest_url = args.ingest.clone();
     let api_key = args.api_key.clone();
     let batch_size = args.batch_size;
+    let client_handle = http_client.clone();
     tokio::spawn(async move {
         let mut batch: Vec<ApiTrafficEvent> = Vec::new();
+        // BUG-1 fix: flush timer ensures events are sent even when traffic is low
+        let mut flush_interval = time::interval(Duration::from_secs(1));
         loop {
-            if let Some(ev) = rx.recv().await {
-                batch.push(ev);
-                if batch.len() >= batch_size {
-                    let payload = std::mem::take(&mut batch);
-                    let _ = send_batch(&ingest_url, &api_key, payload).await;
+            tokio::select! {
+                Some(ev) = rx.recv() => {
+                    batch.push(ev);
+                    if batch.len() >= batch_size {
+                        let payload = std::mem::take(&mut batch);
+                        let _ = send_batch_with_client(&client_handle, &ingest_url, &api_key, payload).await;
+                    }
+                }
+                _ = flush_interval.tick() => {
+                    if !batch.is_empty() {
+                        let payload = std::mem::take(&mut batch);
+                        let _ = send_batch_with_client(&client_handle, &ingest_url, &api_key, payload).await;
+                    }
                 }
             }
         }
@@ -660,8 +795,13 @@ fn attach_symbol(
     Ok(())
 }
 
-async fn send_batch(url: &str, api_key: &str, events: Vec<ApiTrafficEvent>) -> Result<()> {
-    let client = reqwest::Client::new();
+// BUG-2 fix: accept shared client instead of creating a new one
+async fn send_batch_with_client(
+    client: &reqwest::Client,
+    url: &str,
+    api_key: &str,
+    events: Vec<ApiTrafficEvent>,
+) -> Result<()> {
     let body = EventBatch {
         version: "v1".to_string(),
         events,
@@ -677,4 +817,74 @@ async fn send_batch(url: &str, api_key: &str, events: Vec<ApiTrafficEvent>) -> R
         anyhow::bail!("ingest failed: {}", text);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split_query() {
+        let (path, query) = split_query("/api/v1/user?id=123&name=test");
+        assert_eq!(path, "/api/v1/user");
+        assert_eq!(query.get("id").unwrap(), "123");
+        assert_eq!(query.get("name").unwrap(), "test");
+
+        let (path, query) = split_query("/health");
+        assert_eq!(path, "/health");
+        assert!(query.is_empty());
+    }
+
+    #[test]
+    fn test_equals_ignore_ascii_case() {
+        assert!(equals_ignore_ascii_case(b"Host", b"host"));
+        assert!(equals_ignore_ascii_case(b"CONTENT-TYPE", b"content-type"));
+        assert!(!equals_ignore_ascii_case(b"Host", b"User-Agent"));
+    }
+
+    #[test]
+    fn test_contains_http2_preface() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"GET / HTTP/1.1\r\n");
+        assert!(!contains_http2_preface(&buf));
+        buf.extend_from_slice(HTTP2_PREFACE);
+        assert!(contains_http2_preface(&buf));
+    }
+
+    #[test]
+    fn test_extract_http_header_request() {
+        let mut buf = b"GET /index.html HTTP/1.1\r\nHost: example.com\r\nUser-Agent: test\r\n\r\nRemaining data".to_vec();
+        let (msg, remaining) = extract_http_header(&buf).unwrap();
+        if let HttpMessage::Request(req) = msg {
+            assert_eq!(req.method, "GET");
+            assert_eq!(req.path, "/index.html");
+            assert_eq!(req.headers.get("host").unwrap(), "example.com");
+            assert_eq!(req.headers.get("user-agent").unwrap(), "test");
+        } else {
+            panic!("Expected Request");
+        }
+        assert_eq!(remaining, b"Remaining data");
+    }
+
+    #[test]
+    fn test_extract_http_header_response() {
+        let mut buf = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 15\r\n\r\n{\"status\": \"ok\"}".to_vec();
+        let (msg, remaining) = extract_http_header(&buf).unwrap();
+        if let HttpMessage::Response(resp) = msg {
+            assert_eq!(resp.status_code, 200);
+            assert_eq!(resp.headers.get("content-type").unwrap(), "application/json");
+        } else {
+            panic!("Expected Response");
+        }
+        assert_eq!(remaining, b"{\"status\": \"ok\"}");
+    }
+
+    #[test]
+    fn test_find_token_value() {
+        let buf = b"PRI * HTTP/2.0\r\n:method: GET\r\n:path: /health\r\n:status: 200\r\n\r\n";
+        assert_eq!(find_token_value(buf, ":method").unwrap(), "GET");
+        assert_eq!(find_token_value(buf, ":path").unwrap(), "/health");
+        assert_eq!(find_token_value(buf, ":status").unwrap(), "200");
+        assert_eq!(find_token_value(buf, ":authority"), None);
+    }
 }

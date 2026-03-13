@@ -1,1 +1,3 @@
-$env:PYTHONPATH="."; .\venv\Scripts\python -m uvicorn server.api.main:app --host 127.0.0.1 --port 8000 --reload
+cd C:\Users\ELCOT\OneDrive\Desktop\soc
+.\venv311\Scripts\activate
+pip install -r requirements.txt --use-deprecated=legacy-resolver

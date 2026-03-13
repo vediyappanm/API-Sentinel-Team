@@ -15,12 +15,12 @@ from server.config import settings
 SECRET_KEY = settings.JWT_SECRET
 ALGORITHM = settings.JWT_ALGORITHM
 
-_jwt_revocation_store: Dict[str, datetime] = {}
+from server.modules.cache.redis_cache import set_json, get_json
 
 class JWTIssuer:
     """
     Handles generation and verification of JWTs for user sessions.
-    Supports token revocation for logout and security events.
+    Supports token revocation using Redis.
     """
     @staticmethod
     def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None, expires_in: Optional[int] = None) -> str:
@@ -42,13 +42,15 @@ class JWTIssuer:
         return encoded_jwt
 
     @staticmethod
-    def verify_token(token: str, db_session=None) -> Dict[str, Any]:
+    async def verify_token(token: str, db_session=None) -> Dict[str, Any]:
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             jti = payload.get("jti")
-            if jti and jti in _jwt_revocation_store:
-                logger.warning("JWT revoked", jti=jti)
-                raise TokenRevokedError("Token has been revoked")
+            if jti:
+                revoked_at = await get_json(f"revoked_token:{jti}")
+                if revoked_at:
+                    logger.warning(f"JWT revoked: {jti}")
+                    raise TokenRevokedError("Token has been revoked")
             return payload
         except jwt.ExpiredSignatureError:
             logger.warning("JWT expired")
@@ -60,15 +62,18 @@ class JWTIssuer:
             raise InvalidTokenError(str(e))
 
     @staticmethod
-    def revoke_token(token: str, account_id: int = None, user_id: str = None) -> bool:
-        """Revoke a token by adding its JTI to the revocation store."""
+    async def revoke_token(token: str, account_id: int = None, user_id: str = None) -> bool:
+        """Revoke a token by adding its JTI to Redis with an expiration matching the token's lifetime."""
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"verify_exp": False})
             jti = payload.get("jti")
             exp = payload.get("exp")
             if jti and exp:
-                _jwt_revocation_store[jti] = datetime.fromtimestamp(exp, tz=timezone.utc)
-                logger.info("token_revoked", jti=jti, account_id=account_id, user_id=user_id)
+                now = datetime.now(timezone.utc).timestamp()
+                ttl = int(exp - now)
+                if ttl > 0:
+                    await set_json(f"revoked_token:{jti}", datetime.now(timezone.utc).isoformat(), ttl_seconds=ttl)
+                logger.info("token_revoked", extra={"jti": jti, "account_id": account_id, "user_id": user_id})
                 return True
             return False
         except jwt.PyJWTError as e:
@@ -77,8 +82,5 @@ class JWTIssuer:
 
     @staticmethod
     def cleanup_expired_revoked():
-        """Remove expired entries from revocation store."""
-        now = datetime.now(timezone.utc)
-        expired = [jti for jti, exp in _jwt_revocation_store.items() if exp < now]
-        for jti in expired:
-            del _jwt_revocation_store[jti]
+        """No-op as Redis handles TTL automatically."""
+        pass

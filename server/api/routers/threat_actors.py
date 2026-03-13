@@ -18,8 +18,8 @@ async def list_threat_actors(
     payload: dict = Depends(RBAC.require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    count_stmt = select(func.count(ThreatActor.id))
-    data_stmt = select(ThreatActor).order_by(desc(ThreatActor.last_seen)).limit(limit)
+    count_stmt = select(func.count(ThreatActor.id)).where(ThreatActor.account_id == payload["account_id"])
+    data_stmt = select(ThreatActor).where(ThreatActor.account_id == payload["account_id"]).order_by(desc(ThreatActor.last_seen)).limit(limit)
     if status:
         f = ThreatActor.status == status.upper()
         count_stmt = count_stmt.where(f)
@@ -156,13 +156,22 @@ async def add_threat_actor(
     payload: dict = Depends(RBAC.require_role(["ADMIN", "SECURITY_ENGINEER"])),
     db: AsyncSession = Depends(get_db),
 ):
-    existing = await db.execute(select(ThreatActor).where(ThreatActor.source_ip == source_ip))
+    account_id = payload["account_id"]
+    existing = await db.execute(select(ThreatActor).where(
+        ThreatActor.source_ip == source_ip, 
+        ThreatActor.account_id == account_id
+    ))
     actor = existing.scalar_one_or_none()
     if actor:
         actor.status = status.upper()
         actor.risk_score = max(actor.risk_score, risk_score)
     else:
-        actor = ThreatActor(source_ip=source_ip, status=status.upper(), risk_score=risk_score)
+        actor = ThreatActor(
+            account_id=account_id,
+            source_ip=source_ip, 
+            status=status.upper(), 
+            risk_score=risk_score
+        )
         db.add(actor)
     await db.commit()
     return {"status": "ok", "source_ip": source_ip, "actor_status": actor.status}
@@ -174,7 +183,11 @@ async def block_actor(
     payload: dict = Depends(RBAC.require_role(["ADMIN", "SECURITY_ENGINEER"])),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(select(ThreatActor).where(ThreatActor.source_ip == ip))
+    account_id = payload["account_id"]
+    result = await db.execute(select(ThreatActor).where(
+        ThreatActor.source_ip == ip,
+        ThreatActor.account_id == account_id
+    ))
     actor = result.scalar_one_or_none()
     if not actor:
         raise HTTPException(status_code=404, detail="Actor not found")
@@ -189,10 +202,14 @@ async def whitelist_actor(
     payload: dict = Depends(RBAC.require_role(["ADMIN", "SECURITY_ENGINEER"])),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(select(ThreatActor).where(ThreatActor.source_ip == ip))
+    account_id = payload["account_id"]
+    result = await db.execute(select(ThreatActor).where(
+        ThreatActor.source_ip == ip,
+        ThreatActor.account_id == account_id
+    ))
     actor = result.scalar_one_or_none()
     if not actor:
-        actor = ThreatActor(source_ip=ip, status="WHITELISTED")
+        actor = ThreatActor(account_id=account_id, source_ip=ip, status="WHITELISTED")
         db.add(actor)
     else:
         actor.status = "WHITELISTED"
@@ -212,10 +229,19 @@ async def log_malicious_event(
 ):
     account_id = payload.get("account_id")
     # Upsert threat actor
-    result = await db.execute(select(ThreatActor).where(ThreatActor.source_ip == source_ip))
+    result = await db.execute(select(ThreatActor).where(
+        ThreatActor.source_ip == source_ip,
+        ThreatActor.account_id == account_id
+    ))
     actor = result.scalar_one_or_none()
     if not actor:
-        actor = ThreatActor(source_ip=source_ip, status="MONITORING", event_count=0, risk_score=0.0)
+        actor = ThreatActor(
+            account_id=account_id,
+            source_ip=source_ip, 
+            status="MONITORING", 
+            event_count=0, 
+            risk_score=0.0
+        )
         db.add(actor)
         await db.flush()
     actor.event_count = (actor.event_count or 0) + 1
@@ -254,12 +280,19 @@ async def threat_stats(
     payload: dict = Depends(RBAC.require_auth),
     db: AsyncSession = Depends(get_db)
 ):
-    total = await db.scalar(select(func.count(ThreatActor.id))) or 0
+    account_id = payload["account_id"]
+    total = await db.scalar(select(func.count(ThreatActor.id)).where(ThreatActor.account_id == account_id)) or 0
     blocked = await db.scalar(
-        select(func.count(ThreatActor.id)).where(ThreatActor.status == "BLOCKED")
+        select(func.count(ThreatActor.id)).where(
+            ThreatActor.status == "BLOCKED",
+            ThreatActor.account_id == account_id
+        )
     ) or 0
     high_risk = await db.scalar(
-        select(func.count(ThreatActor.id)).where(ThreatActor.risk_score >= 0.7)
+        select(func.count(ThreatActor.id)).where(
+            ThreatActor.risk_score >= 0.7,
+            ThreatActor.account_id == account_id
+        )
     ) or 0
     return {"total_actors": total, "blocked": blocked, "high_risk": high_risk}
 
@@ -270,8 +303,9 @@ async def threat_filters(
     db: AsyncSession = Depends(get_db)
 ):
     """Returns unique values for filtering (IPs, types)."""
-    ips_res = await db.execute(select(func.distinct(ThreatActor.source_ip)))
-    types_res = await db.execute(select(func.distinct(MaliciousEvent.event_type)))
+    account_id = payload["account_id"]
+    ips_res = await db.execute(select(func.distinct(ThreatActor.source_ip)).where(ThreatActor.account_id == account_id))
+    types_res = await db.execute(select(func.distinct(MaliciousEvent.event_type)).where(MaliciousEvent.account_id == account_id))
     return {
         "ips": [row[0] for row in ips_res.all()],
         "types": [row[0] for row in types_res.all()],
@@ -285,8 +319,10 @@ async def threat_top_n(
     db: AsyncSession = Depends(get_db)
 ):
     """Returns top attacked endpoints/hosts."""
+    account_id = payload["account_id"]
     api_res = await db.execute(
         select(MaliciousEvent.event_type, func.count(MaliciousEvent.id))
+        .where(MaliciousEvent.account_id == account_id)
         .group_by(MaliciousEvent.event_type)
         .order_by(desc(func.count(MaliciousEvent.id)))
         .limit(limit)

@@ -13,9 +13,9 @@ const SEV_CONFIG: Record<Severity, { color: string; rank: string }> = {
 
 const STATUS_MAP: Record<string, { bg: string; text: string; label: string }> = {
   'Open': { bg: 'rgba(239,68,68,0.1)', text: '#EF4444', label: 'Open' },
-  'False Positive': { bg: 'rgba(249,115,22,0.1)', text: '#F97316', label: 'False Positive' },
+  'False Positive': { bg: 'rgba(99,44,175,0.1)', text: '#632CA6', label: 'False Positive' },
   'Analyzed': { bg: 'rgba(234,179,8,0.1)', text: '#EAB308', label: 'Analyzed' },
-  'Risk Accepted': { bg: 'rgba(167,139,250,0.1)', text: '#A78BFA', label: 'Risk Accepted' },
+  'Risk Accepted': { bg: 'rgba(167,139,250,0.1)', text: '#7C3AED', label: 'Risk Accepted' },
   'Resolved': { bg: 'rgba(34,197,94,0.1)', text: '#22C55E', label: 'Resolved' },
 };
 
@@ -48,7 +48,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
 interface MethodBadgeProps { method: string; }
 export const MethodBadge: React.FC<MethodBadgeProps> = ({ method }) => {
   const colors: Record<string, string> = {
-    GET: '#22C55E', POST: '#F97316', PUT: '#EAB308', DELETE: '#EF4444', PATCH: '#3B82F6'
+    GET: '#22C55E', POST: '#3B82F6', PUT: '#EAB308', DELETE: '#EF4444', PATCH: '#632CA6'
   };
   const color = colors[method] || '#6B7280';
   return (

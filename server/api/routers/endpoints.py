@@ -207,7 +207,9 @@ async def delete_endpoint(endpoint_id: str, db: AsyncSession = Depends(get_db), 
     if not ep:
         raise HTTPException(status_code=404, detail="Endpoint not found")
         
-    await db.execute(delete(APIEndpoint).where(APIEndpoint.id == endpoint_id))
+    await db.execute(delete(APIEndpoint).where(
+        and_(APIEndpoint.id == endpoint_id, APIEndpoint.account_id == account_id)
+    ))
     await db.commit()
     await bump_cache_version(account_id)
     return {"status": "deleted", "id": endpoint_id}

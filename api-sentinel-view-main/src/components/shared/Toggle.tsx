@@ -14,7 +14,7 @@ export const Toggle: React.FC<ToggleProps> = ({ checked, onChange, label }) => {
             <div
                 onClick={() => onChange(!checked)}
                 className="w-8 h-4 rounded-full relative transition-all duration-200 shrink-0"
-                style={{ background: checked ? 'linear-gradient(135deg, #F97316, #EA580C)' : 'var(--bg-elevated)', boxShadow: checked ? '0 0 8px rgba(249,115,22,0.4)' : 'none' }}
+                style={{ background: checked ? 'linear-gradient(135deg, #632CA6, #4F1F8E)' : 'var(--bg-elevated)', boxShadow: checked ? '0 0 8px rgba(99,44,175,0.4)' : 'none' }}
             >
                 <div className={clsx(
                     'absolute top-[2px] w-3 h-3 rounded-full bg-bg-base transition-transform duration-200 shadow-sm',

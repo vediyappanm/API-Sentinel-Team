@@ -24,12 +24,15 @@ class ComplianceReportGenerator:
         }
     }
 
-    async def generate(self, framework: str = "OWASP_API_2023") -> Dict[str, Any]:
+    async def generate(self, account_id: int, framework: str = "OWASP_API_2023") -> Dict[str, Any]:
         """
-        Gathers all OPEN vulnerabilities and maps them to the framework categories.
+        Gathers OPEN vulnerabilities for the given account and maps them to framework categories.
         """
         async with AsyncSessionLocal() as session:
-            stmt = select(Vulnerability).where(Vulnerability.status == "OPEN")
+            stmt = select(Vulnerability).where(
+                Vulnerability.account_id == account_id,
+                Vulnerability.status == "OPEN"
+            )
             result = await session.execute(stmt)
             vulns = result.scalars().all()
 

@@ -24,6 +24,9 @@ class ConnectionManager:
         """
         try:
             # Validate JWT token from query params or headers
+            if token and token.lower().startswith("bearer "):
+                token = token.split(" ", 1)[1].strip()
+
             if not token:
                 logger.warning("WebSocket connection rejected: missing token")
                 await websocket.close(code=1008, reason="Authentication required")
@@ -32,7 +35,7 @@ class ConnectionManager:
             # Validate token using JWTIssuer
             from server.modules.auth.jwt_issuer import JWTIssuer, TokenRevokedError
             try:
-                payload = JWTIssuer.verify_token(token)
+                payload = await JWTIssuer.verify_token(token)
             except TokenRevokedError:
                 logger.warning("WebSocket connection rejected: token revoked")
                 await websocket.close(code=1008, reason="Token revoked")

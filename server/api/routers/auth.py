@@ -24,12 +24,16 @@ class SignupRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def strong_password(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters long")
+        if len(v) < 12:
+            raise ValueError("Password must be at least 12 characters long")
+        if len(v) > 72:
+            raise ValueError("Password is too long (max 72 characters for bcrypt compatibility)")
         if not any(c.isdigit() for c in v):
             raise ValueError("Password must contain at least one digit")
         if not any(c.isalpha() for c in v):
             raise ValueError("Password must contain at least one letter")
+        if not any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in v):
+            raise ValueError("Password must contain at least one special character")
         return v
 
 class LoginRequest(BaseModel):
@@ -55,12 +59,12 @@ async def signup(
     # Create a new account for this user (Multi-tenancy)
     new_account = Account(name=req.account_name, plan_tier="FREE")
     db.add(new_account)
-    await db.flush() # Get the new account ID
+    await db.flush() 
 
     pwd_hash = PasswordHasher.hash_password(req.password)
     user = User(account_id=new_account.id, email=req.email, password_hash=pwd_hash, role="ADMIN")
     db.add(user)
-    await db.flush() # Ensure user.id is available
+    await db.flush() 
 
     await log_action(
         db=db,
@@ -84,7 +88,7 @@ async def signup(
         key="access_token",
         value=token,
         httponly=True,
-        secure=True, # Should be True in production
+        secure=not settings.DEBUG, # True in production
         samesite="lax",
         max_age=settings.JWT_EXPIRE_MINUTES * 60
     )
@@ -93,8 +97,7 @@ async def signup(
         "status": "created",
         "account_id": new_account.id,
         "user_id": user.id,
-        "access_token": token, # Still return in body for mobile/SPA if needed
-        "token_type": "bearer",
+        "message": "User registered successfully."
     }
 
 
@@ -106,7 +109,7 @@ async def login(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
-    """Authenticate a user and return a JWT access token in body and cookie."""
+    """Authenticate a user and return a JWT access token in cookie."""
     result = await db.execute(select(User).where(User.email == req.email))
     user = result.scalar_one_or_none()
 
@@ -132,12 +135,12 @@ async def login(
         key="access_token",
         value=token,
         httponly=True,
-        secure=True,
+        secure=not settings.DEBUG,
         samesite="lax",
         max_age=settings.JWT_EXPIRE_MINUTES * 60
     )
 
-    return {"access_token": token, "token_type": "bearer", "role": user.role}
+    return {"status": "authenticated", "role": user.role}
 
 
 @router.get("/me")
@@ -168,18 +171,16 @@ async def logout(
     payload: dict = Depends(RBAC.require_auth)
 ):
     """Revoke the JWT token and clear the cookie."""
-    token_str = None
-    if "access_token" in request.cookies:
-        token_str = request.cookies["access_token"]
+    token_str = request.cookies.get("access_token")
     
     if token_str:
-        JWTIssuer.revoke_token(
+        await JWTIssuer.revoke_token(
             token_str,
             account_id=payload.get("account_id"),
             user_id=payload.get("sub")
         )
     
-    response.delete_cookie("access_token", httponly=True, secure=True, samesite="lax")
+    response.delete_cookie("access_token", httponly=True, secure=not settings.DEBUG, samesite="lax")
     return {"status": "logged_out", "message": "Token has been revoked"}
 
 

@@ -19,7 +19,7 @@ const TimeFilter: React.FC<TimeFilterProps> = ({ value, onChange }) => {
           <div className={twMerge(clsx(
             "w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-all",
             value === opt
-              ? "border-brand bg-brand/10 shadow-[0_0_8px_rgba(249,115,22,0.2)]"
+              ? "border-brand bg-brand/10 shadow-[0_0_8px_rgba(99,44,175,0.2)]"
               : "border-border-subtle group-hover:border-muted-foreground"
           ))}>
             {value === opt && <div className="w-1.5 h-1.5 rounded-full bg-brand" />}

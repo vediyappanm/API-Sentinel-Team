@@ -9,7 +9,7 @@ class BaselineCapturer:
     """Sends the original (unmodified) request to get a baseline response."""
 
     async def capture(self, endpoint: dict) -> dict:
-        url = endpoint.get("url") or f"{endpoint.get("protocol","http")}://{endpoint.get("host","")}{endpoint.get("path","/")}"
+        url = endpoint.get("url") or f"{endpoint.get('protocol', 'http')}://{endpoint.get('host', '')}{endpoint.get('path', '/')}"
         method = endpoint.get("method", "GET").upper()
         headers = endpoint.get("headers") or {}
 

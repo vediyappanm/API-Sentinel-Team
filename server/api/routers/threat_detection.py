@@ -439,6 +439,7 @@ async def list_threat_actors_proto(
 @router.post("/actors/status", response_model=ModifyThreatActorStatusResponse)
 async def modify_actor_status(
     req: ModifyThreatActorStatusRequest,
+    payload: dict = Depends(RBAC.require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a single actor's status (proto: ModifyThreatActorStatusRequest)."""

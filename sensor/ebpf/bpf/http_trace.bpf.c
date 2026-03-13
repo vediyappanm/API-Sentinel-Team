@@ -6,7 +6,7 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
-#define MAX_DATA 512
+#define MAX_DATA 4096
 
 struct tls_event {
     __u64 ts_ns;
@@ -49,7 +49,7 @@ struct write_ex_args {
 
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 1 << 24);
+    __uint(max_entries, 1 << 26);
 } events SEC(".maps");
 
 struct {
@@ -79,6 +79,21 @@ struct {
     __type(key, __u64);   // pid_tgid
     __type(value, struct write_ex_args);
 } ssl_write_ex_args SEC(".maps");
+
+// Separate GnuTLS maps to avoid key collision with OpenSSL maps (BUG-3)
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 8192);
+    __type(key, __u64);   // pid_tgid
+    __type(value, struct write_args);
+} gnutls_write_args SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 8192);
+    __type(key, __u64);   // pid_tgid
+    __type(value, struct read_args);
+} gnutls_read_args SEC(".maps");
 
 static __always_inline int emit_event(struct pt_regs *ctx, const void *buf, __u32 len, __u8 direction, __u64 ssl_ptr)
 {
@@ -242,7 +257,7 @@ int gnutls_send_entry(struct pt_regs *ctx)
     args.ssl_ptr = (__u64)PT_REGS_PARM1(ctx);
     args.buf = (const void *)PT_REGS_PARM2(ctx);
     args.len = (__u32)PT_REGS_PARM3(ctx);
-    bpf_map_update_elem(&ssl_write_args, &pid_tgid, &args, BPF_ANY);
+    bpf_map_update_elem(&gnutls_write_args, &pid_tgid, &args, BPF_ANY);
     return 0;
 }
 
@@ -250,7 +265,7 @@ SEC("uretprobe/gnutls_record_send")
 int gnutls_send_exit(struct pt_regs *ctx)
 {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    struct write_args *args = bpf_map_lookup_elem(&ssl_write_args, &pid_tgid);
+    struct write_args *args = bpf_map_lookup_elem(&gnutls_write_args, &pid_tgid);
     int ret = (int)PT_REGS_RC(ctx);
     if (!args) {
         return 0;
@@ -258,7 +273,7 @@ int gnutls_send_exit(struct pt_regs *ctx)
     if (ret > 0) {
         emit_event(ctx, args->buf, (__u32)ret, 1, args->ssl_ptr);
     }
-    bpf_map_delete_elem(&ssl_write_args, &pid_tgid);
+    bpf_map_delete_elem(&gnutls_write_args, &pid_tgid);
     return 0;
 }
 
@@ -270,7 +285,7 @@ int gnutls_recv_entry(struct pt_regs *ctx)
     args.ssl_ptr = (__u64)PT_REGS_PARM1(ctx);
     args.buf = (const void *)PT_REGS_PARM2(ctx);
     args.len = (__u32)PT_REGS_PARM3(ctx);
-    bpf_map_update_elem(&ssl_read_args, &pid_tgid, &args, BPF_ANY);
+    bpf_map_update_elem(&gnutls_read_args, &pid_tgid, &args, BPF_ANY);
     return 0;
 }
 
@@ -278,7 +293,7 @@ SEC("uretprobe/gnutls_record_recv")
 int gnutls_recv_exit(struct pt_regs *ctx)
 {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    struct read_args *args = bpf_map_lookup_elem(&ssl_read_args, &pid_tgid);
+    struct read_args *args = bpf_map_lookup_elem(&gnutls_read_args, &pid_tgid);
     int ret = (int)PT_REGS_RC(ctx);
     if (!args) {
         return 0;
@@ -286,6 +301,6 @@ int gnutls_recv_exit(struct pt_regs *ctx)
     if (ret > 0) {
         emit_event(ctx, args->buf, (__u32)ret, 0, args->ssl_ptr);
     }
-    bpf_map_delete_elem(&ssl_read_args, &pid_tgid);
+    bpf_map_delete_elem(&gnutls_read_args, &pid_tgid);
     return 0;
 }

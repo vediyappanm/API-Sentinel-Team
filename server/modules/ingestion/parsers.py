@@ -46,9 +46,18 @@ def parse_log_line(line: str) -> dict | None:
 
 
 def detect_attacks(path: str, ua: str) -> list[dict]:
-    target = unquote(path) + " " + (ua or "")
+    # Recursive unquote to catch double/triple encoding bypasses
+    target = path + " " + (ua or "")
+    prev = None
+    curr = target
+    for _ in range(3): # Limit depth
+        prev = curr
+        curr = unquote(curr)
+        if curr == prev:
+            break
+    
     found = []
     for pattern, category, severity in _ATTACK_SIGNATURES:
-        if pattern.search(target):
+        if pattern.search(curr):
             found.append({"category": category, "severity": severity})
     return found

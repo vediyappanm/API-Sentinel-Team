@@ -77,18 +77,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, password: string) => {
     try {
-      const res = await post<{ access_token: string; role: string }>('/auth/login', { email, password });
+      const res = await post<{ access_token?: string; role?: string }>('/auth/login', { email, password });
       if (res.access_token) {
         setToken(res.access_token);
-        const profile = await get<{ email?: string; role?: string }>('/auth/me');
-        if (profile.email) {
-          setUser({
-            login: profile.email,
-            name: profile.email.split('@')[0],
-            role: profile.role as UserRole,
-            accounts: { '1000000': { accountId: 1000000, name: 'Helios', isDefault: true } },
-          });
-        }
+      }
+      const profile = await get<{ email?: string; role?: string; account_id?: number }>('/auth/me');
+      if (profile.email) {
+        setUser({
+          login: profile.email,
+          name: profile.email.split('@')[0],
+          role: (profile.role as UserRole) ?? 'ADMIN',
+          accounts: { [String(profile.account_id ?? 1000000)]: { accountId: profile.account_id ?? 1000000, name: 'My Org', isDefault: true } },
+        });
       }
     } catch (err) {
       throw new Error(friendlyError(err, 'login'));
@@ -98,18 +98,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signup = async (email: string, password: string) => {
     try {
       const accountName = email.split('@')[0] || 'My Org';
-      const res = await post<{ access_token: string; role: string }>('/auth/signup', { email, password, account_name: accountName });
+      const res = await post<{ access_token?: string; role?: string }>('/auth/signup', { email, password, account_name: accountName });
       if (res.access_token) {
         setToken(res.access_token);
-        const profile = await get<{ email?: string; role?: string; account_id?: number }>('/auth/me');
-        if (profile.email) {
-          setUser({
-            login: profile.email,
-            name: profile.email.split('@')[0],
-            role: profile.role as UserRole,
-            accounts: { [String(profile.account_id ?? 1000000)]: { accountId: profile.account_id ?? 1000000, name: accountName, isDefault: true } },
-          });
-        }
+      }
+      const profile = await get<{ email?: string; role?: string; account_id?: number }>('/auth/me');
+      if (profile.email) {
+        setUser({
+          login: profile.email,
+          name: profile.email.split('@')[0],
+          role: (profile.role as UserRole) ?? 'ADMIN',
+          accounts: { [String(profile.account_id ?? 1000000)]: { accountId: profile.account_id ?? 1000000, name: accountName, isDefault: true } },
+        });
       }
     } catch (err) {
       throw new Error(friendlyError(err, 'signup'));

@@ -58,9 +58,9 @@ async def scan_endpoint(
 
     findings = []
     for sample in samples:
-        for source, payload in [("response", (sample.response or {}).get("body", "")),
-                                 ("request", (sample.request or {}).get("body", ""))]:
-            for f in _scanner.scan_payload(payload):
+        for source, payload_body in [("response", (sample.response or {}).get("body", "")),
+                                     ("request", (sample.request or {}).get("body", ""))]:
+            for f in _scanner.scan_payload(payload_body):
                 findings.append({"source": source, "sample_id": sample.id, **f})
 
     return {
@@ -72,7 +72,7 @@ async def scan_endpoint(
 
 
 @router.post("/scan-text")
-async def scan_text(text: str):
+async def scan_text(text: str, payload: dict = Depends(RBAC.require_auth)):
     """Scan arbitrary text for PII patterns."""
     findings = _scanner.scan_string(text)
     return {"findings": findings, "has_pii": len(findings) > 0}

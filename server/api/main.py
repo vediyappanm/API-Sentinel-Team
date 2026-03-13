@@ -129,9 +129,12 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 async def generic_exception_handler(request: Request, exc: Exception):
     # Skip logging for common network errors or expected breaks
     logger.error("unhandled_exception", path=request.url.path, error=str(exc))
+    msg = "Internal Server Error"
+    if settings.DEBUG:
+        msg = f"Internal Server Error: {str(exc)}"
     return JSONResponse(
         status_code=500,
-        content={"error": True, "message": "Internal Server Error"},
+        content={"error": True, "message": msg},
     )
 
 app.add_middleware(

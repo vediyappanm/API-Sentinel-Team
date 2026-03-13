@@ -12,7 +12,12 @@ class Settings(BaseSettings):
     APP_NAME: str = "API Security Engine"
     VERSION: str = "1.0.0"
     DEBUG: bool = True
+    DEFAULT_ACCOUNT_ID: int = 1000000
     API_KEY: str = "dev-api-key-change-in-production"
+    JWT_SECRET: str = "change-me-in-production-32-char-minimum"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_MINUTES: int = 60 * 24 * 7 # 1 week
+    ENCRYPTION_KEY: str = "" # Set via .env for production
 
     # ── Database ─────────────────────────────────────────────────────
     DATABASE_URL: str = "sqlite+aiosqlite:///./api_security.db"
@@ -66,7 +71,13 @@ class Settings(BaseSettings):
     CORAZA_URL: str = ""
 
     # ── Security ─────────────────────────────────────────────────────
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000", "http://localhost:8080"]
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://localhost:8080",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:8080",
+    ]
     ENCRYPTION_KEY: str = "" # Fernet key for PAT rotation
 
     # ── Test Execution ───────────────────────────────────────────────
@@ -137,20 +148,6 @@ class Settings(BaseSettings):
     # ── Tenant Isolation (RLS) ───────────────────────────────────────
     TENANT_RLS_ENABLED: bool = False
     TENANT_RLS_SETTING_NAME: str = "app.current_account_id"
-
-    # ── Account ──────────────────────────────────────────────────────
-    DEFAULT_ACCOUNT_ID: int = 1000000
-
-    # ── JWT ──────────────────────────────────────────────────────────────
-    JWT_SECRET: str = "change-me-in-production-32-char-minimum"
-    JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 1440
-
-    # ── GitHub OAuth SSO ─────────────────────────────────────────────────
-    GITHUB_CLIENT_ID: str = ""
-    GITHUB_CLIENT_SECRET: str = ""
-    GITHUB_WEBHOOK_SECRET: str = ""
-    OAUTH_REDIRECT_BASE_URL: str = "http://localhost:8000"
 
     # ── GitLab ───────────────────────────────────────────────────────────
     GITLAB_WEBHOOK_SECRET: str = ""
