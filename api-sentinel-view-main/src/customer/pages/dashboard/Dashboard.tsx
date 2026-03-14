@@ -166,7 +166,7 @@ const Dashboard: React.FC = () => {
         <div className="flex items-center gap-3 mb-3">
           <h2 className="text-sm font-bold text-text-primary">Core Engine Signals</h2>
           <span className="text-[10px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-border-subtle">
-            Evidence-first â€¢ Long-window ML â€¢ MCP coverage
+            Evidence-first - Long-window ML - MCP coverage
           </span>
         </div>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

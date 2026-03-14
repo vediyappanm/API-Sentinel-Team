@@ -187,15 +187,15 @@ const AlertCenter: React.FC = () => {
   const { data: alerts = [], isLoading, isError, refetch } = useQuery<Alert[]>({
     queryKey: ['alerts', 'list', queryStatus, querySeverity],
     queryFn: ({ signal }) => fetchAlerts(queryStatus, querySeverity, signal),
-    staleTime: 30_000,
-    refetchInterval: 30_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 
   const { data: summary } = useQuery<AlertSummary>({
     queryKey: ['alerts', 'summary'],
     queryFn: ({ signal }) => fetchAlertSummary(signal),
-    staleTime: 30_000,
-    refetchInterval: 30_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 
   const withActioning = (id: string, fn: () => void) => { setActioningIds((prev) => new Set([...prev, id])); fn(); };
@@ -289,7 +289,7 @@ const AlertCenter: React.FC = () => {
               <Shield size={28} className="text-sev-low" />
             </div>
             <p className="text-sm font-semibold text-text-primary">No alerts. System is clean.</p>
-            <p className="text-[11px] text-text-muted mt-1">All clear — no active threats or anomalies detected.</p>
+            <p className="text-[11px] text-text-muted mt-1">All clear - no active threats or anomalies detected.</p>
           </GlassCard>
         )}
 

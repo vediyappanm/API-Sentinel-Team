@@ -168,7 +168,7 @@ const BlockModal: React.FC<BlockModalProps> = ({ onClose, onSubmit, isLoading })
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">Reason</label>
-            <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for blocking…"
+            <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for blocking..."
               className="bg-bg-base border border-border-subtle rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-brand/50 focus:ring-1 focus:ring-brand/20 placeholder:text-text-muted transition-all" />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -234,7 +234,8 @@ const BlockList: React.FC = () => {
   const { data, isLoading, isError, refetch } = useQuery<BlocklistResponse>({
     queryKey: ['blocklist'],
     queryFn: ({ signal }) => fetchBlocklist(signal),
-    staleTime: 30_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 
   const items = data?.items ?? [];
@@ -306,7 +307,7 @@ const BlockList: React.FC = () => {
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2 bg-bg-surface border border-border-subtle rounded-lg px-3 py-2 flex-1 min-w-[200px] max-w-xs">
           <Search size={13} className="text-text-muted" />
-          <input type="text" placeholder="Search IP or reason…" value={search} onChange={(e) => setSearch(e.target.value)}
+          <input type="text" placeholder="Search IP or reason..." value={search} onChange={(e) => setSearch(e.target.value)}
             className="bg-transparent text-xs text-text-primary outline-none placeholder:text-text-muted w-full" />
           {search && <button onClick={() => setSearch('')} className="text-text-muted hover:text-text-primary"><X size={12} /></button>}
         </div>
@@ -358,7 +359,7 @@ const BlockList: React.FC = () => {
                 {filtered.map((item) => (
                   <tr key={item.ip} className="data-row-interactive hover:bg-white/[0.02] transition-colors">
                     <td className="px-4 py-3 text-[12px] font-mono text-text-primary whitespace-nowrap">{item.ip}</td>
-                    <td className="px-4 py-3 text-[11px] text-text-secondary max-w-[200px] truncate">{item.reason || '—'}</td>
+                    <td className="px-4 py-3 text-[11px] text-text-secondary max-w-[200px] truncate">{item.reason || '-'}</td>
                     <td className="px-4 py-3">
                       {item.blocked_by === 'AUTO' ? (
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-sev-critical/20 bg-sev-critical/10 text-sev-critical">AUTO</span>
@@ -367,8 +368,8 @@ const BlockList: React.FC = () => {
                       )}
                     </td>
                     <td className="px-4 py-3 min-w-[120px]"><RiskBar score={item.risk_score} /></td>
-                    <td className="px-4 py-3 text-[12px] font-mono font-bold text-text-primary tabular-nums">{item.event_count?.toLocaleString() ?? '—'}</td>
-                    <td className="px-4 py-3 text-[10px] font-mono text-text-muted whitespace-nowrap">{item.blocked_at ? formatDate(item.blocked_at) : '—'}</td>
+                    <td className="px-4 py-3 text-[12px] font-mono font-bold text-text-primary tabular-nums">{item.event_count?.toLocaleString() ?? '-'}</td>
+                    <td className="px-4 py-3 text-[10px] font-mono text-text-muted whitespace-nowrap">{item.blocked_at ? formatDate(item.blocked_at) : '-'}</td>
                     <td className="px-4 py-3">
                       {item.expires_at ? (
                         <span className={`text-[10px] font-mono whitespace-nowrap ${isExpiringSoon(item.expires_at) ? 'text-sev-medium' : 'text-text-muted'}`}>

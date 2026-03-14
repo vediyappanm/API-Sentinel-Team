@@ -51,9 +51,9 @@ const queryClient = new QueryClient({
       retry: 1,
       refetchOnWindowFocus: true,
       refetchOnReconnect: true,
-      refetchInterval: 15_000,
+      refetchInterval: 5_000,
       refetchIntervalInBackground: true,
-      staleTime: 15_000,
+      staleTime: 5_000,
     },
   },
 });
@@ -71,7 +71,7 @@ const App = () => (
               <Route path="/login" element={<Login />} />
               <Route path="/access-restricted" element={<AccessRestricted />} />
 
-              {/* Customer Portal — Protected */}
+              {/* Customer Portal - Protected */}
               <Route element={<ProtectedRoute><CustomerLayout /></ProtectedRoute>}>
                 <Route path="/organization" element={<Organization />} />
                 <Route path="/dashboard" element={<Dashboard />} />

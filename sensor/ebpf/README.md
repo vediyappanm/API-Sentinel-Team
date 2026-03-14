@@ -31,9 +31,14 @@ make
 - Write-side capture is emitted from uretprobes to honor the actual byte count returned by TLS libs.
 - Use `scripts/verify_env.sh` to confirm kernel BTF and TLS symbols on target hosts.
 - For Kubernetes, deploy as a privileged DaemonSet with host PID namespace.
-- HTTP/2/gRPC metadata is heuristically extracted by scanning header frames for
-  `:method`, `:path`, `:status`, and `content-type`, and the emitted events set
-  `protocol=HTTP/2` with `source=ebpf-grpc` when detected.
+- HTTP/2 metadata is decoded via HPACK (61 static entries + dynamic table) and
+  the emitted events set `protocol=HTTP/2` with `source=ebpf-grpc` when detected.
+- Container enrichment parses both cgroups v1 (`/kubepods/.../pod<uid>/<id>`) and
+  cgroups v2 (`/kubepods.slice/.../pod<uid>.slice/<id>.scope`) formats and can
+  optionally resolve Kubernetes metadata via the containerd CRI socket at
+  `/run/containerd/containerd.sock` (override with `CRI_SOCKET`).
+- TCP correlation is keyed by `pid_tgid` in this phase; async runtimes may report
+  incorrect IP tuples until Phase 2 adds `SSL_set_fd`-based socket mapping.
 
 **Common Options**
 - `--tls-provider auto|openssl|gnutls`

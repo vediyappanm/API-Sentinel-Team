@@ -11,6 +11,7 @@ import GlassCard from '@/components/ui/GlassCard';
 import SparklineChart from '@/components/ui/SparklineChart';
 import { useApiCollections, useApiInfos, useSeverityCounts } from '@/hooks/use-discovery';
 import { useQueryClient } from '@tanstack/react-query';
+import { toast } from '@/hooks/use-toast';
 
 function formatTs(epoch: number) {
   if (!epoch) return '-';
@@ -87,7 +88,10 @@ const ApiCatalogue: React.FC = () => {
       setUploadResult(data);
       qc.invalidateQueries({ queryKey: ['discovery'] });
     } catch (e) {
-      alert(`Upload failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast({
+        title: 'Upload failed',
+        description: e instanceof Error ? e.message : String(e),
+      });
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';

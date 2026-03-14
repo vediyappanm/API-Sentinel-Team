@@ -1,5 +1,7 @@
+ARCH ?= $(shell uname -m)
+BPF_ARCH ?= $(if $(filter x86_64,$(ARCH)),x86,$(ARCH))
 BPF_CLANG ?= clang
-BPF_CFLAGS := -O2 -g -Wall -target bpf
+BPF_CFLAGS := -O2 -g -Wall -target bpf -D__TARGET_ARCH_$(BPF_ARCH)
 
 VMLINUX ?= /sys/kernel/btf/vmlinux
 VMLINUX_HDR ?= bpf/vmlinux.h

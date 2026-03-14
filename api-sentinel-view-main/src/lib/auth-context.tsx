@@ -13,7 +13,7 @@ function friendlyError(err: unknown, action: 'login' | 'signup'): string {
     if (err.status === 422) return action === 'signup' ? 'Please fill all fields correctly.' : 'Invalid email or password format.';
     if (err.status === 429) return 'Too many attempts. Please wait a minute.';
   }
-  return 'Network error — is the backend running?';
+  return 'Network error - is the backend running?';
 }
 
 export type UserRole = 'ADMIN' | 'MEMBER' | 'GUEST';

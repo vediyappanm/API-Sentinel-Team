@@ -103,7 +103,7 @@ const ApiGovernance: React.FC = () => {
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-xs font-bold text-text-primary uppercase tracking-wider">Governance Highlights</h3>
           <span className="text-[10px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-border-subtle">
-            Evidence-first â€¢ Redact-by-default
+            Evidence-first - Redact-by-default
           </span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

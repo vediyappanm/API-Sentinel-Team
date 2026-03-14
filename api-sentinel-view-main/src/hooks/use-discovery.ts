@@ -16,7 +16,8 @@ export function useApiCollections() {
   return useQuery({
     queryKey: ['discovery', 'collections'],
     queryFn: ({ signal }) => fetchApiCollections(signal),
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -33,7 +34,8 @@ export function useApiInfos(
     queryFn: ({ signal }) =>
       fetchApiInfosForCollection(collectionId!, page * pageSize, pageSize, sortKey, sortOrder, filters, signal),
     enabled: collectionId !== null,
-    staleTime: 30_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -42,7 +44,8 @@ export function useSeverityCounts(apiCollectionIds: number[]) {
     queryKey: ['discovery', 'severityCounts', apiCollectionIds],
     queryFn: ({ signal }) => fetchSeverityCounts(apiCollectionIds, signal),
     enabled: apiCollectionIds.length > 0,
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -50,7 +53,8 @@ export function useEndpointsCount() {
   return useQuery({
     queryKey: ['discovery', 'endpointsCount'],
     queryFn: ({ signal }) => fetchEndpointsCount(signal),
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -58,7 +62,8 @@ export function useRecentEndpoints(startTs: number, endTs: number) {
   return useQuery({
     queryKey: ['discovery', 'recent', startTs, endTs],
     queryFn: ({ signal }) => fetchRecentEndpoints(startTs, endTs, signal),
-    staleTime: 30_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -67,7 +72,8 @@ export function useAccessTypes(apiCollectionId: number | null) {
     queryKey: ['discovery', 'accessTypes', apiCollectionId],
     queryFn: ({ signal }) => fetchAccessTypes(apiCollectionId!, signal),
     enabled: apiCollectionId !== null,
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -79,7 +85,8 @@ export function useGovernanceEvents(
   return useQuery({
     queryKey: ['discovery', 'governance', page, pageSize, filters],
     queryFn: ({ signal }) => fetchGovernanceEvents(page * pageSize, pageSize, filters, signal),
-    staleTime: 30_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -87,7 +94,8 @@ export function useApiStats() {
   return useQuery({
     queryKey: ['discovery', 'apiStats'],
     queryFn: ({ signal }) => fetchApiStats(signal),
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -95,7 +103,8 @@ export function useSensitiveParameters(page: number = 0, pageSize: number = 50) 
   return useQuery({
     queryKey: ['discovery', 'sensitiveParams', page, pageSize],
     queryFn: ({ signal }) => fetchSensitiveParameters(page * pageSize, pageSize, signal),
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -103,6 +112,7 @@ export function useSensitiveInfoForCollections() {
   return useQuery({
     queryKey: ['discovery', 'sensitiveInfo'],
     queryFn: ({ signal }) => fetchSensitiveInfoForCollections(signal),
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }

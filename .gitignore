@@ -33,5 +33,13 @@ build/
 # Tooling
 .claude/
 
+# Rust build artifacts
+target/
+**/target/
+
+# eBPF build artifacts
+sensor/ebpf/bpf/*.o
+sensor/ebpf/bpf/vmlinux.h
+
 # OS
 .DS_Store

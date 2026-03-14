@@ -35,12 +35,28 @@ class APIResponse(BaseModel):
     latency_ms: Optional[int] = None
 
 
+class ContainerContext(BaseModel):
+    pod_name: Optional[str] = None
+    pod_namespace: Optional[str] = None
+    container_id: Optional[str] = None
+    container_name: Optional[str] = None
+    node_name: Optional[str] = None
+    service_name: Optional[str] = None
+    workload_type: Optional[str] = None
+
+
 class APITrafficEvent(BaseEvent):
     event_type: EventType = EventType.API_TRAFFIC
     request: APIRequest
     response: APIResponse
     collection_id: Optional[str] = None
     source_ip: Optional[str] = None
+    dest_ip: Optional[str] = None
+    source_port: Optional[int] = None
+    dest_port: Optional[int] = None
+    netns_ino: Optional[int] = None
+    cgroup_id: Optional[int] = None
+    container: Optional[ContainerContext] = None
     protocol: str = Field(default="HTTP/1.1")
 
 

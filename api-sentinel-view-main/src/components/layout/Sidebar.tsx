@@ -139,7 +139,7 @@ export const Sidebar: React.FC = () => {
                       <span className={clsx(
                         'text-[9px] font-semibold tracking-tight leading-none',
                         isActive ? 'text-brand' : 'text-text-muted'
-                      )}>{item.label.length > 8 ? item.label.slice(0, 7) + '…' : item.label}</span>
+                      )}>{item.label.length > 8 ? item.label.slice(0, 7) + '...' : item.label}</span>
                     ) : (
                       <span className={clsx(
                         'text-[13px] font-medium truncate animate-fade-in',

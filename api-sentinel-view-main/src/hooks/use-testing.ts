@@ -20,7 +20,8 @@ export function useVulnerabilities(
     queryKey: ['testing', 'issues', page, pageSize, filters, sortKey, sortOrder],
     queryFn: ({ signal }) =>
       fetchAllIssues(page * pageSize, pageSize, filters, sortKey, sortOrder, signal),
-    staleTime: 30_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -28,7 +29,8 @@ export function useIssueSummary() {
   return useQuery({
     queryKey: ['testing', 'summary'],
     queryFn: ({ signal }) => fetchIssueSummary(signal),
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -36,7 +38,8 @@ export function useSeverityInfo() {
   return useQuery({
     queryKey: ['testing', 'severityInfo'],
     queryFn: ({ signal }) => fetchSeverityInfoForIssues(signal),
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -44,7 +47,8 @@ export function useIssuesTrend(startTs: number, endTs: number) {
   return useQuery({
     queryKey: ['testing', 'trend', startTs, endTs],
     queryFn: ({ signal }) => fetchIssuesByDay(startTs, endTs, signal),
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -52,7 +56,8 @@ export function useSubCategories() {
   return useQuery({
     queryKey: ['testing', 'subCategories'],
     queryFn: ({ signal }) => fetchAllSubCategories(signal),
-    staleTime: 300_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 

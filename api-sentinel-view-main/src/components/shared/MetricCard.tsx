@@ -4,14 +4,14 @@ import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 interface MetricCardProps {
   label: string;
   value: string | number;
-  trend?: '↑' | '↓' | '↕' | 'up' | 'down' | 'neutral';
+  trend?: 'up' | 'down' | 'neutral';
   subLabel?: string;
   accentColor?: string;
 }
 
 const MetricCard: React.FC<MetricCardProps> = ({ label, value, trend, subLabel, accentColor }) => {
-  const isUp = trend === '↑' || trend === 'up';
-  const isDown = trend === '↓' || trend === 'down';
+  const isUp = trend === 'up';
+  const isDown = trend === 'down';
 
   return (
     <div className="rounded-lg flex flex-col p-4 border border-border-subtle justify-center min-w-[150px] transition-all duration-200 card-hover bg-bg-base"

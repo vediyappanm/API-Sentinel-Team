@@ -63,7 +63,7 @@ function DataTable<T extends { id: string }>({ data, columns, selectable = true,
                   <span className="flex items-center gap-1">
                     {col.header}
                     {col.sortable !== false && sortKey === col.key && (
-                      <span className="text-primary">{sortDir === 'asc' ? '↑' : '↓'}</span>
+                      <span className="text-primary">{sortDir === 'asc' ? '^' : 'v'}</span>
                     )}
                   </span>
                 </th>
@@ -115,7 +115,7 @@ function DataTable<T extends { id: string }>({ data, columns, selectable = true,
         </div>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <span>Items <select className="ml-1 rounded border border-border bg-secondary px-1.5 py-0.5 text-foreground text-xs"><option>{pageSize}</option></select></span>
-          <span>{start} – {end} of {sorted.length}</span>
+          <span>{start} - {end} of {sorted.length}</span>
           <div className="flex items-center gap-1">
             <button onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0} className="rounded p-1 hover:bg-secondary/50 disabled:opacity-30">
               <ChevronLeft className="h-4 w-4" />

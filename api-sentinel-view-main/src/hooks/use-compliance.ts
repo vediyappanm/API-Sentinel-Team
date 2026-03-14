@@ -5,7 +5,8 @@ export function useComplianceReport(framework: string = 'OWASP_API_2023') {
     return useQuery({
         queryKey: ['compliance', 'report', framework],
         queryFn: ({ signal }) => fetchComplianceReport(framework, signal),
-        staleTime: 60_000,
+        staleTime: 5_000,
+        refetchInterval: 5_000,
     });
 }
 

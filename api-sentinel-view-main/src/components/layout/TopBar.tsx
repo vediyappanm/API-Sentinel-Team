@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { ChevronRight, Bell, Search, ChevronDown, RefreshCw, LogOut, Clock, Zap } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { ChevronRight, Bell, Search, ChevronDown, RefreshCw, LogOut, Clock, Zap, Settings } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/auth-context';
 import { useApiCollections } from '@/hooks/use-discovery';
+import { useIsFetching, useQueryClient } from '@tanstack/react-query';
+import { toast } from '@/hooks/use-toast';
 
 const PAGE_LABELS: Record<string, string> = {
   organization: 'Organization',
@@ -20,6 +22,30 @@ const PAGE_LABELS: Record<string, string> = {
   alerts: 'Alerts',
   blocklist: 'Blocklist',
 };
+
+type SearchShortcut = {
+  label: string;
+  path: string;
+  hint: string;
+  keywords?: string[];
+  adminOnly?: boolean;
+};
+
+const SEARCH_SHORTCUTS: SearchShortcut[] = [
+  { label: 'Dashboard', path: '/dashboard', hint: 'Overview & KPIs', keywords: ['home', 'overview', 'kpi'] },
+  { label: 'Live Feed', path: '/live', hint: 'Real-time traffic', keywords: ['realtime', 'stream', 'events'] },
+  { label: 'Alerts', path: '/alerts', hint: 'Active detections', keywords: ['incidents', 'detections'] },
+  { label: 'Discovery', path: '/discovery', hint: 'Inventory & catalog', keywords: ['inventory', 'catalog'] },
+  { label: 'Testing', path: '/testing', hint: 'Tests & results', keywords: ['vulnerabilities', 'tests'] },
+  { label: 'Protection', path: '/protection', hint: 'Policies & enforcement', keywords: ['policy', 'enforce'] },
+  { label: 'Blocklist', path: '/blocklist', hint: 'IP and actor bans', keywords: ['deny', 'block'] },
+  { label: 'Reports', path: '/reports', hint: 'Exports & summaries', keywords: ['export', 'summary'] },
+  { label: 'Intel', path: '/intelligence', hint: 'Threat insights', keywords: ['threats', 'intel'] },
+  { label: 'System Health', path: '/system-health', hint: 'Sensors & controllers', keywords: ['health', 'status'], adminOnly: true },
+  { label: 'Operations', path: '/operations', hint: 'Admin operations', keywords: ['ops', 'admin'], adminOnly: true },
+  { label: 'Add Application', path: '/add-application', hint: 'Register a new app', keywords: ['app', 'register'], adminOnly: true },
+  { label: 'Settings', path: '/settings', hint: 'Users & org', keywords: ['account', 'org'] },
+];
 
 function getInitials(user: { login: string; name?: string } | null): string {
   if (!user) return '??';
@@ -41,6 +67,8 @@ function useCurrentTime() {
 export const TopBar: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const isFetching = useIsFetching();
   const { user, isAdmin, logout } = useAuth();
   const { data: collectionsData } = useApiCollections();
   const collections = collectionsData?.apiCollections ?? [];
@@ -58,7 +86,9 @@ export const TopBar: React.FC = () => {
   const [appOpen, setAppOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [hasNotif] = useState(true);
+  const [lastSync, setLastSync] = useState<Date | null>(null);
 
   const initials = getInitials(user);
   const displayName = user?.name || user?.login?.split('@')[0] || 'User';
@@ -80,6 +110,34 @@ export const TopBar: React.FC = () => {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
+
+  useEffect(() => {
+    if (searchOpen) setSearchQuery('');
+  }, [searchOpen]);
+
+  useEffect(() => {
+    if (isFetching === 0) {
+      setLastSync(new Date());
+    }
+  }, [isFetching]);
+
+  const filteredShortcuts = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const base = SEARCH_SHORTCUTS.filter(item => !item.adminOnly || isAdmin);
+    if (!q) return base;
+    return base.filter(item => {
+      const haystack = [item.label, item.hint, ...(item.keywords ?? [])].join(' ').toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [searchQuery, isAdmin]);
+
+  const handleRefresh = () => {
+    queryClient.invalidateQueries();
+    toast({
+      title: 'Refreshing data',
+      description: 'Fetching the latest telemetry and inventory.',
+    });
+  };
 
   return (
     <>
@@ -139,6 +197,17 @@ export const TopBar: React.FC = () => {
             Production
           </div>
 
+          {/* Live sync status */}
+          <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border-subtle bg-bg-elevated text-[10px] font-semibold text-text-secondary">
+            <span className={`w-2 h-2 rounded-full ${isFetching > 0 ? 'bg-brand animate-pulse' : 'bg-green-500'}`} />
+            {isFetching > 0 ? 'Syncing' : 'Live'}
+            {lastSync && (
+              <span className="text-text-muted ml-1">
+                {lastSync.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
+          </div>
+
           {/* Clock */}
           <div className="hidden md:flex items-center gap-1 text-[11px] text-text-muted tabular-nums">
             <Clock size={11} />
@@ -155,11 +224,14 @@ export const TopBar: React.FC = () => {
             <Search size={13} />
             <span className="hidden md:inline text-[11px]">Search</span>
             <kbd className="hidden md:inline text-[9px] px-1 py-0.5 rounded bg-bg-base border border-border-subtle text-text-muted font-mono">
-              {navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}K
+              {navigator.platform.includes('Mac') ? 'Cmd' : 'Ctrl'}K
             </kbd>
           </button>
 
-          <button className="w-7 h-7 rounded-lg border border-border-subtle bg-bg-elevated/50 flex items-center justify-center text-muted-foreground hover:text-brand hover:border-brand/20 transition-all outline-none">
+          <button
+            onClick={handleRefresh}
+            className="w-7 h-7 rounded-lg border border-border-subtle bg-bg-elevated/50 flex items-center justify-center text-muted-foreground hover:text-brand hover:border-brand/20 transition-all outline-none"
+          >
             <RefreshCw size={13} />
           </button>
 
@@ -232,14 +304,33 @@ export const TopBar: React.FC = () => {
                 autoFocus
                 type="text"
                 placeholder="Search endpoints, tests, events..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 className="flex-1 bg-transparent text-sm text-text-primary placeholder-text-muted outline-none"
               />
               <kbd className="text-[10px] px-1.5 py-0.5 rounded bg-bg-base border border-border-subtle text-text-muted font-mono">
                 ESC
               </kbd>
             </div>
-            <div className="p-3 text-center text-xs text-text-muted py-8">
-              Start typing to search across your API inventory...
+            <div className="max-h-64 overflow-y-auto">
+              {filteredShortcuts.map(item => (
+                <button
+                  key={item.path}
+                  onClick={() => { navigate(item.path); setSearchOpen(false); }}
+                  className="w-full text-left px-4 py-3 text-xs text-text-secondary hover:text-text-primary hover:bg-black/[0.04] transition-colors flex items-center justify-between"
+                >
+                  <div className="flex flex-col">
+                    <span className="text-[12px] font-semibold">{item.label}</span>
+                    <span className="text-[10px] text-text-muted">{item.hint}</span>
+                  </div>
+                  <ChevronRight size={12} className="text-text-muted" />
+                </button>
+              ))}
+              {filteredShortcuts.length === 0 && (
+                <div className="p-4 text-center text-xs text-text-muted">
+                  No matches. Try "alerts", "live", or "discovery".
+                </div>
+              )}
             </div>
           </div>
         </div>

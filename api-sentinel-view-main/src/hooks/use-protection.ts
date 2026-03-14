@@ -25,7 +25,8 @@ export function useSecurityEvents(
     queryKey: ['protection', 'events', page, pageSize, sortKey, sortOrder, filters, startTs, endTs],
     queryFn: ({ signal }) =>
       fetchSecurityEvents(page * pageSize, pageSize, sortKey, sortOrder, filters, startTs, endTs, signal),
-    staleTime: 30_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -33,7 +34,8 @@ export function useSecurityEventFilters() {
   return useQuery({
     queryKey: ['protection', 'eventFilters'],
     queryFn: ({ signal }) => fetchSecurityEventFilters(signal),
-    staleTime: 120_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -50,7 +52,8 @@ export function useThreatActors(
     queryKey: ['protection', 'actors', page, pageSize, sortKey, sortOrder, filters, startTs, endTs],
     queryFn: ({ signal }) =>
       fetchThreatActors(page * pageSize, pageSize, sortKey, sortOrder, filters, startTs, endTs, signal),
-    staleTime: 30_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -58,7 +61,8 @@ export function useThreatActorFilters() {
   return useQuery({
     queryKey: ['protection', 'actorFilters'],
     queryFn: ({ signal }) => fetchThreatActorFilters(signal),
-    staleTime: 120_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -77,7 +81,8 @@ export function useThreatCategoryCount(startTs?: number, endTs?: number) {
   return useQuery({
     queryKey: ['protection', 'categoryCount', startTs, endTs],
     queryFn: ({ signal }) => fetchThreatCategoryCount(startTs, endTs, signal),
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -85,7 +90,8 @@ export function useSeverityCount(startTs?: number, endTs?: number) {
   return useQuery({
     queryKey: ['protection', 'severityCount', startTs, endTs],
     queryFn: ({ signal }) => fetchCountBySeverity(startTs, endTs, signal),
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -93,7 +99,8 @@ export function useDailyThreatCount(startTs: number, endTs: number) {
   return useQuery({
     queryKey: ['protection', 'dailyCount', startTs, endTs],
     queryFn: ({ signal }) => getDailyThreatActorsCount(startTs, endTs, signal),
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -101,7 +108,8 @@ export function useActorsGeoCount() {
   return useQuery({
     queryKey: ['protection', 'geoCount'],
     queryFn: ({ signal }) => getActorsGeoCount(signal),
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -109,6 +117,7 @@ export function useThreatTopN(startTs?: number, endTs?: number) {
   return useQuery({
     queryKey: ['protection', 'topN', startTs, endTs],
     queryFn: ({ signal }) => fetchThreatTopN(startTs, endTs, signal),
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   });
 }

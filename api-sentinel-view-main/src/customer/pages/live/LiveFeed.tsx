@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Wifi, WifiOff, Activity, Shield, Ban, Zap, Download, X, RefreshCw, Search, Filter } from 'lucide-react';
 import MetricWidget from '@/components/ui/MetricWidget';
 import StatusPulse from '@/components/ui/StatusPulse';
+import QueryError from '@/components/shared/QueryError';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,8 +31,10 @@ interface WsMessage {
 type SeverityFilter = 'ALL' | 'CRITICAL' | 'HIGH' | 'MEDIUM';
 
 const MAX_ROWS = 200;
-const WS_URL = 'ws://127.0.0.1:8000/api/stream/live';
-const RECENT_URL = '/api/stream/recent';
+const WS_BASE = (import.meta.env.VITE_API_WS_URL ?? '').replace(/\/$/, '');
+const DEFAULT_WS_BASE = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+const WS_URL = `${(WS_BASE || DEFAULT_WS_BASE)}/api/stream/live`;
+const RECENT_URL = `${(import.meta.env.VITE_API_BASE_URL ?? '')}/api/stream/recent`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -108,7 +111,7 @@ const LiveFeed: React.FC = () => {
   const tableBodyRef = useRef<HTMLDivElement>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { isLoading: initialLoading } = useQuery({
+  const { isLoading: initialLoading, isError, refetch } = useQuery({
     queryKey: ['live-feed', 'recent'],
     queryFn: async ({ signal }) => {
       const token = localStorage.getItem('sentinel_token');
@@ -204,7 +207,7 @@ const LiveFeed: React.FC = () => {
         </div>
         <div className="flex items-center gap-2 bg-bg-surface border border-border-subtle rounded-lg px-3 py-2 flex-1 min-w-[180px] max-w-xs">
           <Search size={13} className="text-text-muted" />
-          <input type="text" placeholder="Search IP or path…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+          <input type="text" placeholder="Search IP or path..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
             className="bg-transparent text-xs text-text-primary outline-none placeholder:text-text-muted w-full" />
           {searchQuery && <button onClick={() => setSearchQuery('')} className="text-text-muted hover:text-text-primary"><X size={12} /></button>}
         </div>
@@ -217,6 +220,10 @@ const LiveFeed: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {isError && (
+        <QueryError message="Failed to load recent traffic" onRetry={() => refetch()} />
+      )}
 
       {/* Table */}
       <div className="bg-bg-surface border border-border-subtle rounded-xl flex flex-col overflow-hidden">
@@ -254,7 +261,7 @@ const LiveFeed: React.FC = () => {
 
               {!initialLoading && filteredEntries.length === 0 && (
                 <tr><td colSpan={7} className="px-4 py-12 text-center text-xs text-text-muted">
-                  {connected ? 'Waiting for traffic…' : 'Disconnected. Reconnecting…'}
+                  {connected ? 'Waiting for traffic...' : 'Disconnected. Reconnecting...'}
                 </td></tr>
               )}
 
@@ -280,10 +287,10 @@ const LiveFeed: React.FC = () => {
                           style={{ color: severityColor(topAttack.severity), borderColor: `${severityColor(topAttack.severity)}40`, backgroundColor: `${severityColor(topAttack.severity)}15` }}>
                           {topAttack.category}
                         </span>
-                      ) : <span className="text-[11px] text-text-muted">—</span>}
+                      ) : <span className="text-[11px] text-text-muted">-</span>}
                     </td>
                     <td className="px-4 py-2.5 text-[10px] font-mono text-text-muted whitespace-nowrap">
-                      {entry.bytes != null && entry.bytes !== '-' ? Number(entry.bytes).toLocaleString() + ' B' : '—'}
+                      {entry.bytes != null && entry.bytes !== '-' ? Number(entry.bytes).toLocaleString() + ' B' : '-'}
                     </td>
                   </tr>
                 );
