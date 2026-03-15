@@ -466,7 +466,6 @@ struct Http2Conn {
     last_status: Option<String>,
     last_request_ts: u64,
     last_event_ts: u64,
-    last_emit_ts: u64,   // timestamp of last successfully emitted event
     hpack: HpackDecoder,
 }
 
@@ -482,7 +481,6 @@ impl Default for Http2Conn {
             last_status: None,
             last_request_ts: 0,
             last_event_ts: 0,
-            last_emit_ts: 0,
             hpack: decoder,
         }
     }
@@ -717,10 +715,8 @@ impl StreamState {
                 conn_state.last_request_ts = ts_ms;
             }
         } else if let Some(status) = headers.get(":status") {
-            // Dedup: skip only if exact same status emitted within 50ms on same conn
-            // Use last_emit_ts (not last_event_ts which is updated every packet)
             if conn_state.last_status.as_deref() == Some(status)
-                && ts_ms.saturating_sub(conn_state.last_emit_ts) < 50
+                && ts_ms.saturating_sub(conn_state.last_event_ts) < 1000
             {
                 return Some(output);
             }
@@ -744,7 +740,6 @@ impl StreamState {
                     if is_grpc { "ebpf-grpc" } else { "ebpf" },
                 );
                 output.push(event);
-                conn_state.last_emit_ts = ts_ms;
             }
             conn_state.last_status = Some(status.clone());
             conn_state.last_event_ts = ts_ms;
@@ -888,13 +883,25 @@ fn hpack_static_scan(buffer: &[u8], map: &mut HashMap<String, String>) {
     ];
 
     // Scan for HTTP/2 HEADERS frames (type = 0x01)
-    let mut i = 0;
+    // Skip HTTP/2 connection preface wherever it appears in the (potentially mixed) buffer
+    let preface = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+    let start = buffer.windows(preface.len())
+        .position(|w| w == preface)
+        .map(|p| p + preface.len())
+        .unwrap_or(0);
+    let mut i = start;
     while i + 9 < buffer.len() {
         // HTTP/2 frame header: length(3) + type(1) + flags(1) + stream_id(4)
         let frame_len = ((buffer[i] as usize) << 16)
             | ((buffer[i + 1] as usize) << 8)
             | (buffer[i + 2] as usize);
         let frame_type = buffer[i + 3];
+
+        // Skip oversized/invalid frames by advancing byte-by-byte to resync
+        if frame_len > 16384 || i + 9 + frame_len > buffer.len() {
+            i += 1;
+            continue;
+        }
 
         if frame_type == 0x01 && frame_len > 0 {
             // HEADERS frame - scan HPACK payload
@@ -931,7 +938,13 @@ fn hpack_static_scan(buffer: &[u8], map: &mut HashMap<String, String>) {
 
 fn extract_hpack_blocks(buffer: &[u8]) -> Vec<Vec<u8>> {
     let mut blocks = Vec::new();
-    let mut i = 0;
+    // Skip HTTP/2 connection preface wherever it appears in the (potentially mixed) buffer
+    let preface = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+    let start = buffer.windows(preface.len())
+        .position(|w| w == preface)
+        .map(|p| p + preface.len())
+        .unwrap_or(0);
+    let mut i = start;
     while i + 9 <= buffer.len() {
         let frame_len = ((buffer[i] as usize) << 16)
             | ((buffer[i + 1] as usize) << 8)
@@ -945,8 +958,10 @@ fn extract_hpack_blocks(buffer: &[u8]) -> Vec<Vec<u8>> {
             buffer[i + 8],
         ]) & 0x7fffffff;
 
-        if i + 9 + frame_len > buffer.len() {
-            break;
+        if frame_len > 16384 || i + 9 + frame_len > buffer.len() {
+            // Oversized or truncated frame — advance by 1 to resync
+            i += 1;
+            continue;
         }
 
         if frame_type == 0x01 && frame_len > 0 {
@@ -1133,6 +1148,7 @@ fn discover_tls_libs(pid: i32) -> Vec<String> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    eprintln!("[sensor] starting, bpf={} ingest={}", args.bpf, args.ingest);
 
     let obj_data = fs::read(&args.bpf)?;
     let mut obj = ObjectBuilder::default().open_memory(&obj_data)?.load()?;
@@ -1264,6 +1280,7 @@ async fn main() -> Result<()> {
     }
 
     let ringbuf = ringbuf.build()?;
+    eprintln!("[sensor] probes attached, polling ring buffer...");
     loop {
         ringbuf.poll(Duration::from_millis(200))?;
     }
