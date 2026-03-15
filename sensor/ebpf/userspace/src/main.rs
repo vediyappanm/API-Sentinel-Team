@@ -43,7 +43,7 @@ struct Args {
     tls_libs: Vec<String>,
     #[arg(long, default_value = "auto")]
     tls_provider: String, // auto | openssl | gnutls
-    #[arg(long, default_value = "0")]
+    #[arg(long, default_value = "-1")]
     pid: i32,
     #[arg(long, default_value_t = false)]
     discover_libs: bool,
@@ -466,6 +466,7 @@ struct Http2Conn {
     last_status: Option<String>,
     last_request_ts: u64,
     last_event_ts: u64,
+    last_emit_ts: u64,   // timestamp of last successfully emitted event
     hpack: HpackDecoder,
 }
 
@@ -481,6 +482,7 @@ impl Default for Http2Conn {
             last_status: None,
             last_request_ts: 0,
             last_event_ts: 0,
+            last_emit_ts: 0,
             hpack: decoder,
         }
     }
@@ -715,8 +717,10 @@ impl StreamState {
                 conn_state.last_request_ts = ts_ms;
             }
         } else if let Some(status) = headers.get(":status") {
+            // Dedup: skip only if exact same status emitted within 50ms on same conn
+            // Use last_emit_ts (not last_event_ts which is updated every packet)
             if conn_state.last_status.as_deref() == Some(status)
-                && ts_ms.saturating_sub(conn_state.last_event_ts) < 1000
+                && ts_ms.saturating_sub(conn_state.last_emit_ts) < 50
             {
                 return Some(output);
             }
@@ -740,6 +744,7 @@ impl StreamState {
                     if is_grpc { "ebpf-grpc" } else { "ebpf" },
                 );
                 output.push(event);
+                conn_state.last_emit_ts = ts_ms;
             }
             conn_state.last_status = Some(status.clone());
             conn_state.last_event_ts = ts_ms;
