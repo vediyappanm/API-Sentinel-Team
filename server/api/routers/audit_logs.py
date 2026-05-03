@@ -95,11 +95,13 @@ async def log_action(
     resource_type: str = None,
     resource_id: str = None,
     user_id: str = None,
-    account_id: int = 1000000,
+    account_id: int | None = None,
     details: dict = None,
     ip_address: str = None,
 ) -> None:
     """Helper called by other routers to write audit entries."""
+    if account_id is None:
+        raise ValueError("account_id is required")
     entry = AuditLog(
         account_id=account_id,
         user_id=user_id,

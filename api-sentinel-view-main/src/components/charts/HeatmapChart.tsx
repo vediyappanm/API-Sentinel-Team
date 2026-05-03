@@ -115,7 +115,7 @@ const HeatmapChart: React.FC<HeatmapChartProps> = ({
       {/* Tooltip */}
       {tooltip && (
         <div
-          className="fixed z-50 glass-card-premium px-2.5 py-1.5 rounded-md text-[10px] pointer-events-none"
+          className="fixed z-50 glass-card-premium px-2.5 py-1.5 rounded-md text-[11px] pointer-events-none"
           style={{
             left: tooltip.x,
             top: tooltip.y,

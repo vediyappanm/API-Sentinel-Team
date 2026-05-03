@@ -5,7 +5,7 @@ import uuid
 import datetime
 from typing import Iterable, Tuple, Dict, Any
 
-from sqlalchemy import select, func
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.core import (
@@ -37,7 +37,7 @@ async def aggregate_hourly(
         select(
             RequestLog.endpoint_id,
             func.count(RequestLog.id).label("reqs"),
-            func.sum(func.case((RequestLog.response_code >= 400, 1), else_=0)).label("errors"),
+            func.sum(case((RequestLog.response_code >= 400, 1), else_=0)).label("errors"),
             func.avg(RequestLog.response_time_ms).label("avg_latency"),
         )
         .where(
@@ -62,7 +62,7 @@ async def aggregate_hourly(
         select(
             RequestLog.source_ip,
             func.count(RequestLog.id).label("reqs"),
-            func.sum(func.case((RequestLog.response_code >= 400, 1), else_=0)).label("errors"),
+            func.sum(case((RequestLog.response_code >= 400, 1), else_=0)).label("errors"),
             func.avg(RequestLog.response_time_ms).label("avg_latency"),
         )
         .where(

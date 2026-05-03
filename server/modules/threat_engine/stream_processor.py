@@ -35,11 +35,13 @@ class StreamProcessor:
             # Simple Pattern: IP with many 4xx/403 errors in a short period
             # Logic: Group by IP, count status_code >= 400
             stmt = select(
+                RequestLog.account_id,
                 RequestLog.source_ip, 
                 func.count(RequestLog.id).label('err_count')
             ).where(
                 RequestLog.response_code >= 400
             ).group_by(
+                RequestLog.account_id,
                 RequestLog.source_ip
             ).having(
                 func.count(RequestLog.id) > 20 # Threshold for probing
@@ -47,13 +49,15 @@ class StreamProcessor:
 
             result = await session.execute(stmt)
             for row in result:
-                ip = row[0]
-                count = row[1]
+                account_id = row[0]
+                ip = row[1]
+                count = row[2]
                 logger.info(f"Potential probe detected from {ip}: {count} errors")
                 await self.tracker.track_activity(
                     source_ip=ip, 
                     event_type="PROBING_DETECTED",
-                    severity="MEDIUM"
+                    severity="MEDIUM",
+                    account_id=account_id,
                 )
 
     def stop(self):

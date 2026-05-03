@@ -1,42 +1,15 @@
-import React, { useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import {
-  Building2, LayoutDashboard, Radar, FlaskConical, ShieldCheck, BarChart2, Settings, Activity,
-  MoreHorizontal, PlusCircle, BrainCircuit, LucideIcon, Radio, Bell, Ban, ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, X,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useAuth } from '@/lib/auth-context';
 import StatusPulse from '@/components/ui/StatusPulse';
-
-interface NavItem {
-  icon: LucideIcon;
-  label: string;
-  path: string;
-  adminOnly?: boolean;
-  live?: boolean;
-  section?: string;
-}
-
-const NAV_ITEMS: NavItem[] = [
-  { icon: Building2,      label: 'Organization', path: '/organization',   section: 'OVERVIEW' },
-  { icon: LayoutDashboard, label: 'Dashboard',   path: '/dashboard',      section: 'OVERVIEW' },
-  { icon: Radio,          label: 'Live Feed',    path: '/live',           section: 'MONITOR', live: true },
-  { icon: Bell,           label: 'Alerts',       path: '/alerts',         section: 'MONITOR' },
-  { icon: Radar,          label: 'Discovery',    path: '/discovery',      section: 'ANALYZE' },
-  { icon: FlaskConical,   label: 'Testing',      path: '/testing',        section: 'ANALYZE' },
-  { icon: ShieldCheck,    label: 'Protection',   path: '/protection',     section: 'PROTECT' },
-  { icon: Ban,            label: 'Blocklist',    path: '/blocklist',      section: 'PROTECT' },
-  { icon: BarChart2,      label: 'Reports',      path: '/reports',        section: 'ANALYZE' },
-  { icon: BrainCircuit,   label: 'Intel',        path: '/intelligence',   section: 'ANALYZE' },
-  { icon: PlusCircle,     label: 'Add App',      path: '/add-application', adminOnly: true },
-  { icon: MoreHorizontal, label: 'Operations',   path: '/operations',     adminOnly: true },
-];
-
-const BOTTOM_ITEMS: NavItem[] = [
-  { icon: Activity, label: 'Health',   path: '/system-health', adminOnly: true },
-  { icon: Settings, label: 'Settings', path: '/settings' },
-];
+import { useLayout } from '@/components/layout/layout-context';
+import { useMediaQuery } from '@/hooks/use-media-query';
+import type { WorkspaceConfig } from '@/components/layout/workspaces';
 
 function getInitials(user: { login: string; name?: string } | null): string {
   if (!user) return '??';
@@ -46,15 +19,25 @@ function getInitials(user: { login: string; name?: string } | null): string {
   return name.slice(0, 2).toUpperCase();
 }
 
-export const Sidebar: React.FC = () => {
-  const { user, isAdmin } = useAuth();
+export const Sidebar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace }) => {
+  const { user } = useAuth();
+  const { isSidebarCollapsed, isMobileSidebarOpen, toggleSidebar, closeMobileSidebar } = useLayout();
+  const isDesktop = useMediaQuery('(min-width: 1024px)');
   const initials = getInitials(user);
-  const [collapsed, setCollapsed] = useState(true);
+  const collapsed = isDesktop ? isSidebarCollapsed : false;
+  const location = useLocation();
 
-  const visibleNav = NAV_ITEMS.filter(item => !item.adminOnly || isAdmin);
-  const visibleBottom = BOTTOM_ITEMS.filter(item => !item.adminOnly || isAdmin);
+  // Auto-close mobile sidebar on route change
+  useEffect(() => {
+    if (!isDesktop && isMobileSidebarOpen) {
+      closeMobileSidebar();
+    }
+  }, [location.pathname]);
 
-  const sidebarWidth = collapsed ? 'w-[72px]' : 'w-[220px]';
+  const visibleNav = workspace.navItems;
+  const visibleBottom = workspace.bottomItems;
+
+  const desktopWidth = collapsed ? 'lg:w-[84px]' : 'lg:w-[228px]';
 
   const navClass = ({ isActive }: { isActive: boolean }) =>
     twMerge(clsx(
@@ -68,37 +51,66 @@ export const Sidebar: React.FC = () => {
   // Group items by section for expanded mode
   let lastSection = '';
 
+  const handleItemClick = () => {
+    if (!isDesktop) {
+      closeMobileSidebar();
+    }
+  };
+
   return (
-    <nav
-      className={clsx(
-        'flex flex-col items-center min-h-screen shrink-0 border-r border-border-subtle relative transition-all duration-300 ease-in-out',
-        sidebarWidth
+    <>
+      {isMobileSidebarOpen && (
+        <button
+          aria-label="Close navigation"
+          onClick={closeMobileSidebar}
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+        />
       )}
-      style={{
-        background: 'linear-gradient(180deg, #F4F4F8 0%, #F0F0F5 50%, #F4F4F8 100%)',
-      }}
-    >
-      {/* Logo */}
-      <div className="w-full flex items-center py-5 mb-1 border-b border-border-subtle justify-center gap-3">
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-bg-elevated border border-brand/20 relative shrink-0">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-            <path d="M12 2L21 6.5V13C21 17.4 17 21.2 12 22C7 21.2 3 17.4 3 13V6.5L12 2Z" fill="#632CA6" />
-            <path d="M12 6L17 8.5V13C17 15.5 14.8 17.7 12 18.5C9.2 17.7 7 15.5 7 13V8.5L12 6Z" fill="#FFFFFF" />
-          </svg>
-          <div className="absolute -inset-1 rounded-xl border border-brand/10 animate-pulse pointer-events-none" style={{ animationDuration: '3s' }} />
-        </div>
-        {!collapsed && (
-          <div className="animate-fade-in">
-            <div className="text-sm font-bold text-text-primary leading-none">API Sentinel</div>
-            <div className="text-[10px] text-text-muted mt-0.5">Security Platform</div>
-          </div>
+
+      <nav
+        className={clsx(
+          'fixed inset-y-0 left-0 z-50 flex min-h-screen w-[85vw] max-w-[280px] shrink-0 -translate-x-full flex-col border-r border-border-subtle transition-all duration-300 ease-in-out lg:static lg:z-10 lg:translate-x-0',
+          desktopWidth,
+          isMobileSidebarOpen && 'translate-x-0'
         )}
+        style={{
+          background: 'linear-gradient(180deg, #F4F4F8 0%, #F0F0F5 50%, #F4F4F8 100%)',
+        }}
+      >
+      {/* Logo */}
+      <div className="w-full border-b border-border-subtle px-3 py-4">
+        <div className={clsx('flex items-center', collapsed ? 'justify-center' : 'justify-between gap-3')}>
+          <div className={clsx('flex items-center gap-3', collapsed && 'justify-center')}>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-bg-elevated border border-brand/20 relative shrink-0">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2L21 6.5V13C21 17.4 17 21.2 12 22C7 21.2 3 17.4 3 13V6.5L12 2Z" fill="#632CA6" />
+                <path d="M12 6L17 8.5V13C17 15.5 14.8 17.7 12 18.5C9.2 17.7 7 15.5 7 13V8.5L12 6Z" fill="#FFFFFF" />
+              </svg>
+              <div className="absolute -inset-1 rounded-xl border border-brand/10 animate-pulse pointer-events-none" style={{ animationDuration: '3s' }} />
+            </div>
+            {!collapsed && (
+              <div className="animate-fade-in min-w-0">
+                <div className="text-sm font-bold text-text-primary leading-none">API Sentinel</div>
+                <div className="text-[11px] text-text-muted mt-0.5">{workspace.label}</div>
+              </div>
+            )}
+          </div>
+
+          {!isDesktop && (
+            <button
+              onClick={closeMobileSidebar}
+              className="w-9 h-9 rounded-xl border border-border-subtle bg-bg-elevated flex items-center justify-center text-text-muted hover:text-brand hover:border-brand/30 transition-all"
+            >
+              <X size={15} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Collapse toggle */}
       <button
-        onClick={() => setCollapsed(v => !v)}
-        className="absolute -right-3 top-[68px] w-6 h-6 rounded-full bg-bg-elevated border border-border-subtle flex items-center justify-center text-text-muted hover:text-brand hover:border-brand/30 transition-all z-20 shadow-md"
+        onClick={toggleSidebar}
+        className="absolute -right-3 top-[68px] hidden h-6 w-6 rounded-full bg-bg-elevated border border-border-subtle items-center justify-center text-text-muted hover:text-brand hover:border-brand/30 transition-all z-20 shadow-md lg:flex"
       >
         {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
       </button>
@@ -113,12 +125,17 @@ export const Sidebar: React.FC = () => {
             <React.Fragment key={item.path}>
               {showSection && (
                 <div className="px-4 pt-4 pb-1.5">
-                  <span className="text-[9px] font-bold text-text-muted uppercase tracking-[0.12em]">
+                  <span className="text-[10px] font-bold text-text-muted uppercase tracking-[0.12em]">
                     {item.section}
                   </span>
                 </div>
               )}
-              <NavLink to={item.path} className={navClass} title={collapsed ? item.label : undefined}>
+              <NavLink
+                to={item.path}
+                className={navClass}
+                title={collapsed ? item.label : undefined}
+                onClick={handleItemClick}
+              >
                 {({ isActive }) => (
                   <>
                     <div className={clsx(
@@ -137,7 +154,7 @@ export const Sidebar: React.FC = () => {
                     </div>
                     {collapsed ? (
                       <span className={clsx(
-                        'text-[9px] font-semibold tracking-tight leading-none',
+                        'text-[10px] font-semibold tracking-tight leading-none',
                         isActive ? 'text-brand' : 'text-text-muted'
                       )}>{item.label.length > 8 ? item.label.slice(0, 7) + '...' : item.label}</span>
                     ) : (
@@ -160,12 +177,18 @@ export const Sidebar: React.FC = () => {
         <div className={clsx('flex items-center px-3 mb-2', collapsed ? 'justify-center' : 'gap-2')}>
           <StatusPulse variant="online" size="sm" />
           {!collapsed && (
-            <span className="text-[10px] text-green-600 animate-fade-in">System Online</span>
+            <span className="text-[11px] text-green-600 animate-fade-in">{workspace.badge} Workspace</span>
           )}
         </div>
 
         {visibleBottom.map(item => (
-          <NavLink key={item.path} to={item.path} className={navClass} title={collapsed ? item.label : undefined}>
+          <NavLink
+            key={item.path}
+            to={item.path}
+            className={navClass}
+            title={collapsed ? item.label : undefined}
+            onClick={handleItemClick}
+          >
             {({ isActive }) => (
               <>
                 <div className={clsx(
@@ -177,7 +200,7 @@ export const Sidebar: React.FC = () => {
                 </div>
                 {collapsed ? (
                   <span className={clsx(
-                    'text-[9px] font-semibold tracking-tight',
+                    'text-[10px] font-semibold tracking-tight',
                     isActive ? 'text-brand' : 'text-text-muted'
                   )}>{item.label}</span>
                 ) : (
@@ -201,11 +224,12 @@ export const Sidebar: React.FC = () => {
               <div className="text-xs font-medium text-text-primary truncate">
                 {user.name || user.login?.split('@')[0]}
               </div>
-              <div className="text-[10px] text-text-muted truncate">{user.login}</div>
+              <div className="text-[11px] text-text-muted truncate">{user.login}</div>
             </div>
           )}
         </div>
       </div>
-    </nav>
+      </nav>
+    </>
   );
 };

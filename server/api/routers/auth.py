@@ -1,4 +1,6 @@
 """Authentication — signup, login, token refresh, current user, user management."""
+import secrets
+import string
 from fastapi import APIRouter, Depends, HTTPException, Body, Query, Response, Request
 from sqlalchemy.future import select
 from sqlalchemy import delete, func
@@ -12,9 +14,22 @@ from server.modules.auth.password_hasher import PasswordHasher
 from server.modules.auth.jwt_issuer import JWTIssuer
 from server.modules.auth.rbac import RBAC, require_admin
 from server.modules.auth.audit import log_action
+from server.modules.auth.auth_rate_limiter import AuthRateLimiter
+from server.modules.validation.input_validator import InputValidator, ValidationError
 from server.api.rate_limiter import limiter
 
 _VALID_ROLES = {"ADMIN", "SECURITY_ENGINEER", "DEVELOPER", "MEMBER", "AUDITOR", "VIEWER"}
+_ALL_ROLES = _VALID_ROLES | {"PLATFORM_ADMIN"}
+
+
+def _generate_temp_password(length: int = 16) -> str:
+    """Generate a secure temporary password meeting the password policy."""
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+    while True:
+        pwd = "".join(secrets.choice(alphabet) for _ in range(length))
+        if (any(c.isdigit() for c in pwd) and any(c.isalpha() for c in pwd)
+                and any(c in "!@#$%^&*" for c in pwd)):
+            return pwd
 
 class SignupRequest(BaseModel):
     email: EmailStr
@@ -51,13 +66,24 @@ async def signup(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new user and a new account for multi-tenancy."""
+    try:
+        # Validate account name
+        validated_account_name = InputValidator.validate_string(
+            req.account_name,
+            "account_name",
+            max_length=256,
+            allow_empty=False
+        )
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     # Check email uniqueness
     existing = await db.execute(select(User).where(User.email == req.email))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Email already registered")
 
     # Create a new account for this user (Multi-tenancy)
-    new_account = Account(name=req.account_name, plan_tier="FREE")
+    new_account = Account(name=validated_account_name, plan_tier="FREE")
     db.add(new_account)
     await db.flush() 
 
@@ -110,16 +136,40 @@ async def login(
     db: AsyncSession = Depends(get_db),
 ):
     """Authenticate a user and return a JWT access token in cookie."""
-    result = await db.execute(select(User).where(User.email == req.email))
+    try:
+        # Validate email format
+        validated_email = InputValidator.validate_email(req.email)
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Extract client IP for rate limiting
+    client_ip = request.client.host if request.client else "unknown"
+
+    # Check brute-force rate limit
+    is_allowed, rate_limit_context = await AuthRateLimiter.check_rate_limit(client_ip)
+    if not is_allowed:
+        retry_after = AuthRateLimiter.get_retry_after_header(rate_limit_context)
+        raise HTTPException(
+            status_code=429,
+            detail=rate_limit_context.get("message", "Too many login attempts"),
+            headers={"Retry-After": str(retry_after)}
+        )
+
+    result = await db.execute(select(User).where(User.email == validated_email))
     user = result.scalar_one_or_none()
 
     if not user or not PasswordHasher.verify_password(req.password, user.password_hash):
+        # Record failed attempt
+        await AuthRateLimiter.record_failed_attempt(client_ip)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = JWTIssuer.create_access_token({
         "sub": user.id, "email": user.email,
         "account_id": user.account_id, "role": user.role,
     })
+
+    # Record successful login (clears failed attempts)
+    await AuthRateLimiter.record_success(client_ip)
 
     await log_action(
         db=db,
@@ -205,6 +255,59 @@ async def list_users(
     }
 
 
+class InviteUserRequest(BaseModel):
+    email: EmailStr
+    role: str
+    name: str = ""
+
+
+@router.post("/users/invite")
+async def invite_user(
+    req: InviteUserRequest,
+    payload: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Invite a new user to the caller's account with a temporary password."""
+    role_upper = req.role.upper()
+    if role_upper not in _VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Invalid role '{req.role}'. Must be one of: {sorted(_VALID_ROLES)}")
+
+    existing = await db.execute(select(User).where(User.email == req.email))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="A user with this email already exists")
+
+    temp_password = _generate_temp_password()
+    pwd_hash = PasswordHasher.hash_password(temp_password)
+
+    user = User(
+        account_id=payload["account_id"],
+        email=req.email,
+        password_hash=pwd_hash,
+        role=role_upper,
+    )
+    db.add(user)
+    await db.flush()
+
+    await log_action(
+        db=db,
+        account_id=payload["account_id"],
+        user_id=payload.get("sub"),
+        action="USER_INVITED",
+        resource_type="USER",
+        resource_id=user.id,
+        details={"email": req.email, "role": role_upper, "invited_by": payload.get("email")},
+    )
+    await db.commit()
+
+    return {
+        "status": "invited",
+        "user_id": user.id,
+        "email": req.email,
+        "role": role_upper,
+        "temp_password": temp_password,
+    }
+
+
 @router.patch("/users/{user_id}/role")
 async def update_user_role(
     user_id: str,
@@ -212,15 +315,35 @@ async def update_user_role(
     payload: dict = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a user's role."""
+    """Update a user's role. PLATFORM_ADMIN can only be assigned by another PLATFORM_ADMIN."""
     role_upper = role.upper()
-    if role_upper not in _VALID_ROLES:
-        raise HTTPException(status_code=400, detail=f"Invalid role '{role}'. Must be one of: {sorted(_VALID_ROLES)}")
+    caller_role = payload.get("role", "")
+
+    if role_upper == "PLATFORM_ADMIN":
+        if caller_role != "PLATFORM_ADMIN":
+            raise HTTPException(status_code=403, detail="Only PLATFORM_ADMIN can assign PLATFORM_ADMIN role")
+        allowed = _ALL_ROLES
+    else:
+        allowed = _VALID_ROLES
+
+    if role_upper not in allowed:
+        raise HTTPException(status_code=400, detail=f"Invalid role '{role}'. Must be one of: {sorted(allowed)}")
+
     result = await db.execute(select(User).where(User.id == user_id, User.account_id == payload["account_id"]))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
     user.role = role_upper
+    await log_action(
+        db=db,
+        account_id=payload["account_id"],
+        user_id=payload.get("sub"),
+        action="USER_ROLE_CHANGED",
+        resource_type="USER",
+        resource_id=user_id,
+        details={"new_role": role_upper, "changed_by": payload.get("email")},
+    )
     await db.commit()
     return {"status": "updated", "user_id": user_id, "role": user.role}
 

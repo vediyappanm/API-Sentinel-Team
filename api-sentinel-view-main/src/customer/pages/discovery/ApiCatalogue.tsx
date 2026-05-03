@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { RefreshCw, Download, Globe, Eye, ShieldOff, Calendar, Filter, Upload, Search } from 'lucide-react';
+import { RefreshCw, Download, Globe, Eye, ShieldOff, Calendar, Filter, Upload, Search, X, ChevronRight, GitBranch, FileCheck } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import DonutChart from '@/components/charts/DonutChart';
 import TimeFilter from '@/components/shared/TimeFilter';
 import LineChart from '@/components/charts/LineChart';
@@ -12,6 +13,7 @@ import SparklineChart from '@/components/ui/SparklineChart';
 import { useApiCollections, useApiInfos, useSeverityCounts } from '@/hooks/use-discovery';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
+import { fetchWithSession } from '@/lib/api-client';
 
 function formatTs(epoch: number) {
   if (!epoch) return '-';
@@ -59,12 +61,27 @@ function inferApiType(url: string): keyof typeof typeColors {
   return 'REST';
 }
 
+// Determine if API is Shadow (in traffic, not in spec) or Zombie (in spec, not in traffic)
+function getApiLifecycleStatus(row: AktoApiInfo, hostCollection?: any): { isShadow: boolean; isZombie: boolean; isDeprecated: boolean } {
+  // Shadow API: Has traffic (lastSeen) but not documented in spec
+  const isInSpec = hostCollection?.type === 'OPEN_API' || hostCollection?.type === 'MIRRORING';
+  const hasTraffic = row.lastSeen && row.lastSeen > 0;
+  const isShadow = hasTraffic && !isInSpec;
+  const isZombie = isInSpec && (!hasTraffic || (row.discoveredAt && row.discoveredAt > Date.now() - 30 * 24 * 60 * 60 * 1000));
+  const isDeprecated = (row as any).deprecated || false;
+  
+  return { isShadow, isZombie, isDeprecated };
+}
+
 const ApiCatalogue: React.FC = () => {
   const [timeRange, setTimeRange] = useState<'24h' | '7d'>('24h');
   const [page, setPage] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedApi, setSelectedApi] = useState<AktoApiInfo | null>(null);
+  const [showDetailsPanel, setShowDetailsPanel] = useState(false);
   const pageSize = 10;
   const qc = useQueryClient();
+  const navigate = useNavigate();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -76,14 +93,10 @@ const ApiCatalogue: React.FC = () => {
     try {
       const form = new FormData();
       form.append('file', file);
-      const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000');
-      const token = localStorage.getItem('sentinel_token');
-      const res = await fetch(`${BASE}/api/traffic/import/nginx-log`, {
+      const res = await fetchWithSession('/traffic/import/nginx-log', {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: form,
       });
-      if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
       const data = await res.json();
       setUploadResult(data);
       qc.invalidateQueries({ queryKey: ['discovery'] });
@@ -105,11 +118,56 @@ const ApiCatalogue: React.FC = () => {
   const sevCounts = useSeverityCounts(allIds);
 
   const isLoading = collections.isLoading || apiInfos.isLoading;
-  const hasError = collections.isError || apiInfos.isError;
+  const isError = collections.isError || apiInfos.isError;
+  const refetch = () => {
+    qc.invalidateQueries({ queryKey: ['discovery'] });
+  };
 
   const totalApis = collections.data?.apiCollections?.reduce((s, c) => s + (c.urlsCount || 0), 0) ?? 0;
   const rows = apiInfos.data?.apiInfoList ?? [];
   const total = apiInfos.data?.total ?? 0;
+
+  // Filter rows based on search query
+  const filteredRows = useMemo(() => {
+    if (!searchQuery.trim()) return rows;
+    const query = searchQuery.toLowerCase();
+    return rows.filter(row => 
+      row.id.url.toLowerCase().includes(query) ||
+      row.id.method.toLowerCase().includes(query) ||
+      (hostCollectionForRow(row)?.hostName?.toLowerCase().includes(query)) ||
+      (hostCollectionForRow(row)?.displayName?.toLowerCase().includes(query))
+    );
+  }, [rows, searchQuery]);
+
+  const hostCollectionForRow = (row: AktoApiInfo) => 
+    collections.data?.apiCollections?.find(c => c.id === row.id.apiCollectionId);
+
+  // Export handler
+  const handleExport = () => {
+    const csvHeaders = ['Method', 'Endpoint', 'Host', 'Discovered', 'Last Seen', 'Auth', 'Risk'];
+    const csvRows = filteredRows.map(row => {
+      const hostCollection = hostCollectionForRow(row);
+      const risk = mapRiskScore(row.riskScore);
+      const isUnauth = !row.allAuthTypesFound?.length || row.allAuthTypesFound.includes('UNAUTHENTICATED');
+      return [
+        row.id.method,
+        row.id.url,
+        hostCollection?.hostName || hostCollection?.displayName || '-',
+        formatTs(row.discoveredAt ?? 0),
+        formatTs(row.lastSeen),
+        isUnauth ? 'Unauthenticated' : 'Authenticated',
+        risk,
+      ].map(v => `"${v}"`).join(',');
+    });
+    const csv = [csvHeaders.join(','), ...csvRows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `api-catalogue-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const sevAgg = useMemo(() => {
     const result = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
@@ -131,20 +189,33 @@ const ApiCatalogue: React.FC = () => {
 
   const methodDist = useMemo(() => {
     const c: Record<string, number> = {};
-    rows.forEach(r => { c[r.id.method] = (c[r.id.method] || 0) + 1; });
+    filteredRows.forEach(r => { c[r.id.method] = (c[r.id.method] || 0) + 1; });
     return c;
-  }, [rows]);
+  }, [filteredRows]);
 
   const authCounts = useMemo(() => {
     let unauth = 0;
-    rows.forEach(r => {
+    filteredRows.forEach(r => {
       if (!r.allAuthTypesFound?.length || r.allAuthTypesFound.includes('UNAUTHENTICATED')) unauth++;
     });
-    return { unauth, auth: rows.length - unauth };
-  }, [rows]);
+    return { unauth, auth: filteredRows.length - unauth };
+  }, [filteredRows]);
 
-  const mcpEndpoints = useMemo(() => rows.filter(r => inferApiType(r.id.url) === 'MCP').length, [rows]);
-  const shadowCandidates = useMemo(() => rows.filter(r => (r as any).shadow === true || (r as any).rogue === true).length, [rows]);
+  const mcpEndpoints = useMemo(() => filteredRows.filter(r => inferApiType(r.id.url) === 'MCP').length, [filteredRows]);
+  const shadowCandidates = useMemo(() => {
+    return filteredRows.filter(r => {
+      const hostCollection = hostCollectionForRow(r);
+      const lifecycle = getApiLifecycleStatus(r, hostCollection);
+      return lifecycle.isShadow;
+    }).length;
+  }, [filteredRows]);
+  const zombieCandidates = useMemo(() => {
+    return filteredRows.filter(r => {
+      const hostCollection = hostCollectionForRow(r);
+      const lifecycle = getApiLifecycleStatus(r, hostCollection);
+      return lifecycle.isZombie;
+    }).length;
+  }, [filteredRows]);
   const specCoverage = totalApis > 0 ? Math.round((authCounts.auth / Math.max(1, totalApis)) * 100) : 0;
 
   return (
@@ -173,7 +244,7 @@ const ApiCatalogue: React.FC = () => {
             className="flex items-center gap-1.5 rounded-lg border border-brand/30 px-3 py-1.5 text-xs text-brand hover:bg-brand/10 transition-all outline-none disabled:opacity-50">
             <Upload size={13} /> {uploading ? 'Importing...' : 'Import Log'}
           </button>
-          <button className="flex items-center gap-1.5 rounded-lg border border-border-subtle px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:border-brand/20 transition-all outline-none">
+          <button onClick={handleExport} className="flex items-center gap-1.5 rounded-lg border border-border-subtle px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:border-brand/20 transition-all outline-none">
             <Download size={13} /> Export
           </button>
         </div>
@@ -206,7 +277,7 @@ const ApiCatalogue: React.FC = () => {
         <GlassCard variant="default" className="p-4 flex items-center gap-4">
           <DonutChart data={riskData} size={100} innerRadius={30} outerRadius={44} centerValue={totalApis} centerLabel="APIs" />
           <div className="flex-1 space-y-1.5">
-            <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">Risk Distribution</span>
+            <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Risk Distribution</span>
             {riskData.map(d => (
               <div key={d.name} className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
@@ -220,7 +291,7 @@ const ApiCatalogue: React.FC = () => {
         </GlassCard>
 
         <GlassCard variant="default" className="p-4">
-          <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">Method Distribution</span>
+          <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Method Distribution</span>
           <div className="mt-3 flex flex-wrap gap-2">
             {Object.entries(methodDist).sort((a, b) => b[1] - a[1]).map(([method, count]) => (
               <span
@@ -278,9 +349,9 @@ const ApiCatalogue: React.FC = () => {
         />
       </div>
 
-      {hasError && <QueryError message="Failed to load API catalogue" onRetry={() => qc.invalidateQueries({ queryKey: ['discovery'] })} />}
+      {isError && <QueryError message="Failed to load API catalogue" onRetry={refetch} />}
 
-      {!isLoading && !hasError && total === 0 && (
+      {!isLoading && !isError && total === 0 && (
         <GlassCard variant="accent" className="px-5 py-4 flex items-start gap-4">
           <div className="w-9 h-9 rounded-lg bg-brand/10 flex items-center justify-center shrink-0 mt-0.5">
             <Eye size={18} className="text-brand" />
@@ -299,16 +370,16 @@ const ApiCatalogue: React.FC = () => {
         <div className="p-3 border-b border-border-subtle flex items-center justify-between">
           <span className="text-sm font-bold text-text-primary flex items-center gap-2">
             API Catalogue
-            <span className="text-[10px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted flex items-center gap-1">
+            <span className="text-[11px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted flex items-center gap-1">
               <Calendar size={10} /> Last 90 days
             </span>
           </span>
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-3 text-xs text-text-muted">
-              <span>{page * pageSize + 1} - {Math.min((page + 1) * pageSize, total)} of {total}</span>
+              <span>{page * pageSize + 1} - {Math.min((page + 1) * pageSize, filteredRows.length)} of {filteredRows.length}</span>
               <div className="flex gap-1">
-                <button disabled={page === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[10px] disabled:opacity-30 hover:border-brand/20 transition-all">Prev</button>
-                <button disabled={(page + 1) * pageSize >= total} onClick={() => setPage(p => p + 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[10px] disabled:opacity-30 hover:border-brand/20 transition-all">Next</button>
+                <button disabled={page === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[11px] disabled:opacity-30 hover:border-brand/20 transition-all">Prev</button>
+                <button disabled={(page + 1) * pageSize >= filteredRows.length} onClick={() => setPage(p => p + 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[11px] disabled:opacity-30 hover:border-brand/20 transition-all">Next</button>
               </div>
             </div>
             <button className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-elevated outline-none transition-colors">
@@ -321,42 +392,76 @@ const ApiCatalogue: React.FC = () => {
           <TableSkeleton columns={10} rows={pageSize} />
         ) : (
           <div className="overflow-x-auto flex-1">
-            <table className="w-full text-left border-collapse table-fixed min-w-[1200px]">
+            <table className="w-full text-left border-collapse table-fixed min-w-[700px]">
               <thead className="bg-bg-base/50">
                 <tr>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-10 text-center">
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-10 text-center">
                     <input type="checkbox" className="accent-brand" />
                   </th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-24">Traits</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Type</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-[30%]">Endpoint</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-[18%]">Host</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-28 text-center">Discovered</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-28 text-center">Last Seen</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Auth</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Risk</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-16 text-center">Volume</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-24">Traits</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Type</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-[30%]">Endpoint</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-[18%]">Host</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-28 text-center">Discovered</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-28 text-center">Last Seen</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Auth</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Risk</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-16 text-center">Volume</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle">
-                {rows.map((row) => {
+                {filteredRows.slice(page * pageSize, (page + 1) * pageSize).map((row) => {
                   const risk = mapRiskScore(row.riskScore);
                   const isUnauth = !row.allAuthTypesFound?.length || row.allAuthTypesFound.includes('UNAUTHENTICATED');
-                  const hostCollection = collections.data?.apiCollections?.find(c => c.id === row.id.apiCollectionId);
+                  const hostCollection = hostCollectionForRow(row);
                   const apiType = inferApiType(row.id.url);
                   const typeColor = typeColors[apiType] || '#6B7280';
                   return (
-                    <tr key={`${row.id.apiCollectionId}-${row.id.method}-${row.id.url}`} className="data-row-interactive hover:bg-white/[0.02] transition-colors cursor-pointer">
-                      <td className="px-4 py-3 text-center"><input type="checkbox" className="accent-brand" /></td>
+                    <tr 
+                      key={`${row.id.apiCollectionId}-${row.id.method}-${row.id.url}`} 
+                      className="data-row-interactive hover:bg-white/[0.02] transition-colors cursor-pointer"
+                      onClick={() => {
+                        setSelectedApi(row);
+                        setShowDetailsPanel(true);
+                      }}
+                    >
+                      <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" className="accent-brand" />
+                      </td>
                       <td className="px-4 py-3">
-                        <div className="flex gap-1.5 items-center">
+                        <div className="flex gap-1.5 items-center flex-wrap">
                           <Globe size={12} className="text-sev-info" />
                           {isUnauth && <ShieldOff size={12} className="text-sev-critical" />}
+                          {(() => {
+                            const lifecycle = getApiLifecycleStatus(row, hostCollection);
+                            if (lifecycle.isShadow) {
+                              return (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-sev-critical/10 text-sev-critical border border-sev-critical/20 flex items-center gap-1">
+                                  <ShieldOff size={8} /> Shadow
+                                </span>
+                              );
+                            }
+                            if (lifecycle.isZombie) {
+                              return (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-sev-medium/10 text-sev-medium border border-sev-medium/20 flex items-center gap-1">
+                                  <Calendar size={8} /> Zombie
+                                </span>
+                              );
+                            }
+                            if (lifecycle.isDeprecated) {
+                              return (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-bg-elevated text-text-muted border border-border-subtle">
+                                  Deprecated
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span
-                          className="text-[10px] font-bold px-2 py-0.5 rounded-full border"
+                          className="text-[11px] font-bold px-2 py-0.5 rounded-full border"
                           style={{ color: typeColor, background: `${typeColor}12`, borderColor: `${typeColor}30` }}
                         >
                           {apiType}
@@ -369,8 +474,8 @@ const ApiCatalogue: React.FC = () => {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-[12px] text-text-secondary truncate">{hostCollection?.hostName || hostCollection?.displayName || '-'}</td>
-                      <td className="px-4 py-3 text-[10px] font-mono text-text-muted text-center">{formatTs(row.discoveredAt ?? 0)}</td>
-                      <td className="px-4 py-3 text-[10px] font-mono text-text-muted text-center">{formatTs(row.lastSeen)}</td>
+                      <td className="px-4 py-3 text-[11px] font-mono text-text-muted text-center">{formatTs(row.discoveredAt ?? 0)}</td>
+                      <td className="px-4 py-3 text-[11px] font-mono text-text-muted text-center">{formatTs(row.lastSeen)}</td>
                       <td className="px-4 py-3 text-center"><AuthBadge auth={isUnauth ? 'Unauth' : 'Authenticated'} /></td>
                       <td className="px-4 py-3 text-center">
                         <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{
@@ -391,7 +496,7 @@ const ApiCatalogue: React.FC = () => {
                     </tr>
                   );
                 })}
-                {rows.length === 0 && !isLoading && (
+                {filteredRows.length === 0 && !isLoading && (
                   <tr><td colSpan={10} className="px-4 py-12 text-center text-xs text-text-muted">No APIs found. Connect a traffic source to start discovering APIs.</td></tr>
                 )}
               </tbody>
@@ -399,6 +504,130 @@ const ApiCatalogue: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* API Details Side Panel */}
+      {showDetailsPanel && selectedApi && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in" onClick={() => setShowDetailsPanel(false)}>
+          <div 
+            className="w-full max-w-2xl bg-bg-surface border border-border-subtle rounded-xl shadow-2xl animate-slide-up m-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-border-subtle">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <MethodBadge method={selectedApi.id.method} />
+                  <span className="text-sm font-bold text-text-primary font-mono">{selectedApi.id.url}</span>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowDetailsPanel(false)}
+                className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-elevated transition-all"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            
+            <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+              {/* Basic Info */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">API Collection</p>
+                  <p className="text-sm text-text-primary mt-1">
+                    {hostCollectionForRow(selectedApi)?.displayName || 'Default Inventory'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Host</p>
+                  <p className="text-sm text-text-primary mt-1">
+                    {hostCollectionForRow(selectedApi)?.hostName || 'internal'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Discovered</p>
+                  <p className="text-sm text-text-primary mt-1 font-mono">{formatTs(selectedApi.discoveredAt ?? 0)}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Last Seen</p>
+                  <p className="text-sm text-text-primary mt-1 font-mono">{formatTs(selectedApi.lastSeen)}</p>
+                </div>
+              </div>
+
+              {/* Authentication */}
+              <div>
+                <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold mb-2">Authentication</p>
+                <div className="flex items-center gap-2">
+                  <AuthBadge auth={!selectedApi.allAuthTypesFound?.length || selectedApi.allAuthTypesFound.includes('UNAUTHENTICATED') ? 'Unauthenticated' : 'Authenticated'} />
+                  {selectedApi.allAuthTypesFound?.length > 0 && !selectedApi.allAuthTypesFound.includes('UNAUTHENTICATED') && (
+                    <div className="flex gap-1">
+                      {selectedApi.allAuthTypesFound.map(auth => (
+                        <span key={auth} className="text-[10px] px-2 py-0.5 rounded-full bg-bg-elevated border border-border-subtle text-text-secondary">
+                          {auth}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Risk Score */}
+              <div>
+                <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold mb-2">Risk Assessment</p>
+                <div className="flex items-center gap-3">
+                  <span 
+                    className="text-sm font-bold px-3 py-1 rounded-full"
+                    style={{
+                      color: riskColor(mapRiskScore(selectedApi.riskScore)),
+                      background: `${riskColor(mapRiskScore(selectedApi.riskScore))}12`,
+                    }}
+                  >
+                    {mapRiskScore(selectedApi.riskScore)}
+                  </span>
+                  <span className="text-xs text-text-muted">
+                    Score: {selectedApi.riskScore ?? 'N/A'}
+                  </span>
+                </div>
+              </div>
+
+              {/* API Type */}
+              <div>
+                <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold mb-2">API Type</p>
+                <span
+                  className="text-[11px] font-bold px-2.5 py-1 rounded-full border"
+                  style={{ 
+                    color: typeColors[inferApiType(selectedApi.id.url)] || '#6B7280',
+                    background: `${typeColors[inferApiType(selectedApi.id.url)] || '#6B7280'}12`,
+                    borderColor: `${typeColors[inferApiType(selectedApi.id.url)] || '#6B7280'}30`,
+                  }}
+                >
+                  {inferApiType(selectedApi.id.url)}
+                </span>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-2 pt-4 border-t border-border-subtle">
+                <button 
+                  onClick={() => {
+                    navigate(`/app/discovery/sequences?endpoint=${encodeURIComponent(selectedApi.id.url)}&method=${selectedApi.id.method}`);
+                    setShowDetailsPanel(false);
+                  }}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-brand/10 text-brand hover:bg-brand/20 transition-all text-sm font-semibold"
+                >
+                  <GitBranch size={14} /> View Sequences
+                </button>
+                <button 
+                  onClick={() => {
+                    navigate(`/app/testing?endpoint=${encodeURIComponent(selectedApi.id.url)}`);
+                    setShowDetailsPanel(false);
+                  }}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-bg-elevated text-text-secondary hover:text-text-primary border border-border-subtle transition-all text-sm font-semibold"
+                >
+                  <FileCheck size={14} /> Run Tests
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

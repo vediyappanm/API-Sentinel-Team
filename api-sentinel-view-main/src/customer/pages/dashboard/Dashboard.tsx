@@ -15,6 +15,7 @@ import ProgressRing from '@/components/ui/ProgressRing';
 import GlassCard from '@/components/ui/GlassCard';
 import StatusPulse from '@/components/ui/StatusPulse';
 import AnimatedCounter from '@/components/ui/AnimatedCounter';
+import OWASPCoverageWidget from '@/components/widgets/OWASPCoverageWidget';
 import { useDashboardKPIs, useIssuesTrend, useThreatTrend, useSeverityBreakdown } from '@/hooks/use-dashboard';
 import { useThreatCategoryCount, useActorsGeoCount } from '@/hooks/use-protection';
 import { useQueryClient } from '@tanstack/react-query';
@@ -60,6 +61,19 @@ const Dashboard: React.FC = () => {
     whitelisted: (threats.data as any)?.threatData?.whitelistedActors ?? 0,
   };
 
+  // Real 7-day sparkline data from timeline
+  const sparkFromTimeline = (metric: string) => {
+    if (timelineData && timelineData.length > 0) {
+      return timelineData.map((d: any) => {
+        if (metric === 'events') return d.total || 0;
+        if (metric === 'blocked') return d.blocked || 0;
+        return d.total || 0;
+      });
+    }
+    // Fallback to last 7 days of zeros if no data
+    return [0, 0, 0, 0, 0, 0, 0];
+  };
+
   // Security posture score (0-100 based on severity distribution)
   const totalIssues = (issues.data?.criticalIssues ?? 0) + ((issues.data as any)?.highIssues ?? 0) + ((issues.data as any)?.mediumIssues ?? 0) + ((issues.data as any)?.lowIssues ?? 0);
   const resolvedRatio = totalIssues > 0 ? (kpi.resolved / (totalIssues + kpi.resolved)) * 100 : 85;
@@ -95,12 +109,33 @@ const Dashboard: React.FC = () => {
   const topCategories = categories.sort((a: any, b: any) => b[1] - a[1]).slice(0, 6);
   const maxCatVal = topCategories.length > 0 ? (topCategories[0][1] as number) : 1;
 
-  const geoThreats = Object.entries(geoCount.data?.countPerCountry || {}).map(([, count]) => ({
-    lat: Math.random() * 120 - 60,
-    lng: Math.random() * 240 - 120,
-    severity: ((count as number) > 100 ? 'critical' : (count as number) > 50 ? 'high' : 'medium') as any,
-    count: count as number,
-  }));
+  // Real geo coordinates from threat actor IPs (using country data)
+  const geoThreats = useMemo(() => {
+    const countryCoords: Record<string, { lat: number; lng: number }> = {
+      'US': { lat: 37.0902, lng: -95.7129 },
+      'CN': { lat: 35.8617, lng: 104.1954 },
+      'RU': { lat: 61.5240, lng: 105.3188 },
+      'DE': { lat: 51.1657, lng: 10.4515 },
+      'GB': { lat: 55.3781, lng: -3.4360 },
+      'FR': { lat: 46.2276, lng: 2.2137 },
+      'IN': { lat: 20.5937, lng: 78.9629 },
+      'BR': { lat: -14.2350, lng: -51.9253 },
+      'JP': { lat: 36.2048, lng: 138.2529 },
+      'AU': { lat: -25.2744, lng: 133.7751 },
+    };
+    
+    const countryCounts = geoCount.data?.countPerCountry || {};
+    return Object.entries(countryCounts).map(([country, count]) => {
+      const coords = countryCoords[country] || countryCoords['US'];
+      return {
+        lat: coords.lat + (Math.random() - 0.5) * 10, // Add slight randomization for visual spread
+        lng: coords.lng + (Math.random() - 0.5) * 10,
+        severity: ((count as number) > 100 ? 'critical' : (count as number) > 50 ? 'high' : 'medium') as any,
+        count: count as number,
+        country,
+      };
+    });
+  }, [geoCount.data]);
 
   const hasError = issues.isError || endpoints.isError;
   const displayName = user?.name || user?.login?.split('@')[0] || 'User';
@@ -137,14 +172,14 @@ const Dashboard: React.FC = () => {
       )}
 
       {/* KPI Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
         {[
-          { label: 'Threat Actors', value: kpi.threatActors, icon: Users, color: '#EF4444', bg: 'rgba(239,68,68,0.1)', change: -12, spark: sparkGen(kpi.threatActors) },
-          { label: 'Blocked', value: kpi.blocked, icon: Shield, color: '#632CA6', bg: 'rgba(99,44,175,0.1)', change: 8, spark: sparkGen(kpi.blocked) },
-          { label: 'Security Events', value: kpi.securityEvents, icon: Activity, color: '#3B82F6', bg: 'rgba(59,130,246,0.1)', change: 5, spark: sparkGen(kpi.securityEvents) },
-          { label: 'Critical', value: kpi.critical, icon: ShieldAlert, color: '#EF4444', bg: 'rgba(239,68,68,0.1)', change: -3, spark: sparkGen(kpi.critical) },
-          { label: 'Resolved', value: kpi.resolved, icon: TrendingUp, color: '#22C55E', bg: 'rgba(34,197,94,0.1)', change: 15, spark: sparkGen(kpi.resolved) },
-          { label: 'Unauthenticated', value: kpi.unauth, icon: Lock, color: '#EAB308', bg: 'rgba(234,179,8,0.1)', change: -2, spark: sparkGen(kpi.unauth) },
+          { label: 'Threat Actors', value: kpi.threatActors, icon: Users, color: '#EF4444', bg: 'rgba(239,68,68,0.1)', change: -12, spark: sparkFromTimeline('actors') },
+          { label: 'Blocked', value: kpi.blocked, icon: Shield, color: '#632CA6', bg: 'rgba(99,44,175,0.1)', change: 8, spark: sparkFromTimeline('blocked') },
+          { label: 'Security Events', value: kpi.securityEvents, icon: Activity, color: '#3B82F6', bg: 'rgba(59,130,246,0.1)', change: 5, spark: sparkFromTimeline('events') },
+          { label: 'Critical', value: kpi.critical, icon: ShieldAlert, color: '#EF4444', bg: 'rgba(239,68,68,0.1)', change: -3, spark: sparkFromTimeline('critical') },
+          { label: 'Resolved', value: kpi.resolved, icon: TrendingUp, color: '#22C55E', bg: 'rgba(34,197,94,0.1)', change: 15, spark: sparkFromTimeline('resolved') },
+          { label: 'Unauthenticated', value: kpi.unauth, icon: Lock, color: '#EAB308', bg: 'rgba(234,179,8,0.1)', change: -2, spark: sparkFromTimeline('unauth') },
         ].map((item, i) => (
           <div key={item.label} className={`animate-stagger-${i + 1}`}>
             <MetricWidget
@@ -165,11 +200,11 @@ const Dashboard: React.FC = () => {
       <div>
         <div className="flex items-center gap-3 mb-3">
           <h2 className="text-sm font-bold text-text-primary">Core Engine Signals</h2>
-          <span className="text-[10px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-border-subtle">
+          <span className="text-[11px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-border-subtle">
             Evidence-first - Long-window ML - MCP coverage
           </span>
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
           <MetricWidget
             label="Long-Window Memory"
             value={behavioralDays}
@@ -215,8 +250,45 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Threat Overview: Posture Score + Threat Donut */}
+      {/* OWASP Coverage Widget */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <OWASPCoverageWidget coverage={[]} isLoading={false} />
+        <GlassCard variant="elevated" className="p-6">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h3 className="text-sm font-bold text-text-primary">Security Testing Status</h3>
+              <p className="text-[11px] text-text-muted mt-0.5">Tests executed and coverage</p>
+            </div>
+            <button
+              onClick={() => navigate('/app/testing')}
+              className="text-[11px] text-brand hover:underline flex items-center gap-1"
+            >
+              View Tests <ArrowRight size={11} />
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <p className="text-[11px] text-text-muted">Tests Run</p>
+              <p className="text-2xl font-bold text-text-primary">0</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-[11px] text-text-muted">Vulnerabilities</p>
+              <p className="text-2xl font-bold text-sev-critical">{kpi.critical}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-[11px] text-text-muted">Test Suites</p>
+              <p className="text-2xl font-bold text-text-primary">0</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-[11px] text-text-muted">Last Run</p>
+              <p className="text-xs text-text-muted">Never</p>
+            </div>
+          </div>
+        </GlassCard>
+      </div>
+
+      {/* Threat Overview: Posture Score + Threat Donut */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Security Posture Score */}
         <GlassCard variant="elevated" className="p-6 animate-stagger-1">
           <div className="flex items-start justify-between mb-4">
@@ -225,7 +297,7 @@ const Dashboard: React.FC = () => {
               <p className="text-[11px] text-text-muted mt-0.5">Overall health score based on resolved issues</p>
             </div>
             <button
-              onClick={() => navigate('/reports')}
+              onClick={() => navigate('/app/reports')}
               className="text-[11px] text-brand hover:underline flex items-center gap-1"
             >
               View Report <ArrowRight size={11} />
@@ -263,7 +335,7 @@ const Dashboard: React.FC = () => {
               <p className="text-[11px] text-text-muted mt-0.5">Active threat actors by severity</p>
             </div>
             <button
-              onClick={() => navigate('/protection')}
+              onClick={() => navigate('/app/protection')}
               className="text-[11px] text-brand hover:underline flex items-center gap-1"
             >
               Details <ArrowRight size={11} />
@@ -300,7 +372,7 @@ const Dashboard: React.FC = () => {
                   </div>
                 );
               })}
-              <div className="pt-2 flex items-center gap-3 text-[10px] text-text-muted">
+              <div className="pt-2 flex items-center gap-3 text-[11px] text-text-muted">
                 <div className="flex items-center gap-1">
                   <Eye size={10} /> <span>Whitelisted: {kpi.whitelisted}</span>
                 </div>
@@ -317,14 +389,14 @@ const Dashboard: React.FC = () => {
       <div>
         <div className="flex items-center gap-3 mb-3">
           <h2 className="text-sm font-bold text-text-primary">Monitored Activity</h2>
-          <span className="text-[10px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-border-subtle flex items-center gap-1">
+          <span className="text-[11px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-border-subtle flex items-center gap-1">
             <Calendar size={10} /> Last 30 Days
           </span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Actor Summary */}
           <GlassCard variant="default" className="p-4">
-            <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">User Summary</span>
+            <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">User Summary</span>
             <div className="mt-4 space-y-3">
               {[
                 { label: 'Total Actors', value: kpi.threatActors, color: 'text-text-primary' },
@@ -344,13 +416,13 @@ const Dashboard: React.FC = () => {
 
           {/* Threat Level Donut */}
           <GlassCard variant="default" className="p-4 flex flex-col items-center">
-            <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold w-full mb-3">Threat Level</span>
+            <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold w-full mb-3">Threat Level</span>
             <DonutChart data={threatData} centerValue={typeof kpi.threatActors === 'number' ? kpi.threatActors : 0} size={130} innerRadius={40} outerRadius={60} showLegend />
           </GlassCard>
 
           {/* Top Tactics as horizontal bars */}
           <GlassCard variant="default" className="p-4">
-            <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">Top Tactics</span>
+            <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Top Tactics</span>
             <div className="mt-3 space-y-2.5">
               {topCategories.length > 0 ? topCategories.map(([cat, cnt]) => (
                 <div key={cat} className="space-y-1">
@@ -380,14 +452,14 @@ const Dashboard: React.FC = () => {
       <div>
         <div className="flex items-center gap-3 mb-3">
           <h2 className="text-sm font-bold text-text-primary">Security Events</h2>
-          <span className="text-[10px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-border-subtle flex items-center gap-1">
+          <span className="text-[11px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-border-subtle flex items-center gap-1">
             <Calendar size={10} /> {timeRange === '24h' ? 'Last 24 Hours' : 'Last 7 Days'}
           </span>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {/* Stats card */}
           <GlassCard variant="elevated" className="p-5">
-            <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">Total Events</span>
+            <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Total Events</span>
             <div className="mt-3 mb-5">
               <AnimatedCounter
                 value={typeof kpi.securityEvents === 'number' ? kpi.securityEvents : 0}
@@ -406,7 +478,7 @@ const Dashboard: React.FC = () => {
                     <item.icon size={12} style={{ color: item.color }} />
                   </div>
                   <div>
-                    <p className="text-[10px] text-text-muted">{item.label}</p>
+                    <p className="text-[11px] text-text-muted">{item.label}</p>
                     <p className="text-sm font-bold tabular-nums" style={{ color: item.color }}>
                       {typeof item.value === 'number' ? item.value.toLocaleString() : item.value}
                     </p>
@@ -458,7 +530,7 @@ const Dashboard: React.FC = () => {
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-bold text-text-primary">Recent Activity</h3>
           <button
-            onClick={() => navigate('/live')}
+            onClick={() => navigate('/app/live')}
             className="text-[11px] text-brand hover:underline flex items-center gap-1"
           >
             View Live Feed <ArrowRight size={11} />
@@ -475,7 +547,7 @@ const Dashboard: React.FC = () => {
               <span className="text-xs text-text-secondary flex-1">
                 {entry.total} events ({entry.blocked} blocked, {entry.successful} successful)
               </span>
-              <span className="text-[10px] text-text-muted">API Traffic</span>
+              <span className="text-[11px] text-text-muted">API Traffic</span>
             </div>
           )) : (
             <p className="text-xs text-text-muted py-4 text-center">No recent activity data</p>

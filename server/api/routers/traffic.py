@@ -20,12 +20,12 @@ from server.modules.traffic_capture.sample_data_writer import SampleDataWriter
 from server.modules.parsers.postman import PostmanParser
 from server.modules.api_inventory.openapi_generator import OpenAPIGenerator
 from server.modules.cache.redis_cache import bump_cache_version
+from server.modules.detection.pipeline import unified_detection_pipeline
+from server.modules.auth.rbac import RBAC, Permission
 from server.models.core import (
     APIEndpoint, SampleData, RequestLog,
     MaliciousEventRecord, MaliciousEvent, ThreatActor, WAFEvent,
 )
-
-ACCOUNT_ID = 1000000
 
 # ── Nginx/Apache combined log pattern ────────────────────────────────────────
 # 1.2.3.4 - frank [10/Oct/2000:13:55:36 -0700] "GET /apache_pb.gif HTTP/1.0" 200 2326 "ref" "UA"
@@ -129,8 +129,13 @@ def _parse_har(har_data: dict) -> list[dict]:
 
 
 @router.post("/har/upload")
-async def upload_har(file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+async def upload_har(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_MANAGE)),
+):
     """Upload a HAR file to discover endpoints and store sample traffic."""
+    account_id = payload["account_id"]
     content = await file.read()
     try:
         har = json.loads(content)
@@ -161,12 +166,14 @@ async def upload_har(file: UploadFile = File(...), db: AsyncSession = Depends(ge
                 APIEndpoint.host == host,
                 APIEndpoint.path == path,
                 APIEndpoint.method == method,
+                APIEndpoint.account_id == account_id,
             )
         )
         ep = result.scalar_one_or_none()
         if not ep:
             ep = APIEndpoint(
                 id=str(uuid.uuid4()),
+                account_id=account_id,
                 method=method, path=path, host=host,
                 protocol=protocol, port=port,
                 last_response_code=pair["response"].get("status", 200),
@@ -176,11 +183,11 @@ async def upload_har(file: UploadFile = File(...), db: AsyncSession = Depends(ge
             discovered += 1
 
         # Save sample data
-        await _writer.save(ep.id, pair["request"], pair["response"], db)
+        await _writer.save(ep.id, pair["request"], pair["response"], db, account_id=account_id)
         saved_samples += 1
 
     await db.commit()
-    await bump_cache_version(ACCOUNT_ID)
+    await bump_cache_version(account_id)
     return {
         "status": "ok",
         "entries_processed": len(pairs),
@@ -190,9 +197,15 @@ async def upload_har(file: UploadFile = File(...), db: AsyncSession = Depends(ge
 
 
 @router.get("/samples")
-async def list_samples(endpoint_id: str = None, limit: int = 50, db: AsyncSession = Depends(get_db)):
+async def list_samples(
+    endpoint_id: str = None,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
+):
     """List captured traffic samples."""
-    query = select(SampleData).limit(limit)
+    account_id = payload["account_id"]
+    query = select(SampleData).where(SampleData.account_id == account_id).limit(limit)
     if endpoint_id:
         query = query.where(SampleData.endpoint_id == endpoint_id)
     result = await db.execute(query)
@@ -209,8 +222,13 @@ async def list_samples(endpoint_id: str = None, limit: int = 50, db: AsyncSessio
 
 
 @router.post("/import/postman")
-async def import_postman(file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+async def import_postman(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_MANAGE)),
+):
     """Import a Postman collection JSON to discover endpoints and sample data."""
+    account_id = payload["account_id"]
     content = await file.read()
     try:
         parser = PostmanParser(content.decode("utf-8"))
@@ -243,12 +261,14 @@ async def import_postman(file: UploadFile = File(...), db: AsyncSession = Depend
                 APIEndpoint.host == host,
                 APIEndpoint.path == path,
                 APIEndpoint.method == method,
+                APIEndpoint.account_id == account_id,
             )
         )
         ep = result.scalar_one_or_none()
         if not ep:
             ep = APIEndpoint(
                 id=str(uuid.uuid4()),
+                account_id=account_id,
                 method=method, path=path, host=host,
                 protocol=protocol, port=port,
             )
@@ -257,11 +277,11 @@ async def import_postman(file: UploadFile = File(...), db: AsyncSession = Depend
             discovered += 1
 
         if sample:
-            await _writer.save(ep.id, sample["request"], sample["response"], db)
+            await _writer.save(ep.id, sample["request"], sample["response"], db, account_id=account_id)
             saved_samples += 1
 
     await db.commit()
-    await bump_cache_version(ACCOUNT_ID)
+    await bump_cache_version(account_id)
     return {
         "status": "ok",
         "requests_parsed": len(items),
@@ -271,17 +291,23 @@ async def import_postman(file: UploadFile = File(...), db: AsyncSession = Depend
 
 
 @router.get("/openapi")
-async def export_openapi(collection_name: str = Query("Discovered API")):
+async def export_openapi(
+    collection_name: str = Query("Discovered API"),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
+):
     """Export an OpenAPI 3.0 spec generated from all discovered endpoints."""
-    spec = await _openapi_gen.generate_spec(collection_name, account_id=ACCOUNT_ID)
+    spec = await _openapi_gen.generate_spec(collection_name, account_id=payload["account_id"])
     return spec
 
 
 @router.get("/status")
-async def traffic_capture_status():
+async def traffic_capture_status(
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
+):
     """Returns traffic capture status (mitmproxy / HAR ingestion mode)."""
     return {
         "mode": "har_upload",
+        "account_id": payload["account_id"],
         "mitmproxy": {"running": False, "note": "Use HAR upload or configure mitmproxy externally"},
         "har_upload_endpoint": "/api/traffic/har/upload",
         "postman_import_endpoint": "/api/traffic/import/postman",
@@ -291,7 +317,11 @@ async def traffic_capture_status():
 
 
 @router.post("/import/nginx-log")
-async def import_nginx_log(file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+async def import_nginx_log(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_MANAGE)),
+):
     """
     Upload a Nginx or Apache combined-format access log file.
     Each line is parsed and stored as:
@@ -309,7 +339,9 @@ async def import_nginx_log(file: UploadFile = File(...), db: AsyncSession = Depe
     if not entries:
         raise HTTPException(status_code=400, detail="No valid log lines found. Expected nginx/apache combined log format.")
 
+    account_id = payload["account_id"]
     stats = {"lines": len(entries), "endpoints_discovered": 0, "request_logs": 0, "threats_detected": 0, "waf_events": 0}
+    pipeline_mode = unified_detection_pipeline.mode()
 
     # Cache endpoints in-memory to avoid repeated DB queries per line
     ep_cache: dict[str, str] = {}  # "METHOD:host:path" -> endpoint_id
@@ -330,14 +362,14 @@ async def import_nginx_log(file: UploadFile = File(...), db: AsyncSession = Depe
                     APIEndpoint.method == method,
                     APIEndpoint.path == clean_path,
                     APIEndpoint.host == host,
-                    APIEndpoint.account_id == ACCOUNT_ID,
+                    APIEndpoint.account_id == account_id,
                 )
             )
             ep = result.scalar_one_or_none()
             if not ep:
                 ep = APIEndpoint(
                     id=str(uuid.uuid4()),
-                    account_id=ACCOUNT_ID,
+                    account_id=account_id,
                     method=method,
                     path=clean_path,
                     host=host,
@@ -356,6 +388,7 @@ async def import_nginx_log(file: UploadFile = File(...), db: AsyncSession = Depe
         # ── Request log ───────────────────────────────────────────────────
         req_log = RequestLog(
             id=str(uuid.uuid4()),
+            account_id=account_id,
             endpoint_id=ep_id,
             source_ip=entry["ip"],
             method=method,
@@ -371,12 +404,16 @@ async def import_nginx_log(file: UploadFile = File(...), db: AsyncSession = Depe
         if attacks:
             # Upsert ThreatActor by IP
             actor_result = await db.execute(
-                select(ThreatActor).where(ThreatActor.source_ip == entry["ip"])
+                select(ThreatActor).where(
+                    ThreatActor.source_ip == entry["ip"],
+                    ThreatActor.account_id == account_id,
+                )
             )
             actor = actor_result.scalar_one_or_none()
             if not actor:
                 actor = ThreatActor(
                     id=str(uuid.uuid4()),
+                    account_id=account_id,
                     source_ip=entry["ip"],
                     status="MONITORING",
                     event_count=0,
@@ -390,6 +427,7 @@ async def import_nginx_log(file: UploadFile = File(...), db: AsyncSession = Depe
                 # MaliciousEvent (lightweight, used by threat actor timeline)
                 mal_ev = MaliciousEvent(
                     id=str(uuid.uuid4()),
+                    account_id=account_id,
                     actor_id=actor.id,
                     event_type=category.replace(" ", "_").upper(),
                     severity=severity,
@@ -400,7 +438,7 @@ async def import_nginx_log(file: UploadFile = File(...), db: AsyncSession = Depe
                 # MaliciousEventRecord (full-fidelity, shown in security events)
                 rec = MaliciousEventRecord(
                     id=str(uuid.uuid4()),
-                    account_id=ACCOUNT_ID,
+                    account_id=account_id,
                     actor=entry["ip"],
                     ip=entry["ip"],
                     url=raw_path,
@@ -418,6 +456,7 @@ async def import_nginx_log(file: UploadFile = File(...), db: AsyncSession = Depe
                 # WAFEvent
                 waf = WAFEvent(
                     id=str(uuid.uuid4()),
+                    account_id=account_id,
                     source_ip=entry["ip"],
                     endpoint_id=ep_id,
                     rule_id=f"NGINX-{category.replace(' ', '-').upper()}",
@@ -437,7 +476,7 @@ async def import_nginx_log(file: UploadFile = File(...), db: AsyncSession = Depe
             actor.last_seen = entry["ts"]
 
     await db.commit()
-    await bump_cache_version(ACCOUNT_ID)
+    await bump_cache_version(account_id)
     return {
         "status": "ok",
         **stats,

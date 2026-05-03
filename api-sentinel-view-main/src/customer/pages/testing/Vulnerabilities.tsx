@@ -143,7 +143,7 @@ const Vulnerabilities: React.FC = () => {
       </div>
 
       {/* Chart + Donut row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <GlassCard variant="default" className="p-4 lg:col-span-2">
           <div className="flex gap-1 mb-3 bg-bg-base rounded-lg p-0.5 w-fit">
             {[
@@ -161,7 +161,7 @@ const Vulnerabilities: React.FC = () => {
         </GlassCard>
 
         <GlassCard variant="default" className="p-4 flex flex-col items-center justify-center">
-          <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold w-full mb-3">Severity</span>
+          <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold w-full mb-3">Severity</span>
           <DonutChart data={severityData} centerValue={openIssues} centerLabel="Open" size={130} innerRadius={40} outerRadius={60} showLegend />
         </GlassCard>
       </div>
@@ -178,8 +178,8 @@ const Vulnerabilities: React.FC = () => {
           <div className="flex items-center gap-3 text-xs text-text-muted">
             <span>{page * pageSize + 1}-{Math.min((page + 1) * pageSize, total)} of {total}</span>
             <div className="flex gap-1">
-              <button disabled={page === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[10px] disabled:opacity-30 hover:border-brand/20 transition-all">Prev</button>
-              <button disabled={(page + 1) * pageSize >= total} onClick={() => setPage(p => p + 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[10px] disabled:opacity-30 hover:border-brand/20 transition-all">Next</button>
+              <button disabled={page === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[11px] disabled:opacity-30 hover:border-brand/20 transition-all">Prev</button>
+              <button disabled={(page + 1) * pageSize >= total} onClick={() => setPage(p => p + 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[11px] disabled:opacity-30 hover:border-brand/20 transition-all">Next</button>
             </div>
           </div>
           <button className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-elevated outline-none transition-colors"><Filter size={14} /></button>
@@ -189,17 +189,17 @@ const Vulnerabilities: React.FC = () => {
       <div className="bg-bg-surface border border-border-subtle rounded-xl overflow-hidden flex flex-col min-h-[400px]">
         {isLoading ? <TableSkeleton columns={10} rows={pageSize} /> : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[1100px]">
+            <table className="w-full text-left border-collapse min-w-[650px]">
               <thead className="bg-bg-base/50">
                 <tr>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-10"><input type="checkbox" className="accent-brand" /></th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-20">Severity</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-[28%]">Endpoint</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-28">Timestamp</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-24">Category</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-[24%]">Summary</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-20">Status</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-24">Last Seen</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-10"><input type="checkbox" className="accent-brand" /></th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20">Severity</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-[28%]">Endpoint</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-28">Timestamp</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-24">Category</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-[24%]">Summary</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20">Status</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-24">Last Seen</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle">
@@ -215,11 +215,11 @@ const Vulnerabilities: React.FC = () => {
                           <span className="text-[12px] font-mono text-text-primary truncate">{row.url}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-[10px] font-mono text-text-muted">{formatTs(row.creationTime)}</td>
+                      <td className="px-4 py-3 text-[11px] font-mono text-text-muted">{formatTs(row.creationTime)}</td>
                       <td className="px-4 py-3 text-[11px] text-text-secondary">{row.testCategory}</td>
                       <td className="px-4 py-3 text-[11px] text-text-muted truncate">{row.testSubType}</td>
                       <td className="px-4 py-3"><StatusBadge status={mapStatus(row.issueStatus)} /></td>
-                      <td className="px-4 py-3 text-[10px] font-mono text-text-muted">{formatTs(row.lastSeen)}</td>
+                      <td className="px-4 py-3 text-[11px] font-mono text-text-muted">{formatTs(row.lastSeen)}</td>
                     </tr>
                   );
                 })}

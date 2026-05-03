@@ -1,6 +1,6 @@
 import pytest
 from httpx import AsyncClient
-import jwt
+from server.modules.auth.jwt_issuer import JWTIssuer
 
 @pytest.mark.asyncio
 async def test_jwt_none_algorithm_attack(client: AsyncClient):
@@ -22,42 +22,42 @@ async def test_jwt_none_algorithm_attack(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_bola_cross_tenant_isolation(client: AsyncClient):
-    # Tenant A
-    signup_a = await client.post("/api/auth/signup", json={
-        "email": "tenant_a@test.com", "password": "pass", "account_name": "TenantA"
+    token_a = JWTIssuer.create_access_token({
+        "sub": "tenant-a-admin",
+        "email": "tenant_a@test.com",
+        "account_id": 1000000,
+        "role": "ADMIN",
     })
-    token_a = signup_a.json()["access_token"]
-    
-    # Tenant B
-    signup_b = await client.post("/api/auth/signup", json={
-        "email": "tenant_b@test.com", "password": "pass", "account_name": "TenantB"
+    token_b = JWTIssuer.create_access_token({
+        "sub": "tenant-b-admin",
+        "email": "tenant_b@test.com",
+        "account_id": 2000000,
+        "role": "ADMIN",
     })
-    token_b = signup_b.json()["access_token"]
-    
-    # Tenant A creates an endpoint
-    ep_a = await client.post("/api/endpoints/", 
-                            headers={"Authorization": f"Bearer {token_a}"},
-                            json={"method": "GET", "path": "/a", "host": "h"})
+
+    ep_a = await client.post(
+        "/api/endpoints/",
+        headers={"Authorization": f"Bearer {token_a}"},
+        json={"method": "GET", "path": "/a", "host": "h"},
+    )
     ep_id_a = ep_a.json()["id"]
-    
-    # Tenant B tries to access Tenant A's endpoint
-    resp = await client.get(f"/api/endpoints/{ep_id_a}", 
-                            headers={"Authorization": f"Bearer {token_b}"})
-    # Should be 404 (not found) to not leak existence, or 403
-    # Based on our implementation, get_endpoint doesn't check account_id yet... 
-    # WAIT, I should check that.
+
+    resp = await client.get(
+        f"/api/endpoints/{ep_id_a}",
+        headers={"Authorization": f"Bearer {token_b}"},
+    )
     assert resp.status_code in (404, 403)
 
 @pytest.mark.asyncio
 async def test_mass_assignment_on_signup(client: AsyncClient):
-    # Try to signup as ADMIN directly
     resp = await client.post("/api/auth/signup", json={
         "email": "hacker@test.com",
-        "password": "pass",
+        "password": "StrongPass1234!",
         "account_name": "HackerCorp",
         "role": "SUPER_ADMIN" # Unauthorized field injection
     })
-    # Even if it succeeds, the role must be restricted or default
-    # Our implementation currently sets role="ADMIN" for the FIRST user 
-    # but we should ensure it doesn't just take whatever is in the body.
-    pass
+    assert resp.status_code == 200
+
+    profile = await client.get("/api/auth/me")
+    assert profile.status_code == 200
+    assert profile.json()["role"] == "ADMIN"

@@ -4,47 +4,57 @@ services:
   fastapi:
     build: .
     container_name: soc-fastapi
+    restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
       - ./server:/app/server
       - ./tests-library:/app/tests-library
     environment:
-      - APP_NAME=API Security Engine
-      - DEBUG=False
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/api_security
-      - REDIS_URL=redis://redis:6379/0
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-      - KAFKA_ENABLED=True
-      - CORAZA_URL=http://coraza:8080
-      - TESTS_LIBRARY_PATH=/app/tests-library
+      APP_NAME: API Security Engine
+      DEBUG: "false"
+      DATABASE_URL: postgresql+asyncpg://app_user:generated_secure_password_here@postgres:5432/api_security
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ENABLED: "true"
+      TESTS_LIBRARY_PATH: /app/tests-library
+      JWT_SECRET: change-this-compose-jwt-secret-to-32-plus-chars
+      API_KEY: change-this-compose-api-key
+      ENCRYPTION_KEY: change-this-compose-encryption-key-32-plus
+      CORS_ORIGINS_OVERRIDE: https://app.example.com
+      STARTUP_BOOTSTRAP_SCHEMA: "false"
+      STARTUP_ENABLE_DEMO_BOOTSTRAP: "false"
+      STARTUP_ENSURE_DEFAULT_PLAYBOOKS: "false"
+      STARTUP_ENABLE_ANALYTICS_PROCESSOR: "false"
+      STARTUP_ENABLE_ARCHIVER: "false"
+      UNIFIED_PIPELINE_MODE: shadow
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health/ready"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       kafka:
         condition: service_started
-    command: uvicorn server.api.main:app --host 0.0.0.0 --port 8000
+    command: /bin/sh -c "alembic upgrade head && uvicorn server.api.main:app --host 0.0.0.0 --port 8000"
 
   postgres:
     image: postgres:16-alpine
     container_name: soc-postgres
+    restart: unless-stopped
     environment:
-      - POSTGRES_USER=app_user
-      - POSTGRES_PASSWORD=generated_secure_password_here
-      - POSTGRES_DB=api_security
-    # ports:
-    #   - "5432:5432" # Keep internal to docker network
+      POSTGRES_USER: app_user
+      POSTGRES_PASSWORD: generated_secure_password_here
+      POSTGRES_DB: api_security
     volumes:
       - soc-postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app_user"]
+      test: ["CMD-SHELL", "pg_isready -U app_user -d api_security"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -52,14 +62,21 @@ services:
   redis:
     image: redis:7-alpine
     container_name: soc-redis
+    restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - soc-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   kafka:
     image: confluentinc/confluent-local:7.5.0
     container_name: soc-kafka
+    restart: unless-stopped
     ports:
       - "9092:9092"
       - "29092:29092"

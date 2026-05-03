@@ -1,17 +1,20 @@
-"""Sensor management — register nginx log-shipper agents, heartbeat, status monitoring."""
-import uuid
-import secrets
+"""Sensor management - register log-shipper agents, heartbeat, status monitoring."""
+
 import datetime
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+import secrets
+import uuid
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
-from server.modules.persistence.database import get_db
+
 from server.models.core import Sensor
+from server.modules.auth.rbac import require_admin
+from server.modules.persistence.database import AsyncSessionLocal, get_db
 
 router = APIRouter()
-ACCOUNT_ID   = 1000000
-OFFLINE_SECS = 120   # mark OFFLINE if no heartbeat in 2 min
+OFFLINE_SECS = 120
 
 
 class SensorRegister(BaseModel):
@@ -22,74 +25,90 @@ class SensorRegister(BaseModel):
 
 
 class HeartbeatBody(BaseModel):
-    lines_shipped:   int | None = None
+    lines_shipped: int | None = None
     events_detected: int | None = None
 
 
-async def _mark_stale_offline(db: AsyncSession):
-    """Background: mark sensors OFFLINE if no heartbeat in OFFLINE_SECS seconds."""
+async def _mark_stale_offline(db: AsyncSession, account_id: int) -> None:
+    """Mark sensors OFFLINE if no heartbeat arrived within OFFLINE_SECS."""
     cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=OFFLINE_SECS)
     result = await db.execute(
         select(Sensor).where(
-            Sensor.account_id == ACCOUNT_ID,
+            Sensor.account_id == account_id,
             Sensor.status == "ONLINE",
             Sensor.last_heartbeat < cutoff,
         )
     )
     stale = result.scalars().all()
-    for s in stale:
-        s.status = "OFFLINE"
+    for sensor in stale:
+        sensor.status = "OFFLINE"
     if stale:
         await db.commit()
 
 
+async def _mark_stale_offline_for_account(account_id: int) -> None:
+    async with AsyncSessionLocal() as db:
+        await _mark_stale_offline(db, account_id)
+
+
 @router.get("/")
-async def list_sensors(db: AsyncSession = Depends(get_db)):
-    await _mark_stale_offline(db)
+async def list_sensors(
+    payload: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    account_id = payload["account_id"]
+    await _mark_stale_offline(db, account_id)
     result = await db.execute(
-        select(Sensor).where(Sensor.account_id == ACCOUNT_ID).order_by(Sensor.created_at.desc())
+        select(Sensor).where(Sensor.account_id == account_id).order_by(Sensor.created_at.desc())
     )
     rows = result.scalars().all()
-    return [_serialize(r) for r in rows]
+    return [_serialize(row) for row in rows]
 
 
 @router.get("/summary")
-async def sensor_summary(db: AsyncSession = Depends(get_db)):
-    await _mark_stale_offline(db)
-    result = await db.execute(
-        select(Sensor).where(Sensor.account_id == ACCOUNT_ID)
-    )
+async def sensor_summary(
+    payload: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    account_id = payload["account_id"]
+    await _mark_stale_offline(db, account_id)
+    result = await db.execute(select(Sensor).where(Sensor.account_id == account_id))
     rows = result.scalars().all()
     return {
-        "total":          len(rows),
-        "online":         sum(1 for r in rows if r.status == "ONLINE"),
-        "offline":        sum(1 for r in rows if r.status == "OFFLINE"),
-        "degraded":       sum(1 for r in rows if r.status == "DEGRADED"),
-        "total_lines":    sum(r.lines_shipped for r in rows),
-        "total_events":   sum(r.events_detected for r in rows),
+        "total": len(rows),
+        "online": sum(1 for row in rows if row.status == "ONLINE"),
+        "offline": sum(1 for row in rows if row.status == "OFFLINE"),
+        "degraded": sum(1 for row in rows if row.status == "DEGRADED"),
+        "total_lines": sum(row.lines_shipped for row in rows),
+        "total_events": sum(row.events_detected for row in rows),
     }
 
 
 @router.post("/register")
-async def register_sensor(body: SensorRegister, db: AsyncSession = Depends(get_db)):
+async def register_sensor(
+    body: SensorRegister,
+    payload: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    account_id = payload["account_id"]
     sensor_key = secrets.token_hex(32)
     sensor = Sensor(
         id=str(uuid.uuid4()),
-        account_id=ACCOUNT_ID,
+        account_id=account_id,
         name=body.name,
         host=body.host,
         log_path=body.log_path,
         version=body.version,
         sensor_key=sensor_key,
-        status="OFFLINE",   # ONLINE only after first heartbeat
+        status="OFFLINE",
     )
     db.add(sensor)
     await db.commit()
     await db.refresh(sensor)
     return {
-        "sensor_id":    sensor.id,
-        "sensor_key":   sensor_key,
-        "ingest_url":   "/api/stream/ingest",
+        "sensor_id": sensor.id,
+        "sensor_key": sensor_key,
+        "ingest_url": "/api/stream/ingest",
         "heartbeat_url": f"/api/sensors/{sensor_key}/heartbeat",
         "usage": (
             f"python log_shipper.py --key {sensor_key} "
@@ -105,9 +124,7 @@ async def heartbeat(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Sensor).where(Sensor.sensor_key == sensor_key)
-    )
+    result = await db.execute(select(Sensor).where(Sensor.sensor_key == sensor_key))
     sensor = result.scalar_one_or_none()
     if not sensor:
         raise HTTPException(status_code=404, detail="Sensor not found")
@@ -120,18 +137,13 @@ async def heartbeat(
         sensor.events_detected = body.events_detected
 
     await db.commit()
-
-    # Background: stale check
-    background_tasks.add_task(_mark_stale_offline, db)
-
+    background_tasks.add_task(_mark_stale_offline_for_account, sensor.account_id)
     return {"status": "ok", "sensor_id": sensor.id}
 
 
 @router.get("/{sensor_key}/status")
 async def sensor_status(sensor_key: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Sensor).where(Sensor.sensor_key == sensor_key)
-    )
+    result = await db.execute(select(Sensor).where(Sensor.sensor_key == sensor_key))
     sensor = result.scalar_one_or_none()
     if not sensor:
         raise HTTPException(status_code=404, detail="Sensor not found")
@@ -139,9 +151,14 @@ async def sensor_status(sensor_key: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/{sensor_id}")
-async def deregister_sensor(sensor_id: str, db: AsyncSession = Depends(get_db)):
+async def deregister_sensor(
+    sensor_id: str,
+    payload: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    account_id = payload["account_id"]
     result = await db.execute(
-        select(Sensor).where(Sensor.id == sensor_id, Sensor.account_id == ACCOUNT_ID)
+        select(Sensor).where(Sensor.id == sensor_id, Sensor.account_id == account_id)
     )
     sensor = result.scalar_one_or_none()
     if not sensor:
@@ -151,16 +168,16 @@ async def deregister_sensor(sensor_id: str, db: AsyncSession = Depends(get_db)):
     return {"status": "deregistered", "id": sensor_id}
 
 
-def _serialize(r: Sensor) -> dict:
+def _serialize(sensor: Sensor) -> dict:
     return {
-        "id":               r.id,
-        "name":             r.name,
-        "host":             r.host,
-        "log_path":         r.log_path,
-        "version":          r.version,
-        "status":           r.status,
-        "lines_shipped":    r.lines_shipped,
-        "events_detected":  r.events_detected,
-        "last_heartbeat":   r.last_heartbeat.isoformat() if r.last_heartbeat else None,
-        "created_at":       r.created_at.isoformat() if r.created_at else None,
+        "id": sensor.id,
+        "name": sensor.name,
+        "host": sensor.host,
+        "log_path": sensor.log_path,
+        "version": sensor.version,
+        "status": sensor.status,
+        "lines_shipped": sensor.lines_shipped,
+        "events_detected": sensor.events_detected,
+        "last_heartbeat": sensor.last_heartbeat.isoformat() if sensor.last_heartbeat else None,
+        "created_at": sensor.created_at.isoformat() if sensor.created_at else None,
     }

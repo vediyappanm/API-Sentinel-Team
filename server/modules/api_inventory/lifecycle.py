@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import datetime
-import logging
+from collections import defaultdict
 
-from sqlalchemy import update, and_, select, func
+import structlog
+from sqlalchemy import update, and_, select
 
 from server.config import settings
 from server.modules.persistence.database import AsyncSessionLocal
@@ -15,7 +16,19 @@ from server.models.core import EvidenceRecord, PolicyViolation
 from server.models.core import Alert
 from server.modules.response.playbook_executor import execute_playbooks
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
+
+
+def _as_utc_naive(value: datetime.datetime | None) -> datetime.datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+
+
+def _threshold_utc_naive() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
 
 class EndpointLifecycleProcessor:
@@ -32,75 +45,74 @@ class EndpointLifecycleProcessor:
 
     async def stop(self) -> None:
         self._running = False
-        if self._task:
-            self._task.cancel()
-            self._task = None
+        task = self._task
+        self._task = None
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     async def _loop(self) -> None:
-        while self._running:
-            try:
-                await self._sweep()
-            except Exception as exc:
-                logger.error("lifecycle_sweep_error", error=str(exc))
-            await asyncio.sleep(self.interval)
+        try:
+            while self._running:
+                try:
+                    await self._sweep()
+                except Exception as exc:
+                    logger.error("lifecycle_sweep_error: %s", exc)
+                await asyncio.sleep(self.interval)
+        except asyncio.CancelledError:
+            logger.info("lifecycle_loop_cancelled")
 
     async def _sweep(self) -> None:
-        threshold = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
-            days=settings.ZOMBIE_ENDPOINT_DAYS
-        )
+        threshold = _threshold_utc_naive() - datetime.timedelta(days=settings.ZOMBIE_ENDPOINT_DAYS)
         async with AsyncSessionLocal() as db:
-            zombie_counts = await db.execute(
-                select(APIEndpoint.account_id, func.count(APIEndpoint.id))
-                .where(
+            endpoint_rows = await db.execute(
+                select(APIEndpoint).where(
                     and_(
                         APIEndpoint.last_seen.isnot(None),
-                        APIEndpoint.last_seen < threshold,
-                        APIEndpoint.status != "ZOMBIE",
                         APIEndpoint.status != "DEPRECATED",
                     )
                 )
-                .group_by(APIEndpoint.account_id)
             )
-            zombie_map = {row[0]: row[1] for row in zombie_counts.all()}
+            endpoints = endpoint_rows.scalars().all()
 
-            revive_counts = await db.execute(
-                select(APIEndpoint.account_id, func.count(APIEndpoint.id))
-                .where(
-                    and_(
-                        APIEndpoint.last_seen.isnot(None),
-                        APIEndpoint.last_seen >= threshold,
-                        APIEndpoint.status == "ZOMBIE",
-                    )
-                )
-                .group_by(APIEndpoint.account_id)
-            )
-            revive_map = {row[0]: row[1] for row in revive_counts.all()}
+            zombie_ids: list[str] = []
+            revive_ids: list[str] = []
+            zombie_map: dict[int, int] = defaultdict(int)
+            revive_map: dict[int, int] = defaultdict(int)
+
+            for endpoint in endpoints:
+                last_seen = _as_utc_naive(endpoint.last_seen)
+                if last_seen is None:
+                    continue
+                if endpoint.status == "ZOMBIE":
+                    if last_seen >= threshold:
+                        revive_ids.append(endpoint.id)
+                        revive_map[endpoint.account_id] += 1
+                    continue
+                if last_seen < threshold:
+                    zombie_ids.append(endpoint.id)
+                    zombie_map[endpoint.account_id] += 1
 
             # Mark inactive endpoints as zombie
-            result = await db.execute(
-                update(APIEndpoint)
-                .where(
-                    and_(
-                        APIEndpoint.last_seen.isnot(None),
-                        APIEndpoint.last_seen < threshold,
-                        APIEndpoint.status != "ZOMBIE",
-                        APIEndpoint.status != "DEPRECATED",
-                    )
+            zombie_count = 0
+            if zombie_ids:
+                result = await db.execute(
+                    update(APIEndpoint)
+                    .where(APIEndpoint.id.in_(zombie_ids))
+                    .execution_options(synchronize_session=False)
+                    .values(status="ZOMBIE")
                 )
-                .values(status="ZOMBIE")
-            )
-            zombie_count = result.rowcount or 0
+                zombie_count = result.rowcount or 0
 
             if zombie_count:
                 # Add evidence records for newly zombified endpoints (sampled by threshold)
                 candidates = await db.execute(
-                    select(APIEndpoint).where(
-                        and_(
-                            APIEndpoint.last_seen.isnot(None),
-                            APIEndpoint.last_seen < threshold,
-                            APIEndpoint.status == "ZOMBIE",
-                        )
-                    ).limit(200)
+                    select(APIEndpoint)
+                    .where(APIEndpoint.id.in_(zombie_ids))
+                    .limit(200)
                 )
                 for ep in candidates.scalars().all():
                     db.add(EvidenceRecord(
@@ -138,18 +150,15 @@ class EndpointLifecycleProcessor:
                         ))
 
             # Revive zombie endpoints if traffic resumes
-            result = await db.execute(
-                update(APIEndpoint)
-                .where(
-                    and_(
-                        APIEndpoint.last_seen.isnot(None),
-                        APIEndpoint.last_seen >= threshold,
-                        APIEndpoint.status == "ZOMBIE",
-                    )
+            revived_count = 0
+            if revive_ids:
+                result = await db.execute(
+                    update(APIEndpoint)
+                    .where(APIEndpoint.id.in_(revive_ids))
+                    .execution_options(synchronize_session=False)
+                    .values(status="ACTIVE")
                 )
-                .values(status="ACTIVE")
-            )
-            revived_count = result.rowcount or 0
+                revived_count = result.rowcount or 0
 
             await db.commit()
 

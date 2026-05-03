@@ -1,5 +1,6 @@
+from sqlalchemy import event, inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from sqlalchemy import text
+from sqlalchemy.orm import Session
 from server.config import settings
 from server.modules.tenancy.context import get_current_account_id
 
@@ -36,6 +37,32 @@ ReadOnlySessionLocal = async_sessionmaker(
     autocommit=False,
     expire_on_commit=False,
 )
+
+
+def _validate_account_scoped_models(session: Session, flush_context, instances) -> None:
+    for obj in list(session.new) + list(session.dirty):
+        if obj in session.deleted:
+            continue
+
+        mapper = inspect(obj).mapper
+        if "account_id" not in mapper.columns:
+            continue
+
+        account_id = getattr(obj, "account_id", None)
+        cls_name = obj.__class__.__name__
+
+        if cls_name == "WarmExportCursor":
+            if account_id is None or int(account_id) < 0:
+                raise ValueError(f"{cls_name}.account_id must be >= 0")
+            continue
+
+        if account_id is None:
+            raise ValueError(f"{cls_name}.account_id is required")
+        if int(account_id) <= 0:
+            raise ValueError(f"{cls_name}.account_id must be > 0")
+
+
+event.listen(Session, "before_flush", _validate_account_scoped_models)
 
 async def get_db():
     async with AsyncSessionLocal() as session:

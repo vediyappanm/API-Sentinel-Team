@@ -1,9 +1,13 @@
+
 """Akto-compatible admin API shims — maps Akto-style POST endpoints to our data."""
 import time
 import random
 import datetime
 import logging
+import hashlib
+import secrets
 from fastapi import APIRouter, Depends, Body
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -11,44 +15,202 @@ from server.modules.persistence.database import get_db
 from server.models.core import (
     User, AuditLog, WAFEvent, ThreatConfig,
     ThreatActor, MaliciousEvent, APICollection, APIEndpoint,
-    Vulnerability, RequestLog, MaliciousEventRecord,
+    Vulnerability, RequestLog, MaliciousEventRecord, Sensor, Account, AccountSetting, ApiToken,
+    PolicyViolation, SampleData,
 )
-from server.modules.auth.rbac import RBAC
+from server.modules.auth.rbac import RBAC, Permission, require_admin
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-# ── Module / System Health ────────────────────────────────────────────────────
+class CreateApiKeyRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    scopes: list[str] = Field(default_factory=list)
+    expiresInDays: int | None = Field(default=90, ge=1, le=3650)
 
-@router.post("/fetchModuleInfo")
-async def fetch_module_info(payload: dict = Depends(RBAC.require_auth)):
-    """Returns a single 'runtime' module representing this FastAPI server instance."""
+
+def _deep_merge(base: dict, patch: dict) -> dict:
+    merged = dict(base)
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _license_defaults(plan_tier: str | None) -> dict:
+    normalized = (plan_tier or "FREE").upper()
+    envelopes = {
+        "FREE": {"applicationsPurchased": 2, "endpointAllowance": 500, "sensorAllowance": 1},
+        "GROWTH": {"applicationsPurchased": 10, "endpointAllowance": 5000, "sensorAllowance": 5},
+        "ENTERPRISE": {"applicationsPurchased": 50, "endpointAllowance": 100000, "sensorAllowance": 50},
+    }
+    envelope = envelopes.get(normalized, envelopes["FREE"])
     return {
-        "moduleInfos": [
-            {
-                "id": "api-sentinel-runtime",
-                "moduleName": "API Sentinel Runtime",
-                "currentVersion": "1.0.0",
-                "lastHeartbeat": int(time.time() * 1000),
-                "lastMirrored": int(time.time() * 1000),
-                "state": "RUNNING",
-                "isConnected": True,
-                "hostName": "localhost",
-                "ipAddress": "127.0.0.1",
-                "policyVersion": "1",
-            }
-        ]
+        "planTier": normalized,
+        "applicationsPurchased": envelope["applicationsPurchased"],
+        "endpointAllowance": envelope["endpointAllowance"],
+        "sensorAllowance": envelope["sensorAllowance"],
+        "expiresOn": None,
     }
 
 
+async def _build_account_settings(account_id: int, db: AsyncSession) -> dict:
+    account = (await db.execute(select(Account).where(Account.id == account_id))).scalar_one_or_none()
+    row = (await db.execute(select(AccountSetting).where(AccountSetting.account_id == account_id))).scalar_one_or_none()
+
+    app_count = (await db.execute(
+        select(func.count()).select_from(APICollection).where(APICollection.account_id == account_id)
+    )).scalar() or 0
+    endpoint_count = (await db.execute(
+        select(func.count()).select_from(APIEndpoint).where(APIEndpoint.account_id == account_id)
+    )).scalar() or 0
+    sensor_count = (await db.execute(
+        select(func.count()).select_from(Sensor).where(Sensor.account_id == account_id)
+    )).scalar() or 0
+    policy_count = (await db.execute(
+        select(func.count()).select_from(PolicyViolation).where(PolicyViolation.account_id == account_id)
+    )).scalar() or 0
+    sample_count = (await db.execute(
+        select(func.count()).select_from(SampleData).where(SampleData.account_id == account_id)
+    )).scalar() or 0
+
+    defaults = {
+        "deployment": {
+            "mode": "saas",
+            "runtimeProfile": "kubernetes",
+            "inlineProtection": False,
+        },
+        "traffic": {
+            "source": "nginx",
+            "collectorUrl": "",
+            "controllerUrl": "",
+        },
+        "applicationDefaults": {
+            "environment": "production",
+            "businessUnit": "Core Platform",
+            "assignedUsers": [],
+        },
+        "identity": {
+            "authHeader": "authorization",
+            "sessionKey": "x-session-id",
+            "userIdKey": "x-user-id",
+            "userRoleKey": "x-user-role",
+            "tenantKey": "x-tenant-id",
+        },
+        "featureEnvelope": {
+            "discovery": True,
+            "behavioralTesting": True,
+            "realtimeProtection": True,
+            "reporting": True,
+        },
+        "onboarding": {
+            "completed": False,
+            "currentStep": "deployment",
+            "completedSteps": [],
+            "validation": {
+                "controllerHealthy": sensor_count > 0,
+                "trafficSeen": sample_count > 0,
+                "inventoryVisible": endpoint_count > 0,
+                "policiesEnabled": policy_count > 0,
+            },
+        },
+        "license": _license_defaults(account.plan_tier if account else "FREE"),
+    }
+    merged = _deep_merge(defaults, row.settings if row and row.settings else {})
+    merged["license"] = {
+        **merged.get("license", {}),
+        "planTier": (account.plan_tier if account else merged.get("license", {}).get("planTier", "FREE")).upper(),
+        "applicationsUsed": app_count,
+        "endpointUsage": endpoint_count,
+        "sensorUsage": sensor_count,
+    }
+    onboarding_settings = merged.get("onboarding", {})
+    merged["onboarding"] = {
+        **onboarding_settings,
+        "validation": {
+            **{
+                "controllerHealthy": sensor_count > 0,
+                "trafficSeen": sample_count > 0,
+                "inventoryVisible": endpoint_count > 0,
+                "policiesEnabled": policy_count > 0,
+            },
+            **(onboarding_settings.get("validation") or {}),
+        },
+    }
+    return merged
+
+
+def _api_key_summary(token: ApiToken) -> dict:
+    return {
+        "id": token.id,
+        "name": token.name,
+        "reference": f"key_{token.id[-6:]}",
+        "scopes": token.scopes or [],
+        "createdAt": token.created_at.isoformat() if token.created_at else None,
+        "expiresAt": token.expires_at.isoformat() if token.expires_at else None,
+        "createdBy": token.user_id,
+        "status": "EXPIRED" if token.expires_at and token.expires_at <= datetime.datetime.utcnow() else "ACTIVE",
+    }
+
+
+# ── Module / System Health ────────────────────────────────────────────────────
+
+@router.post("/fetchModuleInfo")
+async def fetch_module_info(
+    payload: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns runtime module + all registered sensors from DB."""
+    account_id = payload.get("account_id")
+    modules = [
+        {
+            "id": "api-sentinel-runtime",
+            "moduleName": "API Sentinel Runtime",
+            "currentVersion": "1.0.0",
+            "lastHeartbeat": int(time.time() * 1000),
+            "lastMirrored": int(time.time() * 1000),
+            "state": "RUNNING",
+            "isConnected": True,
+            "hostName": "localhost",
+            "ipAddress": "127.0.0.1",
+            "policyVersion": "1",
+        }
+    ]
+
+    result = await db.execute(select(Sensor).where(Sensor.account_id == account_id))
+    sensors = result.scalars().all()
+    now = time.time()
+    for s in sensors:
+        hb_ts = s.last_heartbeat.timestamp() if s.last_heartbeat else 0
+        # Consider sensor ONLINE if heartbeat within last 60 seconds
+        is_online = (now - hb_ts) < 60
+        modules.append({
+            "id": s.id,
+            "moduleName": f"eBPF Sensor — {s.name}",
+            "currentVersion": s.version or "v1",
+            "lastHeartbeat": int(hb_ts * 1000),
+            "lastMirrored": int(hb_ts * 1000),
+            "state": "RUNNING" if is_online else "STOPPED",
+            "isConnected": is_online,
+            "hostName": s.name,
+            "ipAddress": s.host or "-",
+            "policyVersion": "1",
+            "linesShipped": s.lines_shipped or 0,
+        })
+
+    return {"moduleInfos": modules}
+
+
 @router.post("/rebootModules")
-async def reboot_modules(payload: dict = Depends(RBAC.require_auth)):
+async def reboot_modules(payload: dict = Depends(require_admin)):
     return {"success": True}
 
 
 @router.post("/deleteModuleInfo")
-async def delete_module_info(payload: dict = Depends(RBAC.require_auth)):
+async def delete_module_info(payload: dict = Depends(require_admin)):
     return {"success": True}
 
 
@@ -56,7 +218,7 @@ async def delete_module_info(payload: dict = Depends(RBAC.require_auth)):
 
 @router.post("/getTeamData")
 async def get_team_data(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload["account_id"]
@@ -65,10 +227,12 @@ async def get_team_data(
     return {
         "users": [
             {
+                "id": u.id,
                 "login": u.email,
                 "name": u.email.split("@")[0],
                 "role": u.role,
                 "lastLoginTs": int(time.time() * 1000),
+                "createdAt": str(u.created_at) if u.created_at else None,
             }
             for u in users
         ],
@@ -77,7 +241,7 @@ async def get_team_data(
 
 
 @router.post("/getCustomRoles")
-async def get_custom_roles(payload: dict = Depends(RBAC.require_auth)):
+async def get_custom_roles(payload: dict = Depends(require_admin)):
     return {
         "customRoles": [
             {"name": r} for r in
@@ -87,17 +251,19 @@ async def get_custom_roles(payload: dict = Depends(RBAC.require_auth)):
 
 
 @router.post("/createCustomRole")
-async def create_custom_role(payload: dict = Depends(RBAC.require_auth)):
+async def create_custom_role(payload: dict = Depends(require_admin)):
     return {"success": True}
 
 
 @router.post("/removeUser")
 async def remove_user(
     email: str = Body(..., embed=True),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(User).where(User.email == email))
+    result = await db.execute(
+        select(User).where(User.email == email, User.account_id == payload["account_id"])
+    )
     user = result.scalar_one_or_none()
     if user:
         await db.delete(user)
@@ -111,7 +277,7 @@ async def remove_user(
 async def fetch_audit_data(
     skip: int = Body(0),
     limit: int = Body(50),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.AUDIT_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload["account_id"]
@@ -144,12 +310,99 @@ async def fetch_audit_data(
 # ── Account Settings ──────────────────────────────────────────────────────────
 
 @router.post("/getAccountSettingsForAdvancedFilters")
-async def get_account_settings(payload: dict = Depends(RBAC.require_auth)):
-    return {"accountSettings": {}}
+async def get_account_settings(
+    payload: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    settings = await _build_account_settings(payload["account_id"], db)
+    return {"accountSettings": settings}
 
 
 @router.post("/modifyAccountSettings")
-async def modify_account_settings(payload: dict = Depends(RBAC.require_auth)):
+async def modify_account_settings(
+    settings_patch: dict = Body(default_factory=dict),
+    payload: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    account_id = payload["account_id"]
+    row = (
+        await db.execute(select(AccountSetting).where(AccountSetting.account_id == account_id))
+    ).scalar_one_or_none()
+    if row:
+        row.settings = _deep_merge(row.settings or {}, settings_patch)
+    else:
+        row = AccountSetting(account_id=account_id, settings=settings_patch)
+        db.add(row)
+
+    await db.commit()
+    merged = await _build_account_settings(account_id, db)
+    return {"success": True, "accountSettings": merged}
+
+
+@router.post("/getApiKeys")
+async def get_api_keys(
+    payload: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ApiToken)
+        .where(ApiToken.account_id == payload["account_id"])
+        .order_by(ApiToken.created_at.desc())
+    )
+    tokens = result.scalars().all()
+    return {"apiKeys": [_api_key_summary(token) for token in tokens]}
+
+
+@router.post("/createApiKey")
+async def create_api_key(
+    req: CreateApiKeyRequest,
+    payload: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    raw_token = f"ask_{secrets.token_urlsafe(32)}"
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    created_by = payload.get("sub") or payload.get("user_id") or "system"
+    expires_at = None
+    if req.expiresInDays:
+        expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=req.expiresInDays)
+
+    token = ApiToken(
+        user_id=created_by,
+        account_id=payload["account_id"],
+        name=req.name.strip(),
+        token_hash=token_hash,
+        scopes=req.scopes,
+        expires_at=expires_at,
+    )
+    db.add(token)
+    await db.commit()
+    await db.refresh(token)
+
+    return {
+        "apiKey": _api_key_summary(token),
+        "token": raw_token,
+    }
+
+
+@router.post("/revokeApiKey")
+async def revoke_api_key(
+    apiKeyId: str = Body(..., embed=True),
+    payload: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    token = (
+        await db.execute(
+            select(ApiToken).where(
+                ApiToken.id == apiKeyId,
+                ApiToken.account_id == payload["account_id"],
+            )
+        )
+    ).scalar_one_or_none()
+    if not token:
+        return {"success": True}
+
+    await db.delete(token)
+    await db.commit()
     return {"success": True}
 
 
@@ -162,6 +415,7 @@ async def get_all_traffic_alerts(
 ):
     result = await db.execute(
         select(WAFEvent)
+        .where(WAFEvent.account_id == payload["account_id"])
         .order_by(WAFEvent.created_at.desc())
         .limit(50)
     )
@@ -207,7 +461,7 @@ async def fetch_threat_configuration(
 
 
 @router.post("/modifyThreatConfiguration")
-async def modify_threat_configuration(payload: dict = Depends(RBAC.require_auth)):
+async def modify_threat_configuration(payload: dict = Depends(require_admin)):
     return {"success": True}
 
 
@@ -215,7 +469,7 @@ async def modify_threat_configuration(payload: dict = Depends(RBAC.require_auth)
 
 @router.post("/seed-demo")
 async def seed_demo_data(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Populate the database with realistic mock data for UI demonstration."""
@@ -285,10 +539,14 @@ async def seed_demo_data(
     actors = []
     for ip in _IPS:
         existing = (await db.execute(
-            select(ThreatActor).where(ThreatActor.source_ip == ip)
+            select(ThreatActor).where(
+                ThreatActor.source_ip == ip,
+                ThreatActor.account_id == account_id,
+            )
         )).scalar_one_or_none()
         if not existing:
             actor = ThreatActor(
+                account_id=account_id,
                 source_ip=ip,
                 status=random.choice(["MONITORING", "MONITORING", "BLOCKED", "WHITELISTED"]),
                 event_count=random.randint(3, 120),

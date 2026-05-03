@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import structlog
 from typing import Dict, Any
 
 from sqlalchemy import select
@@ -17,7 +18,7 @@ from server.modules.response.playbook_executor import execute_playbooks
 from server.models.core import ReconSourceConfig, Alert
 from server.modules.tenancy.context import set_current_account_id
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class ReconSourceRunner:

@@ -29,4 +29,13 @@ jobs:
         run: |
           helm upgrade --install api-sentinel infra/helm/api-sentinel \
             --set image.repository=ghcr.io/${{ github.repository }}/api-sentinel \
-            --set image.tag=${{ github.sha }}
+            --set image.tag=${{ github.sha }} \
+            --set-string secrets.databaseUrl=${{ secrets.DATABASE_URL }} \
+            --set-string secrets.redisUrl=${{ secrets.REDIS_URL }} \
+            --set-string secrets.kafkaBootstrapServers=${{ secrets.KAFKA_BOOTSTRAP }} \
+            --set-string secrets.jwtSecret=${{ secrets.JWT_SECRET }} \
+            --set-string secrets.apiKey=${{ secrets.API_KEY }} \
+            --set-string secrets.encryptionKey=${{ secrets.ENCRYPTION_KEY }} \
+            --set-string env.CORS_ORIGINS_OVERRIDE=${{ secrets.CORS_ORIGINS_OVERRIDE }} \
+            --set externalServices.s3Bucket=${{ secrets.ARCHIVE_BUCKET }} \
+            --set externalServices.s3Region=${{ secrets.ARCHIVE_REGION }}

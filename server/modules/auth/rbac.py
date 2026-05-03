@@ -108,8 +108,10 @@ class RBAC:
     @staticmethod
     async def require_auth(request: Request, token: Optional[HTTPAuthorizationCredentials] = Security(auth_scheme)) -> dict:
         token_str = None
-        if token:
+        if token and hasattr(token, "credentials"):
             token_str = token.credentials
+        elif request.headers.get("authorization", "").lower().startswith("bearer "):
+            token_str = request.headers.get("authorization", "").split(" ", 1)[1].strip()
         elif "access_token" in request.cookies:
             token_str = request.cookies["access_token"]
             

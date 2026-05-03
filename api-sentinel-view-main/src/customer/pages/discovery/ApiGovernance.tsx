@@ -102,25 +102,25 @@ const ApiGovernance: React.FC = () => {
       <GlassCard variant="default" className="p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-xs font-bold text-text-primary uppercase tracking-wider">Governance Highlights</h3>
-          <span className="text-[10px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-border-subtle">
+          <span className="text-[11px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-border-subtle">
             Evidence-first - Redact-by-default
           </span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="metric-card p-3">
-            <p className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">Policy Coverage</p>
+            <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Policy Coverage</p>
             <p className="text-xl font-bold text-text-primary tabular-nums">{policyCoverage}%</p>
-            <p className="text-[10px] text-text-muted">Auth, PII, rate-limit, drift</p>
+            <p className="text-[11px] text-text-muted">Auth, PII, rate-limit, drift</p>
           </div>
           <div className="metric-card p-3">
-            <p className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">Schema Drift</p>
+            <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Schema Drift</p>
             <p className="text-xl font-bold text-sev-critical tabular-nums">{counts.sev.major + counts.sev.critical}</p>
-            <p className="text-[10px] text-text-muted">Breaking changes flagged</p>
+            <p className="text-[11px] text-text-muted">Breaking changes flagged</p>
           </div>
           <div className="metric-card p-3">
-            <p className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">MCP Policies</p>
+            <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">MCP Policies</p>
             <p className="text-xl font-bold text-brand tabular-nums">{counts.sev.info}</p>
-            <p className="text-[10px] text-text-muted">Tool & trust-chain checks</p>
+            <p className="text-[11px] text-text-muted">Tool & trust-chain checks</p>
           </div>
         </div>
       </GlassCard>
@@ -149,34 +149,34 @@ const ApiGovernance: React.FC = () => {
         <div className="p-3 border-b border-border-subtle flex items-center justify-between">
           <span className="text-sm font-bold text-text-primary flex items-center gap-2">
             Governance Events
-            <span className="text-[10px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted flex items-center gap-1">
+            <span className="text-[11px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted flex items-center gap-1">
               <Calendar size={10} /> Last 90 days
             </span>
           </span>
           <div className="flex items-center gap-3 text-xs text-text-muted">
             <span>{page * pageSize + 1} - {Math.min((page + 1) * pageSize, total)} of {total}</span>
             <div className="flex gap-1">
-              <button disabled={page === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[10px] disabled:opacity-30 hover:border-brand/20 transition-all">Prev</button>
-              <button disabled={(page + 1) * pageSize >= total} onClick={() => setPage(p => p + 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[10px] disabled:opacity-30 hover:border-brand/20 transition-all">Next</button>
+              <button disabled={page === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[11px] disabled:opacity-30 hover:border-brand/20 transition-all">Prev</button>
+              <button disabled={(page + 1) * pageSize >= total} onClick={() => setPage(p => p + 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[11px] disabled:opacity-30 hover:border-brand/20 transition-all">Next</button>
             </div>
           </div>
         </div>
 
         {isLoading ? <TableSkeleton columns={8} rows={pageSize} /> : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse table-fixed min-w-[1100px]">
+            <table className="w-full text-left border-collapse table-fixed min-w-[650px]">
               <thead className="bg-bg-base/50">
                 <tr>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-10 text-center">
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-10 text-center">
                     <input type="checkbox" className="accent-brand" />
                   </th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Severity</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-[28%]">Endpoint</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-28 text-center">Timestamp</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-24">Sub Category</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-[28%]">Summary</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Status</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-16 text-center">ID</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Severity</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-[28%]">Endpoint</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-28 text-center">Timestamp</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-24">Sub Category</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-[28%]">Summary</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Status</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-16 text-center">ID</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle">
@@ -192,17 +192,17 @@ const ApiGovernance: React.FC = () => {
                           <span className="text-[12px] font-mono text-text-primary truncate">{row.url}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-[10px] font-mono text-text-muted text-center">{formatTs(row.timestamp)}</td>
+                      <td className="px-4 py-3 text-[11px] font-mono text-text-muted text-center">{formatTs(row.timestamp)}</td>
                       <td className="px-4 py-3 text-[11px] text-text-secondary">{row.subCategory}</td>
                       <td className="px-4 py-3 text-[11px] text-text-muted truncate" title={row.description}>{row.description}</td>
                       <td className="px-4 py-3 text-center">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
                           row.status === 'OPEN' ? 'bg-sev-critical/10 text-sev-critical border border-sev-critical/20' : 'bg-sev-low/10 text-sev-low border border-sev-low/20'
                         }`}>
                           {row.status === 'OPEN' ? 'Open' : row.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-[10px] font-mono text-text-muted text-center">{row.eventId}</td>
+                      <td className="px-4 py-3 text-[11px] font-mono text-text-muted text-center">{row.eventId}</td>
                     </tr>
                   );
                 })}

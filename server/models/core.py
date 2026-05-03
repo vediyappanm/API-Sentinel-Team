@@ -66,6 +66,85 @@ class TestAccount(Base):
     created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AuthProfile(Base):
+    """Reusable authentication profile for pentest orchestration and authenticated scans."""
+    __tablename__ = "auth_profiles"
+    __table_args__ = (
+        UniqueConstraint("account_id", "name", name="uq_auth_profiles_account_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(String, nullable=True)
+    auth_mode: Mapped[str] = mapped_column(String(50), default="header")  # header|bearer|basic|cookie|dynamic_bearer
+    header_name: Mapped[str] = mapped_column(String(100), nullable=True)
+    header_value: Mapped[str] = mapped_column(Text, nullable=True)
+    token: Mapped[str] = mapped_column(Text, nullable=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=True)
+    password: Mapped[str] = mapped_column(String(255), nullable=True)
+    cookie_name: Mapped[str] = mapped_column(String(100), nullable=True)
+    cookie_value: Mapped[str] = mapped_column(Text, nullable=True)
+    cookies: Mapped[list] = mapped_column(JSON, default=list)
+    static_headers: Mapped[dict] = mapped_column(JSON, default=dict)
+    login_url: Mapped[str] = mapped_column(String, nullable=True)
+    login_method: Mapped[str] = mapped_column(String(10), default="POST")
+    login_payload: Mapped[dict] = mapped_column(JSON, nullable=True)
+    login_headers: Mapped[dict] = mapped_column(JSON, default=dict)
+    token_json_path: Mapped[str] = mapped_column(String(255), nullable=True)
+    dynamic_template_path: Mapped[str] = mapped_column(String, nullable=True)
+    openapi_security_scheme: Mapped[str] = mapped_column(String(100), nullable=True)
+    scope_domains: Mapped[list] = mapped_column(JSON, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PentestProfile(Base):
+    """Policy bundle for production-safe pentest execution."""
+    __tablename__ = "pentest_profiles"
+    __table_args__ = (
+        UniqueConstraint("account_id", "name", name="uq_pentest_profiles_account_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(String, nullable=True)
+    mode: Mapped[str] = mapped_column(String(20), default="SAFE")  # SAFE|BALANCED|AGGRESSIVE
+    allow_state_change: Mapped[bool] = mapped_column(Boolean, default=False)
+    follow_redirects: Mapped[bool] = mapped_column(Boolean, default=False)
+    max_concurrency: Mapped[int] = mapped_column(Integer, default=5)
+    request_timeout_seconds: Mapped[int] = mapped_column(Integer, default=15)
+    auth_profile_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    attacker_role: Mapped[str] = mapped_column(String(50), default="ATTACKER")
+    schemathesis_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    schemathesis_stateful: Mapped[bool] = mapped_column(Boolean, default=True)
+    schemathesis_max_examples: Mapped[int] = mapped_column(Integer, default=25)
+    schemathesis_workers: Mapped[int] = mapped_column(Integer, default=2)
+    nuclei_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    nuclei_include_dast: Mapped[bool] = mapped_column(Boolean, default=False)
+    nuclei_template_tags: Mapped[list] = mapped_column(JSON, default=list)
+    zap_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PentestArtifact(Base):
+    """Generated pentest material such as configs, secret files, and run summaries."""
+    __tablename__ = "pentest_artifacts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    run_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    pentest_profile_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    artifact_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=True)
+    content_text: Mapped[str] = mapped_column(Text, nullable=True)
+    content_json: Mapped[dict] = mapped_column(JSON, nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Vulnerability(Base):
     __tablename__ = "vulnerabilities"
 
@@ -195,10 +274,13 @@ class WAFEvent(Base):
 
 class ThreatActor(Base):
     __tablename__ = "threat_actors"
+    __table_args__ = (
+        UniqueConstraint("account_id", "source_ip", name="uq_threat_actors_account_source_ip"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
-    source_ip: Mapped[str] = mapped_column(String(45), unique=True)
+    source_ip: Mapped[str] = mapped_column(String(45))
     status: Mapped[str] = mapped_column(String(20), default="MONITORING")
     event_count: Mapped[int] = mapped_column(Integer, default=0)
     risk_score: Mapped[float] = mapped_column(Float, default=0.0)
@@ -235,6 +317,17 @@ class Account(Base):
     name: Mapped[str] = mapped_column(String(255))
     plan_tier: Mapped[str] = mapped_column(String(50), default="FREE")
     created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AccountSetting(Base):
+    """Persistent organization-level onboarding, identity, and license settings."""
+    __tablename__ = "account_settings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, unique=True)
+    settings: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class User(Base):
@@ -513,10 +606,13 @@ class AgenticSession(Base):
     Tracks multi-turn LLM/agent conversations for threat analysis.
     """
     __tablename__ = "agentic_sessions"
+    __table_args__ = (
+        UniqueConstraint("account_id", "session_identifier", name="uq_agentic_sessions_account_session_identifier"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000)
-    session_identifier: Mapped[str] = mapped_column(String(255), unique=True)
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    session_identifier: Mapped[str] = mapped_column(String(255))
     session_summary: Mapped[str] = mapped_column(Text, nullable=True)
     conversation_info: Mapped[list] = mapped_column(JSON, default=list)   # List[ConversationEntry]
     is_malicious: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -861,9 +957,12 @@ class OAuthProvider(Base):
 class BlockedIP(Base):
     """IPs blocked by the WAF/sensor layer."""
     __tablename__ = "blocked_ips"
+    __table_args__ = (
+        UniqueConstraint("account_id", "ip", name="uq_blocked_ips_account_ip"),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
-    ip: Mapped[str] = mapped_column(String(45), unique=True, nullable=False, index=True)
+    ip: Mapped[str] = mapped_column(String(45), nullable=False, index=True)
     reason: Mapped[str] = mapped_column(String(255), nullable=True)
     blocked_by: Mapped[str] = mapped_column(String(50), default="MANUAL")  # MANUAL | AUTO | SENSOR
     risk_score: Mapped[float] = mapped_column(Float, default=0.0)
@@ -998,6 +1097,26 @@ class ActorBaseline(Base):
     endpoint_history: Mapped[list] = mapped_column(JSON, default=list)
     anomaly_score: Mapped[float] = mapped_column(Float, default=0.0)
     metadata_blob: Mapped[dict] = mapped_column("metadata", JSON, nullable=True)
+    last_seen = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DetectionObjectState(Base):
+    """Durable object ownership/state used by BOLA-style detectors."""
+    __tablename__ = "detection_object_states"
+    __table_args__ = (
+        UniqueConstraint("account_id", "object_key_hash", name="uq_detection_object_state"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[int] = mapped_column(BigInteger, default=1000000, index=True)
+    object_key_hash: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    object_key_hint: Mapped[str] = mapped_column(String(255), nullable=True)
+    endpoint_scope: Mapped[str] = mapped_column(String(255), nullable=True, index=True)
+    last_known_owner_actor: Mapped[str] = mapped_column(String(255), nullable=True, index=True)
+    last_seen_actor: Mapped[str] = mapped_column(String(255), nullable=True, index=True)
+    metadata_blob: Mapped[dict] = mapped_column("metadata", JSON, nullable=True)
+    first_seen = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_seen = mapped_column(DateTime(timezone=True), nullable=True)
     created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
 

@@ -2,6 +2,31 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { Loader2, Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { validateEmail, validatePassword } from '@/lib/validations';
+
+function getPasswordValidationError(password: string, isSignup: boolean): string | null {
+  if (!password) {
+    return 'Please enter email and password';
+  }
+  if (!isSignup && password.length < 6) {
+    return 'Password must be at least 6 characters';
+  }
+  if (isSignup) {
+    if (password.length < 12) {
+      return 'Password must be at least 12 characters';
+    }
+    if (!/[A-Za-z]/.test(password)) {
+      return 'Password must include at least one letter';
+    }
+    if (!/\d/.test(password)) {
+      return 'Password must include at least one number';
+    }
+    if (!/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password)) {
+      return 'Password must include at least one special character';
+    }
+  }
+  return null;
+}
 
 const Login: React.FC = () => {
   const [email, setEmail] = React.useState('');
@@ -12,24 +37,48 @@ const Login: React.FC = () => {
   const [localError, setLocalError] = React.useState<string | null>(null);
   const [shakeError, setShakeError] = React.useState(false);
   const [isSignup, setIsSignup] = React.useState(false);
+  const [emailError, setEmailError] = React.useState<string | null>(null);
+  const [passwordError, setPasswordError] = React.useState<string | null>(null);
   const { user, login, signup, error: authError } = useAuth();
   const location = useLocation();
-  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/organization';
+  const from = (location.state as { from?: { pathname: string } })?.from?.pathname
+    || '/';
 
   if (user) return <Navigate to={from} replace />;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
-      setLocalError('Please enter email and password');
+    
+    // Clear field errors
+    setEmailError(null);
+    setPasswordError(null);
+    
+    // Validate email
+    const emailResult = validateEmail(email);
+    if (!emailResult.valid) {
+      setEmailError(emailResult.error || 'Invalid email');
+      setLocalError(emailResult.error || 'Invalid email');
       triggerShake();
       return;
     }
-    if (password.length < 6) {
-      setLocalError('Password must be at least 6 characters');
+    
+    // Validate password
+    const passwordResult = validatePassword(password);
+    if (!passwordResult.valid) {
+      setPasswordError(passwordResult.error || 'Invalid password');
+      setLocalError(passwordResult.error || 'Invalid password');
       triggerShake();
       return;
     }
+    
+    // Additional signup validation
+    if (isSignup && password.length < 12) {
+      setPasswordError('Password must be at least 12 characters');
+      setLocalError('Password must be at least 12 characters for signup');
+      triggerShake();
+      return;
+    }
+    
     setLocalError(null);
     setSubmitting(true);
     try {
@@ -47,6 +96,28 @@ const Login: React.FC = () => {
     }
   };
 
+  const handleEmailBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    let hasError = false;
+    if (email.trim()) {
+      const result = validateEmail(email);
+      setEmailError(result.valid ? null : result.error);
+      hasError = !result.valid;
+    }
+    e.target.style.borderColor = hasError ? '#ef4444' : '#e2e8f0';
+    e.target.style.boxShadow = hasError ? '0 0 0 3px rgba(239, 68, 68, 0.1)' : 'none';
+  };
+
+  const handlePasswordBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    let hasError = false;
+    if (password) {
+      const result = validatePassword(password);
+      setPasswordError(result.valid ? null : result.error);
+      hasError = !result.valid;
+    }
+    e.target.style.borderColor = hasError ? '#ef4444' : '#e2e8f0';
+    e.target.style.boxShadow = hasError ? '0 0 0 3px rgba(239, 68, 68, 0.1)' : 'none';
+  };
+
   const triggerShake = () => {
     setShakeError(true);
     setTimeout(() => setShakeError(false), 500);
@@ -55,40 +126,36 @@ const Login: React.FC = () => {
   const displayError = localError || authError;
 
   return (
-    <div className="relative flex min-h-screen font-sans overflow-hidden" style={{ background: '#fafbff' }}>
+    <div className="relative flex min-h-screen font-sans overflow-x-hidden overflow-y-auto" style={{ background: '#fafbff' }}>
       {/* Animated mesh gradient background */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div
-          className="absolute rounded-full blur-[100px] opacity-30"
+          className="absolute rounded-full blur-[100px] opacity-30 w-[80vw] max-w-[600px] aspect-square"
           style={{
-            width: 600, height: 600,
             top: '-10%', left: '-5%',
             background: 'radial-gradient(circle, #818cf8 0%, #6366f1 50%, transparent 70%)',
             animation: 'mesh-float-1 20s ease-in-out infinite',
           }}
         />
         <div
-          className="absolute rounded-full blur-[120px] opacity-20"
+          className="absolute rounded-full blur-[120px] opacity-20 w-[70vw] max-w-[500px] aspect-square"
           style={{
-            width: 500, height: 500,
             top: '40%', right: '-10%',
             background: 'radial-gradient(circle, #f472b6 0%, #ec4899 50%, transparent 70%)',
             animation: 'mesh-float-2 25s ease-in-out infinite',
           }}
         />
         <div
-          className="absolute rounded-full blur-[90px] opacity-20"
+          className="absolute rounded-full blur-[90px] opacity-20 w-[60vw] max-w-[400px] aspect-square"
           style={{
-            width: 400, height: 400,
             bottom: '-5%', left: '30%',
             background: 'radial-gradient(circle, #fbbf24 0%, #f59e0b 50%, transparent 70%)',
             animation: 'mesh-float-3 18s ease-in-out infinite',
           }}
         />
         <div
-          className="absolute rounded-full blur-[80px] opacity-15"
+          className="absolute rounded-full blur-[80px] opacity-15 w-[55vw] max-w-[350px] aspect-square"
           style={{
-            width: 350, height: 350,
             top: '20%', left: '50%',
             background: 'radial-gradient(circle, #34d399 0%, #10b981 50%, transparent 70%)',
             animation: 'mesh-float-4 22s ease-in-out infinite',
@@ -161,7 +228,7 @@ const Login: React.FC = () => {
       <div className="flex-1 flex items-center justify-center p-6 relative z-10">
         <form
           onSubmit={handleSubmit}
-          className={`w-full max-w-[440px] space-y-6 rounded-2xl p-8 md:p-10 ${shakeError ? 'animate-[shake_0.5s_ease-in-out]' : ''}`}
+          className={`w-full max-w-[440px] px-4 sm:px-0 space-y-6 rounded-2xl p-8 md:p-10 ${shakeError ? 'animate-[shake_0.5s_ease-in-out]' : ''}`}
           style={{
             background: 'rgba(255, 255, 255, 0.85)',
             backdropFilter: 'blur(20px)',
@@ -193,6 +260,31 @@ const Login: React.FC = () => {
             </p>
           </div>
 
+          {/* Mobile feature cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 lg:hidden">
+            {[
+              { icon: '🔍', title: 'API Discovery', desc: 'Auto-discover all endpoints' },
+              { icon: '🧪', title: 'Security Testing', desc: 'OWASP Top 10 coverage' },
+              { icon: '🛡️', title: 'Real-time Protection', desc: 'WAF & threat blocking' },
+              { icon: '📊', title: 'Compliance Reports', desc: 'PCI-DSS, HIPAA, SOC2' },
+            ].map((feat) => (
+              <div
+                key={feat.title}
+                className="rounded-lg p-3 text-left flex items-center gap-3"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.5)',
+                  border: '1px solid rgba(228, 231, 238, 0.6)',
+                }}
+              >
+                <div className="text-lg shrink-0">{feat.icon}</div>
+                <div>
+                  <div className="text-xs font-semibold" style={{ color: '#0f172a' }}>{feat.title}</div>
+                  <div className="text-[11px]" style={{ color: '#94a3b8' }}>{feat.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
           {/* Error */}
           {displayError && (
             <div
@@ -215,30 +307,35 @@ const Login: React.FC = () => {
                 Email
               </label>
               <div className="relative">
-                <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: '#94a3b8' }} />
+                <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: emailError ? '#ef4444' : '#94a3b8' }} />
                 <input
+                  data-testid="auth-email"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full rounded-xl pl-10 pr-4 py-3 text-sm transition-all outline-none"
+                  onBlur={handleEmailBlur}
+                  className="w-full rounded-xl pl-10 pr-4 py-3 min-h-[44px] text-sm transition-all outline-none"
                   style={{
                     background: '#f8fafc',
-                    border: '1px solid #e2e8f0',
+                    border: `1px solid ${emailError ? '#ef4444' : '#e2e8f0'}`,
                     color: '#0f172a',
+                    boxShadow: emailError ? '0 0 0 3px rgba(239, 68, 68, 0.1)' : 'none',
                   }}
                   onFocus={(e) => {
-                    e.target.style.borderColor = '#818cf8';
-                    e.target.style.boxShadow = '0 0 0 3px rgba(99, 102, 241, 0.1)';
-                  }}
-                  onBlur={(e) => {
-                    e.target.style.borderColor = '#e2e8f0';
-                    e.target.style.boxShadow = 'none';
+                    e.target.style.borderColor = emailError ? '#ef4444' : '#818cf8';
+                    e.target.style.boxShadow = emailError ? '0 0 0 3px rgba(239, 68, 68, 0.1)' : '0 0 0 3px rgba(99, 102, 241, 0.1)';
                   }}
                   placeholder="you@company.com"
                   disabled={submitting}
                   autoComplete="email"
                 />
               </div>
+              {emailError && (
+                <p className="text-[11px] text-red-500 flex items-center gap-1 mt-1">
+                  <span className="w-1 h-1 rounded-full bg-red-500" />
+                  {emailError}
+                </p>
+              )}
             </div>
 
             {/* Password */}
@@ -254,59 +351,71 @@ const Login: React.FC = () => {
                 )}
               </div>
               <div className="relative">
-                <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: '#94a3b8' }} />
+                <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: passwordError ? '#ef4444' : '#94a3b8' }} />
                 <input
+                  data-testid="auth-password"
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-xl pl-10 pr-10 py-3 text-sm transition-all outline-none"
+                  onBlur={handlePasswordBlur}
+                  className="w-full rounded-xl pl-10 pr-10 py-3 min-h-[44px] text-sm transition-all outline-none"
                   style={{
                     background: '#f8fafc',
-                    border: '1px solid #e2e8f0',
+                    border: `1px solid ${passwordError ? '#ef4444' : '#e2e8f0'}`,
                     color: '#0f172a',
+                    boxShadow: passwordError ? '0 0 0 3px rgba(239, 68, 68, 0.1)' : 'none',
                   }}
                   onFocus={(e) => {
-                    e.target.style.borderColor = '#818cf8';
-                    e.target.style.boxShadow = '0 0 0 3px rgba(99, 102, 241, 0.1)';
+                    e.target.style.borderColor = passwordError ? '#ef4444' : '#818cf8';
+                    e.target.style.boxShadow = passwordError ? '0 0 0 3px rgba(239, 68, 68, 0.1)' : '0 0 0 3px rgba(99, 102, 241, 0.1)';
                   }}
-                  onBlur={(e) => {
-                    e.target.style.borderColor = '#e2e8f0';
-                    e.target.style.boxShadow = 'none';
-                  }}
-                  placeholder={isSignup ? 'Min 6 characters' : '••••••••'}
+                  placeholder={isSignup ? 'Min 12 chars, letter, number, symbol' : 'Password'}
                   disabled={submitting}
                   autoComplete={isSignup ? 'new-password' : 'current-password'}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(v => !v)}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 transition-colors"
-                  style={{ color: '#94a3b8' }}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center -mr-3.5"
+                  style={{ color: passwordError ? '#ef4444' : '#94a3b8' }}
                 >
                   {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                 </button>
               </div>
+              {passwordError && (
+                <p className="text-[11px] text-red-500 flex items-center gap-1 mt-1">
+                  <span className="w-1 h-1 rounded-full bg-red-500" />
+                  {passwordError}
+                </p>
+              )}
             </div>
 
             {/* Remember me */}
             {!isSignup && (
-              <label className="flex items-center gap-2 cursor-pointer">
+              <label className="flex items-center gap-2 cursor-pointer min-h-[44px]">
                 <input
                   type="checkbox"
                   checked={rememberMe}
                   onChange={(e) => setRememberMe(e.target.checked)}
-                  className="w-3.5 h-3.5 rounded"
+                  className="w-4 h-4 rounded"
                   style={{ accentColor: '#6366f1' }}
                 />
                 <span className="text-xs" style={{ color: '#64748b' }}>Remember me</span>
               </label>
             )}
 
+            {isSignup && !passwordError && (
+              <p className="text-[11px]" style={{ color: '#64748b' }}>
+                Use at least 12 characters and include a letter, number, and symbol.
+              </p>
+            )}
+
             {/* Submit Button - Archon gradient style */}
             <button
+              data-testid="auth-submit"
               type="submit"
               disabled={submitting}
-              className="w-full rounded-xl px-4 py-3.5 text-sm font-bold text-white flex justify-center items-center gap-2 mt-2 transition-all duration-200 disabled:opacity-60 hover:opacity-90 hover:-translate-y-0.5"
+              className="w-full rounded-xl px-4 py-3.5 min-h-[44px] text-sm font-bold text-white flex justify-center items-center gap-2 mt-2 transition-all duration-200 disabled:opacity-60 hover:opacity-90 hover:-translate-y-0.5"
               style={{
                 background: 'linear-gradient(135deg, #6366f1, #7c3aed, #a855f7)',
                 boxShadow: '0 4px 20px rgba(99, 102, 241, 0.35)',
@@ -322,9 +431,10 @@ const Login: React.FC = () => {
           {/* Toggle mode */}
           <div className="text-center pt-4" style={{ borderTop: '1px solid #e4e7ee' }}>
             <button
+              data-testid="auth-mode-toggle"
               type="button"
               onClick={() => { setIsSignup(v => !v); setLocalError(null); }}
-              className="text-xs transition-colors outline-none cursor-pointer"
+              className="text-xs transition-colors outline-none cursor-pointer min-h-[44px]"
               style={{ color: '#64748b' }}
               onMouseEnter={(e) => (e.currentTarget.style.color = '#6366f1')}
               onMouseLeave={(e) => (e.currentTarget.style.color = '#64748b')}

@@ -88,7 +88,7 @@ const ThreatIntelligence: React.FC = () => {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-bold text-text-primary">AI Threat Intelligence</h2>
-              <span className="text-[10px] bg-[#7C3AED]/10 border border-[#7C3AED]/30 text-[#7C3AED] px-2 py-0.5 rounded-full font-semibold">6-Expert Ensemble</span>
+              <span className="text-[11px] bg-[#7C3AED]/10 border border-[#7C3AED]/30 text-[#7C3AED] px-2 py-0.5 rounded-full font-semibold">6-Expert Ensemble</span>
             </div>
             <p className="text-[11px] text-text-muted">Real-time swarm scoring of live API traffic using ensemble AI models</p>
           </div>
@@ -104,28 +104,28 @@ const ThreatIntelligence: React.FC = () => {
         <GlassCard variant="default" className="p-4 flex items-center gap-3">
           <ProgressRing value={riskScore} max={100} size={64} strokeWidth={6} label="Risk" />
           <div>
-            <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">Risk Score</span>
+            <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Risk Score</span>
             <p className="text-2xl font-bold text-text-primary tabular-nums"><AnimatedCounter value={riskScore} /></p>
-            <span className="text-[10px] text-text-muted">out of 100</span>
+            <span className="text-[11px] text-text-muted">out of 100</span>
           </div>
         </GlassCard>
 
         <MetricWidget label="Events Detected" value={totalEvents} icon={Activity} iconColor="#3B82F6" iconBg="rgba(59,130,246,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, totalEvents + Math.floor(Math.random() * 10 - 5)))} sparkColor="#3B82F6" />
 
         <GlassCard variant="default" className="p-4 flex flex-col gap-2">
-          <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5"><AlertTriangle size={10} /> Top Attack Vector</span>
+          <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5"><AlertTriangle size={10} /> Top Attack Vector</span>
           <span className="text-base font-bold text-brand truncate">{topAttack?.[0] ?? 'None'}</span>
-          <span className="text-[10px] text-text-muted">{topAttack?.[1] ?? 0} events</span>
+          <span className="text-[11px] text-text-muted">{topAttack?.[1] ?? 0} events</span>
         </GlassCard>
 
         <GlassCard variant="default" className="p-4 flex flex-col gap-2">
-          <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5"><Shield size={10} /> Expert Models</span>
+          <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5"><Shield size={10} /> Expert Models</span>
           <span className="text-2xl font-bold text-[#7C3AED] tabular-nums"><AnimatedCounter value={expertVotes.filter(e => e.active).length} /></span>
-          <span className="text-[10px] text-text-muted">of 6 active</span>
+          <span className="text-[11px] text-text-muted">of 6 active</span>
         </GlassCard>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Expert Model Consensus */}
         <GlassCard variant="elevated" className="p-5">
           <div className="flex items-center gap-2 mb-4">
@@ -141,7 +141,7 @@ const ThreatIntelligence: React.FC = () => {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-[11px] font-semibold text-text-primary">{expert.name}</span>
-                      <span className="text-[10px] font-mono font-bold" style={{ color: vote.active ? expert.color : '#9D9DAF' }}>{vote.confidence}%</span>
+                      <span className="text-[11px] font-mono font-bold" style={{ color: vote.active ? expert.color : '#9D9DAF' }}>{vote.confidence}%</span>
                     </div>
                     <div className="h-1.5 bg-black/[0.04] rounded-full overflow-hidden">
                       <div className="h-full rounded-full transition-all duration-700" style={{ width: `${vote.confidence}%`, background: vote.active ? `linear-gradient(90deg, ${expert.color}88, ${expert.color})` : '#F9F9FC' }} />
@@ -152,7 +152,7 @@ const ThreatIntelligence: React.FC = () => {
               );
             })}
           </div>
-          <p className="text-[10px] text-text-muted mt-4 pt-3 border-t border-border-subtle">
+          <p className="text-[11px] text-text-muted mt-4 pt-3 border-t border-border-subtle">
             Confidence derived from event category distribution. Bars represent model activation relative to total traffic volume.
           </p>
         </GlassCard>
@@ -179,7 +179,7 @@ const ThreatIntelligence: React.FC = () => {
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-[11px] text-text-secondary truncate max-w-[160px]">{cat}</span>
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-text-muted">{pct.toFixed(1)}%</span>
+                        <span className="text-[11px] text-text-muted">{pct.toFixed(1)}%</span>
                         <span className="text-[11px] font-bold font-mono tabular-nums" style={{ color: col }}>{cnt}</span>
                       </div>
                     </div>
@@ -208,7 +208,7 @@ const ThreatIntelligence: React.FC = () => {
             { label: 'MCP Traffic', value: agenticSignals.mcp, color: '#EAB308' },
           ].map((item) => (
             <div key={item.label} className="metric-card p-3">
-              <p className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">{item.label}</p>
+              <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">{item.label}</p>
               <p className="text-xl font-bold tabular-nums" style={{ color: item.color }}>{item.value}</p>
               <div className="h-1.5 bg-black/[0.04] rounded-full overflow-hidden mt-2">
                 <div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, item.value * 5)}%`, background: item.color }} />
@@ -216,13 +216,13 @@ const ThreatIntelligence: React.FC = () => {
             </div>
           ))}
         </div>
-        <p className="text-[10px] text-text-muted mt-3">
+        <p className="text-[11px] text-text-muted mt-3">
           Signals are derived from MCP tool invocation patterns, prompt injection classifiers, and delegation-chain analysis.
         </p>
       </GlassCard>
 
       {/* Geo + Severity */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <GlassCard variant="default" className="lg:col-span-2 p-4">
           <div className="flex items-center gap-2 mb-3">
             <TrendingUp size={14} className="text-sev-low" />
@@ -242,7 +242,7 @@ const ThreatIntelligence: React.FC = () => {
               <div key={name} className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-sm" style={{ background: color }} />
-                  <span className="text-[10px] text-text-secondary">{name}</span>
+                  <span className="text-[11px] text-text-secondary">{name}</span>
                 </div>
                 <span className="text-[11px] font-bold font-mono tabular-nums" style={{ color }}>{value}</span>
               </div>
@@ -258,7 +258,7 @@ const ThreatIntelligence: React.FC = () => {
             <Target size={14} className="text-sev-critical" />
             <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Most Targeted Attack Patterns</span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
             {(topN.data as any).top_apis.slice(0, 5).map((item: any, idx: number) => (
               <div key={idx} className="metric-card p-3">
                 <span className="text-[9px] text-text-muted uppercase">#{idx + 1}</span>

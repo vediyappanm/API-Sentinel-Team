@@ -12,9 +12,9 @@ AUTH_HEADERS = ["authorization", "x-api-key", "x-auth-token", "cookie", "token",
 
 class AuthRotator:
 
-    async def get_auth_headers(self, role: str = "ATTACKER", account_id: int = 1000000, db=None) -> dict:
+    async def get_auth_headers(self, role: str = "ATTACKER", account_id: int | None = None, db=None) -> dict:
         """Return auth headers dict for the given role from TestAccount table."""
-        if db is None:
+        if db is None or account_id is None:
             return {}
         try:
             result = await db.execute(

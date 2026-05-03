@@ -4,6 +4,7 @@ import { Wifi, WifiOff, Activity, Shield, Ban, Zap, Download, X, RefreshCw, Sear
 import MetricWidget from '@/components/ui/MetricWidget';
 import StatusPulse from '@/components/ui/StatusPulse';
 import QueryError from '@/components/shared/QueryError';
+import { buildWebSocketUrl, fetchWithSession, getToken, get } from '@/lib/api-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,10 +32,7 @@ interface WsMessage {
 type SeverityFilter = 'ALL' | 'CRITICAL' | 'HIGH' | 'MEDIUM';
 
 const MAX_ROWS = 200;
-const WS_BASE = (import.meta.env.VITE_API_WS_URL ?? '').replace(/\/$/, '');
-const DEFAULT_WS_BASE = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
-const WS_URL = `${(WS_BASE || DEFAULT_WS_BASE)}/api/stream/live`;
-const RECENT_URL = `${(import.meta.env.VITE_API_BASE_URL ?? '')}/api/stream/recent`;
+const WS_URL = buildWebSocketUrl('/api/stream/live');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -90,12 +88,12 @@ function exportCsv(rows: LogEntry[]): void {
   URL.revokeObjectURL(url);
 }
 
-function computeStats(rows: LogEntry[]) {
+function computeStats(rows: LogEntry[], activeSensors: number) {
   const now = Date.now();
   const recent = rows.filter((r) => new Date(r.timestamp).getTime() >= now - 60_000);
   const threats = rows.filter((r) => r.attacks.length > 0).length;
   const blockedIps = new Set(rows.filter((r) => r.attacks.length > 0).map((r) => r.ip)).size;
-  return { reqPerMin: recent.length, threats, blockedIps, sensors: 1 };
+  return { reqPerMin: recent.length, threats, blockedIps, sensors: activeSensors };
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -111,12 +109,17 @@ const LiveFeed: React.FC = () => {
   const tableBodyRef = useRef<HTMLDivElement>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const { data: sensorsData } = useQuery({
+    queryKey: ['live-feed', 'sensors'],
+    queryFn: () => get('/sensors/').catch(() => ({ sensors: [] })),
+    refetchInterval: 30_000,
+  });
+  const activeSensors: number = (sensorsData?.sensors ?? []).filter((s: { status: string }) => s.status === 'ONLINE').length;
+
   const { isLoading: initialLoading, isError, refetch } = useQuery({
     queryKey: ['live-feed', 'recent'],
     queryFn: async ({ signal }) => {
-      const token = localStorage.getItem('sentinel_token');
-      const res = await fetch(RECENT_URL, { signal, headers: token ? { Authorization: `Bearer ${token}` } : {} });
-      if (!res.ok) throw new Error('Failed to fetch recent');
+      const res = await fetchWithSession('/stream/recent', { signal });
       const json = await res.json();
       const items: LogEntry[] = (json.data ?? json ?? []).map((d: Omit<LogEntry, 'id'>) => ({ ...d, id: genId() }));
       setEntries(items.slice(0, MAX_ROWS));
@@ -128,8 +131,8 @@ const LiveFeed: React.FC = () => {
 
   const connect = useCallback(() => {
     if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close(); }
-    const token = localStorage.getItem('sentinel_token');
-    const url = token ? `${WS_URL}?token=${token}` : WS_URL;
+    const token = getToken();
+    const url = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
     const ws = new WebSocket(url);
     wsRef.current = ws;
     ws.onopen = () => setConnected(true);
@@ -166,7 +169,12 @@ const LiveFeed: React.FC = () => {
     });
   }, [entries, severityFilter, searchQuery]);
 
-  const stats = useMemo(() => computeStats(entries), [entries]);
+  const stats = useMemo(() => computeStats(entries, activeSensors), [entries, activeSensors]);
+
+  const sparkReqPerMin = useMemo(() => Array.from({ length: 7 }, (_, i) => Math.max(0, stats.reqPerMin - (6 - i))), [stats.reqPerMin]);
+  const sparkThreats = useMemo(() => Array.from({ length: 7 }, (_, i) => Math.max(0, stats.threats - (6 - i))), [stats.threats]);
+  const sparkBlocked = useMemo(() => Array.from({ length: 7 }, (_, i) => Math.max(0, stats.blockedIps - (6 - i))), [stats.blockedIps]);
+  const sparkSensors = useMemo(() => Array.from({ length: 7 }, () => stats.sensors), [stats.sensors]);
 
   return (
     <div className="space-y-5 animate-fade-in w-full pb-10">
@@ -187,10 +195,10 @@ const LiveFeed: React.FC = () => {
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <MetricWidget label="Requests / min" value={stats.reqPerMin} icon={Activity} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, stats.reqPerMin + Math.floor(Math.random() * 6 - 3)))} sparkColor="#F97316" />
-        <MetricWidget label="Threats Detected" value={stats.threats} icon={Shield} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, stats.threats + Math.floor(Math.random() * 4 - 2)))} sparkColor="#EF4444" />
-        <MetricWidget label="Blocked IPs" value={stats.blockedIps} icon={Ban} iconColor="#EAB308" iconBg="rgba(234,179,8,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, stats.blockedIps + Math.floor(Math.random() * 3 - 1)))} sparkColor="#EAB308" />
-        <MetricWidget label="Active Sensors" value={stats.sensors} icon={Zap} iconColor="#22C55E" iconBg="rgba(34,197,94,0.1)" sparkData={[1, 1, 1, 1, 1, 1, 1]} sparkColor="#22C55E" />
+        <MetricWidget label="Requests / min" value={stats.reqPerMin} icon={Activity} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" sparkData={sparkReqPerMin} sparkColor="#F97316" />
+        <MetricWidget label="Threats Detected" value={stats.threats} icon={Shield} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" sparkData={sparkThreats} sparkColor="#EF4444" />
+        <MetricWidget label="Blocked IPs" value={stats.blockedIps} icon={Ban} iconColor="#EAB308" iconBg="rgba(234,179,8,0.1)" sparkData={sparkBlocked} sparkColor="#EAB308" />
+        <MetricWidget label="Active Sensors" value={stats.sensors} icon={Zap} iconColor="#22C55E" iconBg="rgba(34,197,94,0.1)" sparkData={sparkSensors} sparkColor="#22C55E" />
       </div>
 
       {/* Filter bar */}
@@ -231,22 +239,22 @@ const LiveFeed: React.FC = () => {
           <span className="text-sm font-bold text-text-primary flex items-center gap-2">
             <Activity size={14} className="text-brand" />
             Live Events
-            <span className="text-[10px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted">{filteredEntries.length} rows</span>
+            <span className="text-[11px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted">{filteredEntries.length} rows</span>
           </span>
           {userScrolled && (
             <button onClick={() => { setUserScrolled(false); tableBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' }); }}
-              className="flex items-center gap-1 text-[10px] text-brand hover:text-brand-light transition-colors">
+              className="flex items-center gap-1 text-[11px] text-brand hover:text-brand-light transition-colors">
               <RefreshCw size={10} /> Resume live scroll
             </button>
           )}
         </div>
 
         <div ref={tableBodyRef} onScroll={handleScroll} className="overflow-auto" style={{ maxHeight: '580px' }}>
-          <table className="w-full text-left border-collapse min-w-[900px]">
+          <table className="w-full text-left border-collapse min-w-[550px]">
             <thead className="sticky top-0 bg-bg-base/90 backdrop-blur-sm border-b border-border-subtle z-10">
               <tr>
                 {['Timestamp', 'IP Address', 'Method', 'Path', 'Status', 'Threat', 'Bytes'].map(h => (
-                  <th key={h} className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted whitespace-nowrap">{h}</th>
+                  <th key={h} className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
@@ -274,22 +282,22 @@ const LiveFeed: React.FC = () => {
 
                 return (
                   <tr key={entry.id} className={`transition-colors hover:bg-white/[0.02] ${isThreat ? 'bg-red-950/20' : ''}`}>
-                    <td className="px-4 py-2.5 text-[10px] font-mono text-text-muted whitespace-nowrap">{formatTime(entry.timestamp)}</td>
+                    <td className="px-4 py-2.5 text-[11px] font-mono text-text-muted whitespace-nowrap">{formatTime(entry.timestamp)}</td>
                     <td className="px-4 py-2.5 text-[12px] font-mono text-text-primary whitespace-nowrap">{entry.ip}</td>
                     <td className="px-4 py-2.5">
-                      <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded" style={{ backgroundColor: mc.bg, color: mc.text }}>{entry.method}</span>
+                      <span className="text-[11px] font-bold font-mono px-2 py-0.5 rounded" style={{ backgroundColor: mc.bg, color: mc.text }}>{entry.method}</span>
                     </td>
                     <td className="px-4 py-2.5 text-[12px] font-mono text-text-secondary max-w-[280px] truncate">{entry.path}</td>
                     <td className="px-4 py-2.5"><span className="text-[12px] font-bold font-mono tabular-nums" style={{ color: sc }}>{entry.status}</span></td>
                     <td className="px-4 py-2.5">
                       {topAttack ? (
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap"
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap"
                           style={{ color: severityColor(topAttack.severity), borderColor: `${severityColor(topAttack.severity)}40`, backgroundColor: `${severityColor(topAttack.severity)}15` }}>
                           {topAttack.category}
                         </span>
                       ) : <span className="text-[11px] text-text-muted">-</span>}
                     </td>
-                    <td className="px-4 py-2.5 text-[10px] font-mono text-text-muted whitespace-nowrap">
+                    <td className="px-4 py-2.5 text-[11px] font-mono text-text-muted whitespace-nowrap">
                       {entry.bytes != null && entry.bytes !== '-' ? Number(entry.bytes).toLocaleString() + ' B' : '-'}
                     </td>
                   </tr>

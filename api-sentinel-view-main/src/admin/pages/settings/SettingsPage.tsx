@@ -23,37 +23,37 @@ const SettingsPage: React.FC = () => {
 
       {/* Access & Identity */}
       <div className="space-y-3">
-        <h3 className="text-[10px] font-semibold text-text-muted uppercase tracking-wider pl-1">Access & Identity</h3>
+        <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider pl-1">Access & Identity</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <SettingsCard icon={LayoutGrid} title="Manage Applications" description="Add and register new applications, assign them to users or groups." onClick={() => navigate('/add-application')} />
-          <SettingsCard icon={Users} title="User & Role Administration" description="Manage organizational users, update role assignments." onClick={() => navigate('/settings/users')} />
-          <SettingsCard icon={Key} title="API Keys Management" description="Securely create, manage, and rotate API keys." />
-          <SettingsCard icon={Shield} title="Private/Internal IPs" description="Define IP ranges owned by your organization." />
+          <SettingsCard icon={LayoutGrid} title="Manage Applications" description="Add and register new applications, assign them to users or groups." onClick={() => navigate('/admin/applications/add')} />
+          <SettingsCard icon={Users} title="User & Role Administration" description="Manage organizational users, update role assignments." onClick={() => navigate('/admin/settings/users')} />
+          <SettingsCard icon={Key} title="API Keys Management" description="Securely create, manage, and rotate API keys." onClick={() => navigate('/admin/settings/api-keys')} />
+          <SettingsCard icon={Shield} title="API Attribute Mapping" description="Define the headers and keys used for session, user, role, and tenant attribution." onClick={() => navigate('/admin/settings/attribute-mapping')} />
         </div>
       </div>
 
       {/* Platform & Infrastructure */}
       <div className="space-y-3 pt-2">
-        <h3 className="text-[10px] font-semibold text-text-muted uppercase tracking-wider pl-1">Platform & Infrastructure</h3>
+        <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider pl-1">Platform & Infrastructure</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <SettingsCard icon={Radio} title="Controller & Sensor Config" description="Configure and manage controller and sensor settings." onClick={() => navigate('/system-health')} />
-          <SettingsCard icon={FileText} title="License Usage" description="Monitor license consumption and track active usage." />
+          <SettingsCard icon={Radio} title="Controller & Sensor Config" description="Configure and manage controller and sensor settings." onClick={() => navigate('/admin/system-health')} />
+          <SettingsCard icon={FileText} title="License Usage" description="Monitor license consumption and track active usage." onClick={() => navigate('/admin/settings/license')} />
         </div>
       </div>
 
       {/* Security & Governance */}
       <div className="space-y-3 pt-2">
-        <h3 className="text-[10px] font-semibold text-text-muted uppercase tracking-wider pl-1">Security & Governance</h3>
+        <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider pl-1">Security & Governance</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <SettingsCard icon={ShieldAlert} title="Threat Policies" description="Global rules for active threats and baseline deviations." onClick={() => navigate('/protection/policy')} />
-          <SettingsCard icon={ClipboardList} title="Audit Logs" description="Review all administrative operations and policy changes." onClick={() => navigate('/settings/audit-logs')} />
-          <SettingsCard icon={CheckSquare} title="Compliance Reports" description="Generate raw exports for SOC2, PCI-DSS, and HIPAA." onClick={() => navigate('/reports')} />
+          <SettingsCard icon={ShieldAlert} title="Threat Policies" description="Global rules for active threats and baseline deviations." onClick={() => navigate('/app/protection/policy')} />
+          <SettingsCard icon={ClipboardList} title="Audit Logs" description="Review all administrative operations and policy changes." onClick={() => navigate('/admin/settings/audit-logs')} />
+          <SettingsCard icon={CheckSquare} title="Compliance Reports" description="Generate raw exports for SOC2, PCI-DSS, and HIPAA." onClick={() => navigate('/app/reports')} />
         </div>
       </div>
 
       {/* Notifications */}
       <div className="space-y-3 pt-2">
-        <h3 className="text-[10px] font-semibold text-text-muted uppercase tracking-wider pl-1">Notifications</h3>
+        <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider pl-1">Notifications</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <SettingsCard icon={Bell} title="Alert Channels" description="Configure Slack, Teams, and Email notification routing." />
           <SettingsCard icon={Webhook} title="Webhook Configuration" description="Set up custom HTTP callbacks for security events." />

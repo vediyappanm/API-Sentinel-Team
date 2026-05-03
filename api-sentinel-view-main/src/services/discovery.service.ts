@@ -1,9 +1,9 @@
-import { get, post } from '@/lib/api-client';
+import { get } from '@/lib/api-client';
 
-/* ───── Types for the New Engine ───── */
+export type ApiCollectionId = string | number;
 
 export interface AktoApiCollection {
-  id: number;
+  id: ApiCollectionId;
   displayName: string;
   hostName: string;
   urlsCount: number;
@@ -12,7 +12,7 @@ export interface AktoApiCollection {
 }
 
 export interface AktoApiInfo {
-  id: { apiCollectionId: number; url: string; method: string };
+  id: { apiCollectionId: ApiCollectionId; url: string; method: string };
   allAuthTypesFound: string[];
   lastSeen: number;
   discoveredAt?: number;
@@ -20,23 +20,17 @@ export interface AktoApiInfo {
   apiAccessTypes?: string[];
 }
 
-/* ───── API Calls ───── */
+const DEFAULT_COLLECTION_ID: ApiCollectionId = 'default-inventory';
 
-/**
- * Maps our /collections/ into the AktoApiCollection shape for the UI
- */
 export async function fetchApiCollections(signal?: AbortSignal) {
   const raw = await get<any>('/collections/', signal);
-
-  // Server returns { total, collections: [] } — normalise to array
   const data: any[] = Array.isArray(raw) ? raw : (raw?.collections ?? []);
 
-  if (!data || data.length === 0) {
-    // Fallback if no collections exist yet
+  if (!data.length) {
     return {
       apiCollections: [
         {
-          id: 1000000,
+          id: DEFAULT_COLLECTION_ID,
           displayName: 'Default Inventory',
           hostName: 'all-hosts',
           urlsCount: 0,
@@ -47,23 +41,20 @@ export async function fetchApiCollections(signal?: AbortSignal) {
     };
   }
 
-  const apiCollections: AktoApiCollection[] = data.map(c => ({
-    id: c.id,
-    displayName: c.name,
-    hostName: 'internal',
-    urlsCount: 0, // In a real scenario, we'd fetch counts per collection
-    startTs: new Date(c.created_at).getTime(),
-    type: c.type || 'MIRRORING',
+  const apiCollections: AktoApiCollection[] = data.map((collection) => ({
+    id: collection.id,
+    displayName: collection.name,
+    hostName: collection.host_name ?? collection.hostName ?? 'internal',
+    urlsCount: collection.urls_count ?? collection.urlsCount ?? 0,
+    startTs: collection.created_at ? new Date(collection.created_at).getTime() : Date.now(),
+    type: collection.type || 'MIRRORING',
   }));
 
   return { apiCollections };
 }
 
-/**
- * Fetches refined endpoint list from our logic
- */
 export async function fetchApiInfosForCollection(
-  apiCollectionId: number,
+  apiCollectionId: ApiCollectionId,
   skip: number = 0,
   limit: number = 50,
   sortKey?: string,
@@ -73,17 +64,21 @@ export async function fetchApiInfosForCollection(
 ) {
   const data = await get<{ total: number; endpoints: any[] }>('/endpoints/', signal);
 
-  // Transform our APIEndpoint into Akto's AktoApiInfo shape
-  const apiInfoList: AktoApiInfo[] = (data.endpoints || []).map((e) => ({
+  const apiInfoList: AktoApiInfo[] = (data.endpoints || []).map((endpoint) => ({
     id: {
-      apiCollectionId: 1000000,
-      url: e.path,
-      method: e.method,
+      apiCollectionId: endpoint.collection_id ?? endpoint.api_collection_id ?? apiCollectionId,
+      url: endpoint.path,
+      method: endpoint.method,
     },
-    allAuthTypesFound: [],
-    lastSeen: new Date(e.last_seen).getTime(),
-    discoveredAt: new Date(e.last_seen).getTime(),
-    riskScore: 0,
+    allAuthTypesFound: endpoint.auth_types ?? [],
+    lastSeen: endpoint.last_seen ? new Date(endpoint.last_seen).getTime() : Date.now(),
+    discoveredAt: endpoint.created_at
+      ? new Date(endpoint.created_at).getTime()
+      : endpoint.last_seen
+        ? new Date(endpoint.last_seen).getTime()
+        : Date.now(),
+    riskScore: endpoint.risk_score ?? 0,
+    apiAccessTypes: endpoint.access_types ?? [],
   }));
 
   return {
@@ -97,18 +92,16 @@ export async function fetchEndpointsCount(signal?: AbortSignal) {
   return { endpointsCount: data.total || 0 };
 }
 
-/* ───── Stubs for other discovery parts ───── */
-
-export async function fetchSeverityCounts(apiCollectionIds: number[], signal?: AbortSignal) {
+export async function fetchSeverityCounts(apiCollectionIds: ApiCollectionId[], signal?: AbortSignal) {
   return { severitiesCountResponse: [] };
 }
 
 export async function fetchRecentEndpoints(startTs: number, endTs: number, signal?: AbortSignal) {
-  const data = await fetchApiInfosForCollection(1000000, 0, 10, undefined, undefined, undefined, signal);
+  const data = await fetchApiInfosForCollection(DEFAULT_COLLECTION_ID, 0, 10, undefined, undefined, undefined, signal);
   return { endpoints: data.apiInfoList };
 }
 
-export async function fetchAccessTypes(apiCollectionId: number, signal?: AbortSignal) {
+export async function fetchAccessTypes(apiCollectionId: ApiCollectionId, signal?: AbortSignal) {
   return { accessTypes: {} };
 }
 
@@ -138,10 +131,8 @@ export async function fetchCollectionWiseEndpoints(signal?: AbortSignal) {
   return { response: {} };
 }
 
-/* ───── Sensitive Parameters (PII) ───── */
-
 export interface AktoSensitiveParam {
-  apiCollectionId: number;
+  apiCollectionId: ApiCollectionId;
   url: string;
   method: string;
   subType: string;
@@ -157,13 +148,13 @@ export async function fetchSensitiveParameters(
 ) {
   const data = await get<{ findings: any[] }>('/pii/', signal);
 
-  const endpoints: AktoSensitiveParam[] = (data.findings || []).map((f) => ({
-    apiCollectionId: 1000000,
-    url: f.url || '/',
-    method: f.method || 'GET',
-    subType: f.entity_type,
+  const endpoints: AktoSensitiveParam[] = (data.findings || []).map((finding) => ({
+    apiCollectionId: finding.api_collection_id ?? finding.collection_id ?? DEFAULT_COLLECTION_ID,
+    url: finding.url || '/',
+    method: finding.method || 'GET',
+    subType: finding.entity_type,
     isHeader: false,
-    param: f.matched_text,
+    param: finding.matched_text ?? finding.sample_value ?? '',
     count: 1,
   }));
 
@@ -176,4 +167,3 @@ export async function fetchSensitiveParameters(
 export async function fetchSensitiveInfoForCollections(signal?: AbortSignal) {
   return { sensitiveInfo: {} };
 }
-

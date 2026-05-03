@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { RefreshCw, ChevronRight, Activity, ShieldAlert, Eye, Lock, Cpu } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import DonutChart from '@/components/charts/DonutChart';
 import TimeFilter from '@/components/shared/TimeFilter';
 import TableSkeleton from '@/components/shared/TableSkeleton';
@@ -12,10 +13,13 @@ import { useApiCollections, useEndpointsCount } from '@/hooks/use-discovery';
 import { useIssueSummary } from '@/hooks/use-testing';
 import { useDashboardKPIs } from '@/hooks/use-dashboard';
 import { useQueryClient } from '@tanstack/react-query';
+import { useOnboarding } from '@/lib/onboarding-context';
 
 const Organization: React.FC = () => {
   const [timeRange, setTimeRange] = useState<'24h' | '7d'>('24h');
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const onboarding = useOnboarding();
 
   const { data: collectionsData, isLoading, isError, refetch } = useApiCollections();
   const epCount = useEndpointsCount();
@@ -61,6 +65,37 @@ const Organization: React.FC = () => {
 
       {isError && <QueryError message="Failed to load organization data" onRetry={() => refetch()} />}
 
+      {!onboarding.data.completed && (
+        <GlassCard variant="accent" className="p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="max-w-2xl">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand">Onboarding In Progress</div>
+              <h3 className="mt-1 text-lg font-bold text-text-primary">Finish deployment, traffic, and application setup before relying on the posture scores.</h3>
+              <p className="mt-2 text-[11px] leading-5 text-text-secondary">
+                The new onboarding flow now mirrors the AppSentinels setup pattern: control plane, traffic hookup, application mapping, identity attributes, and go-live validation.
+              </p>
+            </div>
+            <div className="min-w-[260px]">
+              <div className="flex items-center justify-between text-[11px] text-text-secondary">
+                <span>Setup completion</span>
+                <span className="font-bold text-text-primary">{onboarding.progress}%</span>
+              </div>
+              <div className="mt-2 h-2 rounded-full bg-black/[0.06] overflow-hidden">
+                <div className="h-full rounded-full bg-gradient-to-r from-brand to-blue-500" style={{ width: `${onboarding.progress}%` }} />
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button onClick={() => navigate('/admin/onboarding')} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white hover:bg-brand-dark transition-colors">
+                  Continue Onboarding
+                </button>
+                <button onClick={() => navigate('/admin/applications/add')} className="rounded-lg border border-border-subtle px-4 py-2 text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-brand/20 transition-all">
+                  Register App
+                </button>
+              </div>
+            </div>
+          </div>
+        </GlassCard>
+      )}
+
       {/* KPI Row */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {([
@@ -79,7 +114,7 @@ const Organization: React.FC = () => {
       </div>
 
       {/* Posture + Distribution */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <GlassCard variant="elevated" className="p-5 flex items-center gap-6">
           <ProgressRing value={healthScore} max={100} size={100} strokeWidth={8} label="Health" />
           <div className="flex-1">
@@ -98,7 +133,7 @@ const Organization: React.FC = () => {
                 ['Total Vulns', String(totalVulns), '#EAB308'],
               ].map(([k, v, c]) => (
                 <div key={k} className="flex items-center justify-between">
-                  <span className="text-[10px] text-text-muted">{k}</span>
+                  <span className="text-[11px] text-text-muted">{k}</span>
                   <span className="text-[11px] font-mono font-bold tabular-nums" style={{ color: c }}>{v}</span>
                 </div>
               ))}
@@ -109,7 +144,7 @@ const Organization: React.FC = () => {
         <GlassCard variant="elevated" className="p-5 flex items-center gap-6">
           <DonutChart data={riskData} centerValue={riskTotal} size={120} innerRadius={38} outerRadius={55} centerLabel="Vulns" />
           <div className="flex-1">
-            <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">Vulnerability Distribution</span>
+            <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Vulnerability Distribution</span>
             <div className="mt-3 space-y-2">
               {riskData.map(({ name, value, color }) => (
                 <div key={name} className="space-y-0.5">
@@ -131,7 +166,7 @@ const Organization: React.FC = () => {
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-xs font-bold text-text-primary uppercase tracking-wider">Applications</h3>
-          <span className="text-[10px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted">{collections.length} apps</span>
+          <span className="text-[11px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted">{collections.length} apps</span>
         </div>
 
         {isLoading ? <TableSkeleton columns={6} rows={3} /> : (
@@ -161,8 +196,8 @@ const Organization: React.FC = () => {
                       <div>
                         <h4 className="text-sm font-bold text-text-primary">{app.displayName || app.hostName || `Collection ${app.id}`}</h4>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[10px] px-1.5 py-0.5 rounded border border-border-subtle text-text-muted bg-black/[0.04]">{app.type || 'API'}</span>
-                          <span className="text-[10px] text-text-muted">{app.hostName}</span>
+                          <span className="text-[11px] px-1.5 py-0.5 rounded border border-border-subtle text-text-muted bg-black/[0.04]">{app.type || 'API'}</span>
+                          <span className="text-[11px] text-text-muted">{app.hostName}</span>
                         </div>
                       </div>
                     </div>
@@ -180,7 +215,7 @@ const Organization: React.FC = () => {
                       { label: 'Total Vulns', value: vulnCount, color: '#EF4444' },
                     ].map(({ label, value, color }) => (
                       <div key={label} className="flex flex-col gap-1">
-                        <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">{label}</span>
+                        <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">{label}</span>
                         <span className="text-sm font-bold font-mono tabular-nums" style={{ color }}>{value}</span>
                       </div>
                     ))}

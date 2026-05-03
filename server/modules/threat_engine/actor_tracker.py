@@ -10,18 +10,29 @@ class ActorTracker:
     """
     Identifies and profiles threat actors based on their activity logs.
     """
-    async def track_activity(self, source_ip: str, event_type: str = None, severity: str = "LOW"):
+    async def track_activity(
+        self,
+        source_ip: str,
+        event_type: str = None,
+        severity: str = "LOW",
+        account_id: int | None = None,
+    ):
         """
         Updates an actor's profile and potentially flags them.
         """
+        if account_id is None:
+            raise ValueError("ActorTracker.track_activity requires account_id")
         async with AsyncSessionLocal() as session:
             # 1. Find or create actor
-            stmt = select(ThreatActor).where(ThreatActor.source_ip == source_ip)
+            stmt = select(ThreatActor).where(
+                ThreatActor.source_ip == source_ip,
+                ThreatActor.account_id == account_id,
+            )
             result = await session.execute(stmt)
             actor = result.scalar_one_or_none()
 
             if not actor:
-                actor = ThreatActor(source_ip=source_ip, event_count=1)
+                actor = ThreatActor(account_id=account_id, source_ip=source_ip, event_count=1)
                 session.add(actor)
             else:
                 actor.event_count += 1
@@ -29,6 +40,7 @@ class ActorTracker:
             # 2. Add Malicious Event if provided
             if event_type:
                 new_event = MaliciousEvent(
+                    account_id=account_id,
                     actor_id=actor.id,
                     event_type=event_type,
                     severity=severity

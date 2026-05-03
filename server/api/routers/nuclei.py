@@ -7,11 +7,13 @@ from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete
+from sqlalchemy import and_, select, update, delete
 
 from server.modules.persistence.database import get_db
 from server.models.core import NucleiScan, NucleiTemplate
+from server.modules.auth.rbac import RBAC, can_run_nuclei
 from server.modules.nuclei.runner import NucleiRunner
+from server.modules.utils.finding_fingerprint import collapse_by_fingerprint, nuclei_fingerprint
 
 router = APIRouter(tags=["Nuclei Scanner"])
 
@@ -30,9 +32,10 @@ async def start_scan(
     custom_template_ids: List[str] = Body(default=[], description="IDs from /nuclei/templates"),
     tags: List[str] = Body(default=[]),
     severity: List[str] = Body(default=[]),
-    account_id: int = 1000000,
+    payload: dict = Depends(can_run_nuclei),
     db: AsyncSession = Depends(get_db)
 ):
+    account_id = payload["account_id"]
     scan = NucleiScan(id=str(uuid.uuid4()), account_id=account_id, target=target,
                       template_ids=template_ids, custom_template_ids=custom_template_ids,
                       tags=tags, severity_filter=severity,
@@ -68,22 +71,65 @@ async def start_scan(
         severity=severity or None,
         extra_template_paths=extra_template_paths or None,
     )
+    unique_findings, duplicate_findings = collapse_by_fingerprint(
+        result["findings"],
+        lambda finding: nuclei_fingerprint(finding, target=target, account_id=account_id),
+    )
+    historical_result = await db.execute(
+        select(NucleiScan)
+        .where(
+            NucleiScan.account_id == account_id,
+            NucleiScan.target == target,
+            NucleiScan.id != scan.id,
+        )
+        .order_by(NucleiScan.created_at.desc())
+        .limit(20)
+    )
+    historical_fingerprints = {
+        nuclei_fingerprint(finding, target=hist.target, account_id=account_id)
+        for hist in historical_result.scalars().all()
+        for finding in (hist.findings or [])
+    }
+    repeated_findings = [
+        finding for finding in unique_findings
+        if nuclei_fingerprint(finding, target=target, account_id=account_id) in historical_fingerprints
+    ]
+    new_findings = [
+        finding for finding in unique_findings
+        if nuclei_fingerprint(finding, target=target, account_id=account_id) not in historical_fingerprints
+    ]
 
     if custom_template_dir:
         shutil.rmtree(custom_template_dir, ignore_errors=True)
 
     scan.status = result["status"]
-    scan.findings = result["findings"]
-    scan.total_found = result["total_found"]
+    scan.findings = unique_findings
+    scan.total_found = len(unique_findings)
     scan.completed_at = datetime.now(timezone.utc)
     await db.commit()
 
-    return {"scan_id": scan.id, "status": scan.status, "total_found": scan.total_found,
-            "findings": scan.findings[:10], "note": result.get("note")}
+    return {
+        "scan_id": scan.id,
+        "status": scan.status,
+        "total_found": scan.total_found,
+        "new_findings": len(new_findings),
+        "repeated_findings": len(repeated_findings),
+        "deduplicated_findings": len(duplicate_findings),
+        "findings": [
+            {**finding, "fingerprint": nuclei_fingerprint(finding, target=target, account_id=account_id)}
+            for finding in scan.findings[:10]
+        ],
+        "note": result.get("note"),
+    }
 
 
 @router.get("/scans")
-async def list_scans(account_id: int = 1000000, limit: int = Query(50), db: AsyncSession = Depends(get_db)):
+async def list_scans(
+    limit: int = Query(50),
+    payload: dict = Depends(RBAC.require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    account_id = payload["account_id"]
     result = await db.execute(
         select(NucleiScan).where(NucleiScan.account_id == account_id)
         .order_by(NucleiScan.created_at.desc()).limit(limit)
@@ -98,21 +144,35 @@ async def list_scans(account_id: int = 1000000, limit: int = Query(50), db: Asyn
 
 
 @router.get("/scans/{scan_id}")
-async def get_scan(scan_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(NucleiScan).where(NucleiScan.id == scan_id))
+async def get_scan(
+    scan_id: str,
+    payload: dict = Depends(RBAC.require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    account_id = payload["account_id"]
+    result = await db.execute(
+        select(NucleiScan).where(and_(NucleiScan.id == scan_id, NucleiScan.account_id == account_id))
+    )
     scan = result.scalar_one_or_none()
     if not scan:
         raise HTTPException(404, "Scan not found")
     return {"id": scan.id, "target": scan.target, "status": scan.status,
-            "total_found": scan.total_found, "findings": scan.findings,
+            "total_found": scan.total_found, "findings": [
+                {**finding, "fingerprint": nuclei_fingerprint(finding, target=scan.target, account_id=account_id)}
+                for finding in (scan.findings or [])
+            ],
             "started_at": scan.started_at, "completed_at": scan.completed_at}
 
 
 # ── Custom template management ────────────────────────────────────────────────
 
 @router.get("/templates")
-async def list_custom_templates(account_id: int = 1000000, db: AsyncSession = Depends(get_db)):
+async def list_custom_templates(
+    payload: dict = Depends(RBAC.require_auth),
+    db: AsyncSession = Depends(get_db),
+):
     """List all custom Nuclei templates uploaded for this account."""
+    account_id = payload["account_id"]
     result = await db.execute(
         select(NucleiTemplate).where(NucleiTemplate.account_id == account_id)
         .order_by(NucleiTemplate.created_at.desc())
@@ -131,11 +191,12 @@ async def create_custom_template(
     name: str = Body(...),
     yaml_content: str = Body(..., description="Full Nuclei YAML template content"),
     description: Optional[str] = Body(None),
-    account_id: int = 1000000,
+    payload: dict = Depends(can_run_nuclei),
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a custom Nuclei YAML template. Parses id/severity/tags from the content."""
     import yaml as _yaml
+    account_id = payload["account_id"]
     template_id = None
     severity = "medium"
     tags = []
@@ -166,28 +227,50 @@ async def create_custom_template(
 async def toggle_custom_template(
     template_id: str,
     enabled: bool = Body(..., embed=True),
+    payload: dict = Depends(can_run_nuclei),
     db: AsyncSession = Depends(get_db),
 ):
     """Enable or disable a custom Nuclei template."""
+    account_id = payload["account_id"]
     await db.execute(
-        update(NucleiTemplate).where(NucleiTemplate.id == template_id).values(enabled=enabled)
+        update(NucleiTemplate)
+        .where(and_(NucleiTemplate.id == template_id, NucleiTemplate.account_id == account_id))
+        .values(enabled=enabled)
     )
     await db.commit()
     return {"template_id": template_id, "enabled": enabled}
 
 
 @router.delete("/templates/{template_id}")
-async def delete_custom_template(template_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_custom_template(
+    template_id: str,
+    payload: dict = Depends(can_run_nuclei),
+    db: AsyncSession = Depends(get_db),
+):
     """Delete a custom Nuclei template."""
-    await db.execute(delete(NucleiTemplate).where(NucleiTemplate.id == template_id))
+    account_id = payload["account_id"]
+    await db.execute(
+        delete(NucleiTemplate).where(
+            and_(NucleiTemplate.id == template_id, NucleiTemplate.account_id == account_id)
+        )
+    )
     await db.commit()
     return {"deleted": template_id}
 
 
 @router.get("/templates/{template_id}/content")
-async def get_template_content(template_id: str, db: AsyncSession = Depends(get_db)):
+async def get_template_content(
+    template_id: str,
+    payload: dict = Depends(RBAC.require_auth),
+    db: AsyncSession = Depends(get_db),
+):
     """Return the raw YAML content of a custom template."""
-    result = await db.execute(select(NucleiTemplate).where(NucleiTemplate.id == template_id))
+    account_id = payload["account_id"]
+    result = await db.execute(
+        select(NucleiTemplate).where(
+            and_(NucleiTemplate.id == template_id, NucleiTemplate.account_id == account_id)
+        )
+    )
     t = result.scalar_one_or_none()
     if not t:
         raise HTTPException(404, "Template not found")

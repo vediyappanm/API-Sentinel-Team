@@ -72,8 +72,10 @@ def _remediation(vuln: str) -> str:
     return remap.get(vuln, "Review and fix the identified pattern.")
 
 
-def scan_directory(root_path: str, account_id: int = 1000000, repo_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def scan_directory(root_path: str, account_id: int | None = None, repo_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Walk root_path and return findings compatible with SourceCodeFinding model."""
+    if account_id is None:
+        raise ValueError("account_id is required")
     findings: List[Dict[str, Any]] = []
     root = Path(root_path)
     if not root.exists():

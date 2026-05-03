@@ -16,7 +16,7 @@ import boto3
 
 from server.config import settings
 from server.modules.persistence.database import AsyncSessionLocal, apply_tenant_context
-from server.models.core import RequestLog, EvidenceRecord, TenantRetentionPolicy
+from server.models.core import Account, RequestLog, EvidenceRecord, TenantRetentionPolicy
 from server.modules.tenancy.context import set_current_account_id
 
 logger = logging.getLogger(__name__)
@@ -94,18 +94,21 @@ async def archive_once(account_id: int) -> Dict[str, Any]:
     archived = {"request_logs": 0, "evidence_records": 0}
 
     async with AsyncSessionLocal() as db:
-        set_current_account_id(account_id)
-        await apply_tenant_context(db)
-        retention_days = await _get_retention_days(db, account_id)
-        deleted_cutoff = now - datetime.timedelta(days=retention_days)
+        try:
+            set_current_account_id(account_id)
+            await apply_tenant_context(db)
+            retention_days = await _get_retention_days(db, account_id)
+            deleted_cutoff = now - datetime.timedelta(days=retention_days)
 
-        archived["request_logs"] += await _archive_table(
-            db, RequestLog, account_id, cutoff, deleted_cutoff, "request_logs", _serialize_request_log
-        )
-        archived["evidence_records"] += await _archive_table(
-            db, EvidenceRecord, account_id, cutoff, deleted_cutoff, "evidence_records", _serialize_evidence
-        )
-        await db.commit()
+            archived["request_logs"] += await _archive_table(
+                db, RequestLog, account_id, cutoff, deleted_cutoff, "request_logs", _serialize_request_log
+            )
+            archived["evidence_records"] += await _archive_table(
+                db, EvidenceRecord, account_id, cutoff, deleted_cutoff, "evidence_records", _serialize_evidence
+            )
+            await db.commit()
+        finally:
+            set_current_account_id(None)
 
     return {"status": "ok", "archived": archived}
 
@@ -162,7 +165,7 @@ async def _archive_table(
 
 
 class ArchiveProcessor:
-    def __init__(self, interval_sec: int = 3600, account_id: int = 1000000):
+    def __init__(self, interval_sec: int = 3600, account_id: int = 0):
         self.interval = interval_sec
         self.account_id = account_id
         self._task: asyncio.Task | None = None
@@ -183,7 +186,20 @@ class ArchiveProcessor:
     async def _loop(self) -> None:
         while self._running:
             try:
-                await archive_once(self.account_id)
+                await self._process_once()
             except Exception as exc:
-                logger.error("archive_processor_error", error=str(exc))
+                logger.exception("archive_processor_error: %s", exc)
             await asyncio.sleep(self.interval)
+
+    async def _resolve_account_ids(self) -> list[int]:
+        if self.account_id > 0:
+            return [self.account_id]
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Account.id).order_by(Account.id.asc()))
+            return [row[0] for row in result.all()]
+
+    async def _process_once(self) -> None:
+        account_ids = await self._resolve_account_ids()
+        for account_id in account_ids:
+            await archive_once(account_id)

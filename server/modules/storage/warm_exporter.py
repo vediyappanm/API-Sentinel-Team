@@ -33,7 +33,7 @@ class WarmStoreExporter:
             "actor_metrics_hourly": (None, None),
             "alert_metrics_daily": (None, None),
         }
-        self._cursor_account_id = settings.DEFAULT_ACCOUNT_ID
+        self._cursor_account_id = 0
 
     async def start(self) -> None:
         if self._running or not settings.CLICKHOUSE_ENABLED:
@@ -54,17 +54,23 @@ class WarmStoreExporter:
             try:
                 await self._export_once(ch)
             except Exception as exc:
-                logger.error("warm_export_error", error=str(exc))
+                logger.exception("warm_export_error: %s", exc)
             await asyncio.sleep(self.interval)
 
     async def _export_once(self, ch: ClickHouseClient) -> None:
         async with AsyncSessionLocal() as db:
-            set_current_account_id(self._cursor_account_id)
-            await apply_tenant_context(db)
-            await self._export_endpoint_metrics(db, ch)
-            await self._export_actor_metrics(db, ch)
-            await self._export_alert_metrics(db, ch)
-            await db.commit()
+            try:
+                if self._cursor_account_id > 0:
+                    set_current_account_id(self._cursor_account_id)
+                    await apply_tenant_context(db)
+                else:
+                    set_current_account_id(None)
+                await self._export_endpoint_metrics(db, ch)
+                await self._export_actor_metrics(db, ch)
+                await self._export_alert_metrics(db, ch)
+                await db.commit()
+            finally:
+                set_current_account_id(None)
 
     async def _export_endpoint_metrics(self, db: AsyncSession, ch: ClickHouseClient) -> None:
         cursor = await self._load_cursor(db, "endpoint_metrics_hourly")

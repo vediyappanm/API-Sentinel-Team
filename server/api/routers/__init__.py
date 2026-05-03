@@ -13,6 +13,8 @@ from . import (
     recon, recon_sources,
     # AppSentinel production routers
     blocklist, alerts, sensors, stream, ingestion, openapi_specs, evidence, business_logic, agentic,
+    detection_meta, pentest,
+    lineage,
 )
 
 try:
@@ -70,6 +72,7 @@ router.include_router(ml_models.router, prefix="/ml")
 router.include_router(ml_training.router, prefix="/ml")
 router.include_router(recon.router, prefix="/recon")
 router.include_router(recon_sources.router, prefix="/recon")
+router.include_router(pentest.router, prefix="/pentest")
 
 # AppSentinel production routers
 router.include_router(blocklist.router, prefix="/blocklist")
@@ -77,8 +80,10 @@ router.include_router(alerts.router,    prefix="/alerts")
 router.include_router(sensors.router,   prefix="/sensors")
 router.include_router(stream.router,    prefix="/stream")
 router.include_router(ingestion.router, prefix="/ingestion")
+router.include_router(detection_meta.router, prefix="/detection")
 router.include_router(business_logic.router, prefix="/business-logic")
 router.include_router(agentic.router, prefix="/agentic")
+router.include_router(lineage.router, prefix="/lineage")
 
 if _ws_available:
     router.include_router(ws.router, prefix="/ws")

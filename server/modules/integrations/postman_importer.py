@@ -11,8 +11,10 @@ class PostmanImporter:
     """Parses Postman Collection JSON and extracts endpoint metadata."""
 
     @staticmethod
-    def parse_collection(data: Dict[str, Any], account_id: int = 1000000,
+    def parse_collection(data: Dict[str, Any], account_id: int | None = None,
                          collection_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        if account_id is None:
+            raise ValueError("account_id is required")
         endpoints: List[Dict[str, Any]] = []
         PostmanImporter._walk(data.get("item", []), endpoints, account_id, collection_id)
         return endpoints
@@ -66,7 +68,9 @@ class PostmanImporter:
                 })
 
     @staticmethod
-    def parse_from_file(path: str, account_id: int = 1000000) -> List[Dict[str, Any]]:
+    def parse_from_file(path: str, account_id: int | None = None) -> List[Dict[str, Any]]:
+        if account_id is None:
+            raise ValueError("account_id is required")
         try:
             data = json.loads(Path(path).read_text(encoding="utf-8"))
             return PostmanImporter.parse_collection(data, account_id=account_id)

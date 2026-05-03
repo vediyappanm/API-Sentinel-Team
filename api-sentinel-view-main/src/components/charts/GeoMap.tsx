@@ -33,7 +33,7 @@ const GeoMap: React.FC<GeoMapProps> = ({ threats = [], height = 200, showControl
       className="w-full bg-bg-base rounded-lg border border-border-subtle overflow-hidden relative"
       style={{ height }}
     >
-      <span className="absolute top-2 left-3 text-[10px] text-text-muted font-medium z-10">
+      <span className="absolute top-2 left-3 text-[11px] text-text-muted font-medium z-10">
         Global Threat Map
       </span>
 
@@ -146,7 +146,7 @@ const GeoMap: React.FC<GeoMapProps> = ({ threats = [], height = 200, showControl
       {/* Country tooltip */}
       {tooltip && (
         <div
-          className="fixed z-50 glass-card-premium px-2.5 py-1 rounded text-[10px] text-text-primary pointer-events-none"
+          className="fixed z-50 glass-card-premium px-2.5 py-1 rounded text-[11px] text-text-primary pointer-events-none"
           style={{
             left: tooltip.x + 12,
             top: tooltip.y - 8,

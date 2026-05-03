@@ -280,7 +280,14 @@ async def import_burp(
     for ep_data in parsed["endpoints"]:
         db.add(APIEndpoint(id=str(uuid.uuid4()), **ep_data))
     for sd in parsed["sample_data"]:
-        db.add(SampleData(id=str(uuid.uuid4()), request=sd["request"], response=sd["response"]))
+        db.add(
+            SampleData(
+                id=str(uuid.uuid4()),
+                account_id=sd["account_id"],
+                request=sd["request"],
+                response=sd["response"],
+            )
+        )
     await db.commit()
     return {"endpoints_imported": len(parsed["endpoints"]),
             "samples_imported": len(parsed["sample_data"]), "source": "burp"}

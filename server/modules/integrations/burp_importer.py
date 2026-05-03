@@ -12,8 +12,10 @@ class BurpImporter:
     """Parses Burp Suite XML export and extracts HTTP request/response pairs."""
 
     @staticmethod
-    def parse_xml(xml_content: str, account_id: int = 1000000,
+    def parse_xml(xml_content: str, account_id: int | None = None,
                   collection_id: Optional[str] = None) -> Dict[str, List[Dict[str, Any]]]:
+        if account_id is None:
+            raise ValueError("account_id is required")
         endpoints: List[Dict[str, Any]] = []
         sample_data: List[Dict[str, Any]] = []
         seen: set = set()
@@ -86,6 +88,7 @@ class BurpImporter:
                     })
 
                 sample_data.append({
+                    "account_id": account_id,
                     "request": {"method": method, "url": url, "headers": req_headers, "body": req_body},
                     "response": {"status_code": resp_code, "headers": resp_headers, "body": resp_body},
                 })

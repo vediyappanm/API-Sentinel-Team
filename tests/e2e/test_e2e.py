@@ -20,10 +20,10 @@ def vulnerable_server():
 async def test_bola_detection_end_to_end(client: AsyncClient, vulnerable_server):
     # 1. Setup platform account
     signup_resp = await client.post("/api/auth/signup", json={
-        "email": "tester@e2e.com", "password": "password123", "account_name": "E2ETest"
+        "email": "tester@e2e.com", "password": "StrongPass123!@", "account_name": "E2ETest"
     })
-    token = signup_resp.json()["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
+    assert signup_resp.status_code == 200
+    headers = {}
 
     # 2. Ingest vulnerable endpoint
     ep_resp = await client.post("/api/endpoints/", headers=headers, json={

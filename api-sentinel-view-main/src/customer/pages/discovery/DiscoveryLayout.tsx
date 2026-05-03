@@ -7,9 +7,7 @@ const DiscoveryLayout: React.FC = () => {
   const navigate = useNavigate();
 
   const segments = location.pathname.split('/').filter(Boolean);
-  // If we are at /discovery, segments is ["discovery"]. length is 1.
-  // We want activeTab to be "" for index, or "parameters", etc.
-  const activeTab = segments[1] || '';
+  const activeTab = segments[2] || '';
 
   const tabs = [
     { key: '', label: 'API Catalogue' },
@@ -17,10 +15,13 @@ const DiscoveryLayout: React.FC = () => {
     { key: 'governance', label: 'API Governance' },
     { key: 'sequence', label: 'API Sequence Flow' },
     { key: 'tree', label: 'API Tree' },
+    { key: 'call-graph', label: 'Business Logic' },
+    { key: 'schema', label: 'Schema Validation' },
+    { key: 'sensitive-data', label: 'Sensitive Data' },
   ];
 
   const handleTabChange = (key: string) => {
-    navigate(key ? `/discovery/${key}` : '/discovery');
+    navigate(key ? `/app/discovery/${key}` : '/app/discovery');
   };
 
   return (

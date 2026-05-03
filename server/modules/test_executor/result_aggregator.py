@@ -1,12 +1,22 @@
 from server.modules.persistence.database import AsyncSessionLocal
-from server.models.core import Vulnerability
 from server.api.websocket.manager import ws_manager
 from server.api.websocket.event_types import WSEventType
+from server.modules.vulnerability_detector.store import create_or_merge_vulnerability
 
 class ResultAggregator:
     """
     Saves test results as persistent vulnerabilities in the database.
     """
+    def __init__(self, db=None):
+        self.db = db
+
+    @staticmethod
+    def _account_id_for(endpoint: dict, test_result: dict) -> int:
+        account_id = endpoint.get("account_id", test_result.get("account_id"))
+        if account_id is None:
+            raise ValueError("ResultAggregator requires account_id on the endpoint or test result")
+        return int(account_id)
+
     async def add_vulnerability(self, test_result: dict, endpoint: dict):
         """
         Processes a raw ExecutionEngine result and stores it if vulnerable.
@@ -14,33 +24,63 @@ class ResultAggregator:
         if not test_result.get("is_vulnerable"):
             return
 
-        async with AsyncSessionLocal() as db:
-            vuln = Vulnerability(
-                template_id=test_result["template_id"],
-                endpoint_id=endpoint.get("id"),
-                url=endpoint.get("path"),
-                method=endpoint.get("method"),
-                severity=test_result.get("severity", "MEDIUM"),
-                status="OPEN",
-                evidence={
-                    "results": test_result["results"],
-                    "context": test_result.get("context_variables", [])
-                }
+        account_id = self._account_id_for(endpoint, test_result)
+
+        if self.db is not None:
+            db = self.db
+            vuln, created, fingerprint = await create_or_merge_vulnerability(
+                db,
+                {
+                    "account_id": account_id,
+                    "template_id": test_result["template_id"],
+                    "endpoint_id": endpoint.get("id"),
+                    "url": endpoint.get("url") or endpoint.get("path"),
+                    "method": endpoint.get("method"),
+                    "severity": test_result.get("severity", "MEDIUM"),
+                    "type": test_result.get("type") or test_result["template_id"],
+                    "status": "OPEN",
+                    "evidence": {
+                        "results": test_result["results"],
+                        "context": test_result.get("context_variables", []),
+                    },
+                },
             )
-            db.add(vuln)
-            await db.commit()
-            
-            # Broadcast to all connected Dashboard clients
-            await ws_manager.broadcast({
-                "type": WSEventType.VULNERABILITY_FOUND,
-                "data": {
-                    "id": vuln.id,
-                    "template_id": vuln.template_id,
-                    "severity": vuln.severity,
-                    "url": vuln.url,
-                    "method": vuln.method,
-                    "timestamp": vuln.created_at.isoformat() if vuln.created_at else None
-                }
-            })
-            
-            print(f"Recorded vulnerability: {test_result['template_id']} on {endpoint['path']}")
+        else:
+            async with AsyncSessionLocal() as db:
+                vuln, created, fingerprint = await create_or_merge_vulnerability(
+                    db,
+                    {
+                        "account_id": account_id,
+                        "template_id": test_result["template_id"],
+                        "endpoint_id": endpoint.get("id"),
+                        "url": endpoint.get("url") or endpoint.get("path"),
+                        "method": endpoint.get("method"),
+                        "severity": test_result.get("severity", "MEDIUM"),
+                        "type": test_result.get("type") or test_result["template_id"],
+                        "status": "OPEN",
+                        "evidence": {
+                            "results": test_result["results"],
+                            "context": test_result.get("context_variables", []),
+                        },
+                    },
+                )
+                await db.commit()
+
+        if not created:
+            return
+
+        # Broadcast to all connected Dashboard clients
+        await ws_manager.broadcast({
+            "type": WSEventType.VULNERABILITY_FOUND,
+            "data": {
+                "id": vuln.id,
+                "template_id": vuln.template_id,
+                "severity": vuln.severity,
+                "url": vuln.url,
+                "method": vuln.method,
+                "fingerprint": fingerprint,
+                "timestamp": vuln.created_at.isoformat() if vuln.created_at else None
+            }
+        })
+        
+        print(f"Recorded vulnerability: {test_result['template_id']} on {endpoint['path']}")

@@ -10,10 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, and_
 
 from server.modules.persistence.database import get_db
-from server.models.core import SourceCodeRepo, SourceCodeFinding
+from server.models.core import APIEndpoint, SourceCodeRepo, SourceCodeFinding
 from server.modules.source_code_analyzer.scanner import scan_directory
 from server.modules.auth.rbac import RBAC
 from server.modules.auth.encryption import Encryption
+from server.modules.utils.finding_fingerprint import source_finding_fingerprint
 
 router = APIRouter(tags=["Source Code Analysis"])
 
@@ -38,6 +39,15 @@ async def _clone_repo(repo_url: str, branch: str, access_token: Optional[str], d
         return proc.returncode == 0
     except Exception:
         return False
+
+
+def _extract_endpoint_path(finding: dict) -> Optional[str]:
+    if finding.get("finding_type") != "ENDPOINT_DISCOVERED":
+        return None
+    title = str(finding.get("title") or "")
+    if not title.startswith("Endpoint: "):
+        return None
+    return title.split("Endpoint: ", 1)[1].strip()
 
 
 @router.get("/repos")
@@ -111,13 +121,58 @@ async def trigger_scan(
         raise HTTPException(400, "No local_path or repo_url configured for scanning")
 
     findings = scan_directory(scan_path, account_id=account_id, repo_id=repo_id)
+    endpoints_result = await db.execute(
+        select(APIEndpoint)
+        .where(APIEndpoint.account_id == account_id)
+        .order_by(APIEndpoint.created_at.desc())
+    )
+    endpoint_lookup = {}
+    for endpoint in endpoints_result.scalars().all():
+        if endpoint.path:
+            endpoint_lookup.setdefault(endpoint.path, endpoint.id)
+        if endpoint.path_pattern:
+            endpoint_lookup.setdefault(endpoint.path_pattern, endpoint.id)
 
-    for f in findings:
-        db.add(SourceCodeFinding(id=str(uuid.uuid4()), **f))
+    existing_result = await db.execute(
+        select(SourceCodeFinding).where(
+            SourceCodeFinding.account_id == account_id,
+            SourceCodeFinding.repo_id == repo_id,
+            SourceCodeFinding.status != "FIXED",
+        )
+    )
+    existing_fingerprints = {
+        source_finding_fingerprint(finding) for finding in existing_result.scalars().all()
+    }
+    batch_fingerprints = set()
+    created_fingerprints = []
+    deduplicated_count = 0
+
+    for finding in findings:
+        endpoint_path = _extract_endpoint_path(finding)
+        if endpoint_path and endpoint_lookup.get(endpoint_path):
+            finding["endpoint_id"] = endpoint_lookup[endpoint_path]
+
+        fingerprint = source_finding_fingerprint(finding)
+        if fingerprint in existing_fingerprints or fingerprint in batch_fingerprints:
+            deduplicated_count += 1
+            continue
+
+        batch_fingerprints.add(fingerprint)
+        created_fingerprints.append(fingerprint)
+        db.add(SourceCodeFinding(id=str(uuid.uuid4()), **finding))
+
+    await db.flush()
+    active_finding_count = await db.scalar(
+        select(func.count(SourceCodeFinding.id)).where(
+            SourceCodeFinding.account_id == account_id,
+            SourceCodeFinding.repo_id == repo_id,
+            SourceCodeFinding.status != "FIXED",
+        )
+    ) or 0
 
     await db.execute(
         update(SourceCodeRepo).where(SourceCodeRepo.id == repo_id)
-        .values(last_scanned_at=datetime.now(timezone.utc), finding_count=len(findings))
+        .values(last_scanned_at=datetime.now(timezone.utc), finding_count=active_finding_count)
     )
     await db.commit()
 
@@ -126,7 +181,14 @@ async def trigger_scan(
         import shutil
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    return {"repo_id": repo_id, "findings_found": len(findings), "status": "scan_complete"}
+    return {
+        "repo_id": repo_id,
+        "findings_found": len(findings),
+        "created_findings": len(created_fingerprints),
+        "deduplicated_findings": deduplicated_count,
+        "created_fingerprints": created_fingerprints[:10],
+        "status": "scan_complete",
+    }
 
 
 @router.get("/findings")
@@ -151,7 +213,8 @@ async def list_findings(
         {"id": f.id, "file_path": f.file_path, "line_number": f.line_number,
          "finding_type": f.finding_type, "severity": f.severity, "title": f.title,
          "description": f.description, "code_snippet": f.code_snippet,
-         "remediation": f.remediation, "status": f.status, "created_at": f.created_at}
+         "remediation": f.remediation, "status": f.status, "endpoint_id": f.endpoint_id,
+         "fingerprint": source_finding_fingerprint(f), "created_at": f.created_at}
         for f in findings
     ]}
 

@@ -10,6 +10,7 @@ from server.modules.persistence.database import get_read_db
 router = APIRouter()
 
 
+@router.get("")
 @router.get("/")
 async def list_evidence(
     endpoint_id: str | None = Query(None),

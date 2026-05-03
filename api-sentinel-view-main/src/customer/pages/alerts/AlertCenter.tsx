@@ -4,6 +4,7 @@ import { Shield, AlertTriangle, CheckCircle, XCircle, RefreshCw, Activity, Filte
 import QueryError from '@/components/shared/QueryError';
 import MetricWidget from '@/components/ui/MetricWidget';
 import GlassCard from '@/components/ui/GlassCard';
+import { del, get, patch } from '@/lib/api-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,41 +34,43 @@ interface AlertSummary {
 
 // ─── API calls ────────────────────────────────────────────────────────────────
 
-function authHeaders(): HeadersInit {
-  const token = localStorage.getItem('sentinel_token');
-  return { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+function normalizeAlert(item: any): Alert {
+  return {
+    id: item.id,
+    severity: item.severity ?? 'LOW',
+    category: item.category ?? '',
+    title: item.title ?? item.message ?? 'Untitled alert',
+    message: item.message ?? '',
+    source_ip: item.source_ip ?? '',
+    endpoint: item.endpoint ?? '',
+    timestamp: item.timestamp ?? item.created_at ?? new Date().toISOString(),
+    status: item.status ?? 'OPEN',
+  };
 }
 
 async function fetchAlerts(status?: string, severity?: string, signal?: AbortSignal): Promise<Alert[]> {
   const params = new URLSearchParams({ limit: '100' });
   if (status && status !== 'ALL') params.set('status', status);
   if (severity && severity !== 'ALL') params.set('severity', severity);
-  const res = await fetch(`/api/alerts/?${params}`, { headers: authHeaders(), signal });
-  if (!res.ok) throw new Error('Failed to fetch alerts');
-  const json = await res.json();
-  if (Array.isArray(json)) return json;
-  return json.items ?? json.alerts ?? [];
+  const json = await get<any>(`/alerts/?${params.toString()}`, signal);
+  const items = Array.isArray(json) ? json : json.items ?? json.alerts ?? [];
+  return items.map(normalizeAlert);
 }
 
 async function fetchAlertSummary(signal?: AbortSignal): Promise<AlertSummary> {
-  const res = await fetch('/api/alerts/summary', { headers: authHeaders(), signal });
-  if (!res.ok) throw new Error('Failed to fetch alert summary');
-  return res.json();
+  return get<AlertSummary>('/alerts/summary', signal);
 }
 
 async function acknowledgeAlert(id: string): Promise<void> {
-  const res = await fetch(`/api/alerts/${id}/acknowledge`, { method: 'PATCH', headers: authHeaders() });
-  if (!res.ok) throw new Error('Failed to acknowledge alert');
+  await patch(`/alerts/${id}/acknowledge`);
 }
 
 async function resolveAlert(id: string): Promise<void> {
-  const res = await fetch(`/api/alerts/${id}/resolve`, { method: 'PATCH', headers: authHeaders() });
-  if (!res.ok) throw new Error('Failed to resolve alert');
+  await patch(`/alerts/${id}/resolve`);
 }
 
 async function dismissAlert(id: string): Promise<void> {
-  const res = await fetch(`/api/alerts/${id}`, { method: 'DELETE', headers: authHeaders() });
-  if (!res.ok) throw new Error('Failed to dismiss alert');
+  await del(`/alerts/${id}`);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -125,13 +128,13 @@ const AlertCard: React.FC<AlertCardProps> = ({ alert, onAcknowledge, onResolve, 
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0 space-y-2">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border" style={{ backgroundColor: sevBadge.bg, color: sevBadge.text, borderColor: `${sevBadge.text}40` }}>
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full border" style={{ backgroundColor: sevBadge.bg, color: sevBadge.text, borderColor: `${sevBadge.text}40` }}>
                 {alert.severity}
               </span>
               {alert.category && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-border-subtle bg-bg-elevated text-text-muted">{alert.category}</span>
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border border-border-subtle bg-bg-elevated text-text-muted">{alert.category}</span>
               )}
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border ml-auto" style={{ backgroundColor: statusChip.bg, color: statusChip.text, borderColor: `${statusChip.text}40` }}>
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full border ml-auto" style={{ backgroundColor: statusChip.bg, color: statusChip.text, borderColor: `${statusChip.text}40` }}>
                 {statusChip.label}
               </span>
             </div>
@@ -140,32 +143,32 @@ const AlertCard: React.FC<AlertCardProps> = ({ alert, onAcknowledge, onResolve, 
             <div className="flex items-center gap-4 flex-wrap">
               {alert.source_ip && <span className="text-[11px] font-mono text-text-secondary">{alert.source_ip}</span>}
               {alert.endpoint && <span className="text-[11px] font-mono text-text-muted truncate max-w-[300px]">{alert.endpoint}</span>}
-              <span className="text-[10px] text-text-muted ml-auto whitespace-nowrap">{timeAgo(alert.timestamp)}</span>
+              <span className="text-[11px] text-text-muted ml-auto whitespace-nowrap">{timeAgo(alert.timestamp)}</span>
             </div>
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-[10px] text-text-muted flex items-center gap-1">
+              <span className="text-[11px] text-text-muted flex items-center gap-1">
                 <FileSearch size={10} />
                 Evidence {evidenceReady ? 'ready' : 'pending'}
               </span>
-              <span className="text-[10px] text-text-muted">OWASP + MITRE mapped</span>
+              <span className="text-[11px] text-text-muted">OWASP + MITRE mapped</span>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2 mt-3 flex-wrap">
           {alert.status === 'OPEN' && (
             <button onClick={() => onAcknowledge(alert.id)} disabled={isActioning}
-              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-1.5 rounded-lg border border-sev-medium/30 bg-sev-medium/10 text-sev-medium hover:bg-sev-medium/20 disabled:opacity-50 transition-all">
+              className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg border border-sev-medium/30 bg-sev-medium/10 text-sev-medium hover:bg-sev-medium/20 disabled:opacity-50 transition-all">
               {isActioning ? <RefreshCw size={10} className="animate-spin" /> : <Activity size={10} />} Acknowledge
             </button>
           )}
           {alert.status !== 'RESOLVED' && (
             <button onClick={() => onResolve(alert.id)} disabled={isActioning}
-              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-1.5 rounded-lg border border-sev-low/30 bg-sev-low/10 text-sev-low hover:bg-sev-low/20 disabled:opacity-50 transition-all">
+              className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg border border-sev-low/30 bg-sev-low/10 text-sev-low hover:bg-sev-low/20 disabled:opacity-50 transition-all">
               {isActioning ? <RefreshCw size={10} className="animate-spin" /> : <CheckCircle size={10} />} Resolve
             </button>
           )}
           <button onClick={() => onDismiss(alert.id)} disabled={isActioning}
-            className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-1.5 rounded-lg border border-border-subtle bg-bg-elevated text-text-muted hover:bg-bg-surface disabled:opacity-50 transition-all">
+            className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg border border-border-subtle bg-bg-elevated text-text-muted hover:bg-bg-surface disabled:opacity-50 transition-all">
             {isActioning ? <RefreshCw size={10} className="animate-spin" /> : <XCircle size={10} />} Dismiss
           </button>
         </div>
@@ -229,7 +232,7 @@ const AlertCenter: React.FC = () => {
         <div className="flex items-center gap-3">
           <h2 className="text-sm font-bold text-text-primary">Alert Center</h2>
           {unreadCount > 0 && (
-            <span className="bg-sev-critical text-white text-[10px] font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center">{unreadCount}</span>
+            <span className="bg-sev-critical text-white text-[11px] font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center">{unreadCount}</span>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -246,7 +249,7 @@ const AlertCenter: React.FC = () => {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         <MetricWidget label="Total" value={summary?.total ?? alerts.length} icon={Filter} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, (summary?.total ?? 0) + Math.floor(Math.random() * 4 - 2)))} sparkColor="#F97316" />
         <MetricWidget label="Open" value={summary?.open ?? tabCounts.OPEN} icon={AlertTriangle} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, (summary?.open ?? 0) + Math.floor(Math.random() * 3 - 1)))} sparkColor="#EF4444" />
         <MetricWidget label="Critical" value={summary?.critical ?? tabCounts.CRITICAL} icon={XCircle} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, (summary?.critical ?? 0) + Math.floor(Math.random() * 2)))} sparkColor="#EF4444" />

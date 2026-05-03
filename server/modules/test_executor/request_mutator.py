@@ -59,10 +59,13 @@ class RequestMutator:
                 if params:
                     mutated["headers"] = self._remove_auth_headers(mutated.get("headers", {}))
             elif action == "replace_auth_header":
-                if params and auth_context.get("attacker_token"):
+                replacement_token = auth_context.get("attacker_token")
+                if isinstance(params, str):
+                    replacement_token = params
+                if params and replacement_token:
                     mutated["headers"] = self._replace_auth_header(
                         mutated.get("headers", {}),
-                        auth_context["attacker_token"],
+                        replacement_token,
                         auth_context.get("auth_header", "Authorization")
                     )
 

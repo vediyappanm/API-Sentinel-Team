@@ -52,7 +52,10 @@ class ContextManager:
         Recursively substitute variables in dicts or lists.
         """
         if isinstance(data, dict):
-            return {k: self.substitute_recursive(v) for k, v in data.items()}
+            return {
+                self.substitute_variables(k) if isinstance(k, str) else k: self.substitute_recursive(v)
+                for k, v in data.items()
+            }
         elif isinstance(data, list):
             return [self.substitute_recursive(i) for i in data]
         elif isinstance(data, str):

@@ -77,7 +77,7 @@ const EnforcementHistory: React.FC = () => {
             { name: 'Low', value: sevStats.low, color: '#22C55E' },
           ]} size={90} innerRadius={28} outerRadius={40} centerLabel="Sev" />
           <div className="flex-1 space-y-1.5">
-            <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">By Severity</span>
+            <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">By Severity</span>
             {[
               { label: 'Critical', value: sevStats.critical, color: '#EF4444' },
               { label: 'High', value: sevStats.high, color: '#F97316' },
@@ -93,7 +93,7 @@ const EnforcementHistory: React.FC = () => {
         </GlassCard>
 
         <GlassCard variant="default" className="p-4">
-          <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">Top Categories</span>
+          <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Top Categories</span>
           <div className="mt-2 space-y-2">
             {catStats.map(([cat, cnt]) => {
               const maxCat = catStats.length > 0 ? catStats[0][1] : 1;
@@ -117,13 +117,13 @@ const EnforcementHistory: React.FC = () => {
           <span className="text-sm font-bold text-text-primary flex items-center gap-2">
             <Activity size={14} className="text-sev-critical" />
             Blocked Events
-            <span className="text-[10px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted flex items-center gap-1"><Calendar size={10} /> Last 90 Days</span>
+            <span className="text-[11px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted flex items-center gap-1"><Calendar size={10} /> Last 90 Days</span>
           </span>
           <div className="flex items-center gap-3 text-xs text-text-muted">
             <span>{total > 0 ? `${page * pageSize + 1}-${Math.min((page + 1) * pageSize, total)}` : '0'} of {total}</span>
             <div className="flex gap-1">
-              <button disabled={page === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[10px] disabled:opacity-30 hover:border-brand/20 transition-all">Prev</button>
-              <button disabled={(page + 1) * pageSize >= total} onClick={() => setPage(p => p + 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[10px] disabled:opacity-30 hover:border-brand/20 transition-all">Next</button>
+              <button disabled={page === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[11px] disabled:opacity-30 hover:border-brand/20 transition-all">Prev</button>
+              <button disabled={(page + 1) * pageSize >= total} onClick={() => setPage(p => p + 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[11px] disabled:opacity-30 hover:border-brand/20 transition-all">Next</button>
             </div>
             <button className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-elevated outline-none transition-colors"><Filter size={14} /></button>
           </div>
@@ -131,15 +131,15 @@ const EnforcementHistory: React.FC = () => {
 
         {isLoading ? <TableSkeleton columns={6} rows={pageSize} /> : (
           <div className="overflow-x-auto flex-1">
-            <table className="w-full text-left border-collapse min-w-[900px]">
+            <table className="w-full text-left border-collapse min-w-[550px]">
               <thead className="bg-bg-base/50">
                 <tr>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-20">Severity</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-20">Action</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-[30%]">Endpoint</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-24">Category</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-28">Timestamp</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-[24%]">Summary</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20">Severity</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20">Action</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-[30%]">Endpoint</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-24">Category</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-28">Timestamp</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-[24%]">Summary</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle">
@@ -149,7 +149,7 @@ const EnforcementHistory: React.FC = () => {
                     <tr key={row.id} className="data-row-interactive hover:bg-white/[0.02] transition-colors" style={{ borderLeftColor: sevBorderColors[sev] || 'transparent' }}>
                       <td className="px-4 py-3"><SeverityBadge severity={sev} /></td>
                       <td className="px-4 py-3">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sev-critical/10 text-sev-critical border border-sev-critical/20">Blocked</span>
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-sev-critical/10 text-sev-critical border border-sev-critical/20">Blocked</span>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
@@ -158,7 +158,7 @@ const EnforcementHistory: React.FC = () => {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-[11px] text-text-secondary">{row.category || row.filterId || '-'}</td>
-                      <td className="px-4 py-3 text-[10px] font-mono text-text-muted">{formatTs(row.timestamp)}</td>
+                      <td className="px-4 py-3 text-[11px] font-mono text-text-muted">{formatTs(row.timestamp)}</td>
                       <td className="px-4 py-3 text-[11px] text-text-muted truncate">{row.description || '-'}</td>
                     </tr>
                   );

@@ -1,13 +1,12 @@
 import { get, post } from '@/lib/api-client';
-
-/* ───── Types for New Engine ───── */
+import type { ApiCollectionId } from '@/services/discovery.service';
 
 export interface AktoMaliciousEvent {
   id: string;
   actor: string;
   filterId: string;
   ip: string;
-  apiCollectionId: number;
+  apiCollectionId: ApiCollectionId;
   url: string;
   method: string;
   timestamp: number;
@@ -24,13 +23,13 @@ export interface AktoThreatActor {
   discoveredAt: number;
   lastSeenAt: number;
   country: string;
-  actorStatus: string;          // BLOCKED, MONITORING, WHITELISTED
+  actorStatus: string;
   severity: string;
   totalRequests: number;
   riskScore?: number;
 }
 
-/* ───── Security Events (WAF + Anomalies + Threat Engine) ───── */
+const DEFAULT_COLLECTION_ID: ApiCollectionId = 'default-inventory';
 
 export async function fetchSecurityEvents(
   skip: number = 0,
@@ -48,18 +47,18 @@ export async function fetchSecurityEvents(
 
   const data = await get<any>(url, signal);
 
-  const allEvents: AktoMaliciousEvent[] = (data.events || []).map((e: any) => ({
-    id: e.id,
-    actor: e.ip || e.actor_id || 'unknown',
-    filterId: e.category || e.event_type || '-',
-    ip: e.ip || e.actor_id || 'unknown',
-    apiCollectionId: 1000000,
-    url: e.url || e.path || '/',
-    method: e.method || 'GET',
-    timestamp: e.timestamp || Date.now(),
-    severity: e.severity || 'MEDIUM',
-    category: e.category || e.event_type,
-    subCategory: e.subCategory,
+  const allEvents: AktoMaliciousEvent[] = (data.events || []).map((event: any) => ({
+    id: event.id,
+    actor: event.ip || event.actor_id || 'unknown',
+    filterId: event.category || event.event_type || '-',
+    ip: event.ip || event.actor_id || 'unknown',
+    apiCollectionId: event.api_collection_id ?? event.collection_id ?? DEFAULT_COLLECTION_ID,
+    url: event.url || event.path || '/',
+    method: event.method || 'GET',
+    timestamp: event.timestamp || Date.now(),
+    severity: event.severity || 'MEDIUM',
+    category: event.category || event.event_type,
+    subCategory: event.subCategory,
   }));
 
   return {
@@ -90,17 +89,17 @@ export async function fetchThreatActors(
   const data = Array.isArray(raw) ? raw : (raw?.actors ?? []);
   const totalCount = raw?.total ?? data.length;
 
-  const actors: AktoThreatActor[] = (data || []).map((a: any) => ({
-    id: a.source_ip,
-    latestApiIp: a.source_ip,
+  const actors: AktoThreatActor[] = (data || []).map((actor: any) => ({
+    id: actor.source_ip,
+    latestApiIp: actor.source_ip,
     latestApiAttackType: ['Suspicious Behavior'],
-    discoveredAt: new Date(a.first_seen).getTime(),
-    lastSeenAt: new Date(a.last_seen || a.first_seen).getTime(),
+    discoveredAt: new Date(actor.first_seen).getTime(),
+    lastSeenAt: new Date(actor.last_seen || actor.first_seen).getTime(),
     country: 'Unknown',
-    actorStatus: a.status || 'MONITORING',
-    severity: a.risk_score > 7 ? 'HIGH' : a.risk_score > 3 ? 'MEDIUM' : 'LOW',
-    totalRequests: a.event_count || 0,
-    riskScore: a.risk_score
+    actorStatus: actor.status || 'MONITORING',
+    severity: actor.risk_score > 7 ? 'HIGH' : actor.risk_score > 3 ? 'MEDIUM' : 'LOW',
+    totalRequests: actor.event_count || 0,
+    riskScore: actor.risk_score,
   }));
 
   return {
@@ -117,9 +116,9 @@ export async function modifyThreatActorStatus(actorId: string, status: string, s
 export async function fetchThreatCategoryCount(startTs?: number, endTs?: number, signal?: AbortSignal) {
   const events = await fetchSecurityEvents(0, 500, undefined, undefined, undefined, startTs, endTs, signal);
   const counts: Record<string, number> = {};
-  events.maliciousEvents.forEach(e => {
-    const cat = e.category || 'Other';
-    counts[cat] = (counts[cat] || 0) + 1;
+  events.maliciousEvents.forEach((event) => {
+    const category = event.category || 'Other';
+    counts[category] = (counts[category] || 0) + 1;
   });
   return { categoryCount: counts };
 }
@@ -127,9 +126,9 @@ export async function fetchThreatCategoryCount(startTs?: number, endTs?: number,
 export async function fetchCountBySeverity(startTs?: number, endTs?: number, signal?: AbortSignal) {
   const events = await fetchSecurityEvents(0, 500, undefined, undefined, undefined, startTs, endTs, signal);
   const counts: Record<string, number> = { HIGH: 0, MEDIUM: 0, LOW: 0 };
-  events.maliciousEvents.forEach(e => {
-    const sev = e.severity.toUpperCase();
-    if (counts[sev] !== undefined) counts[sev]++;
+  events.maliciousEvents.forEach((event) => {
+    const severity = event.severity.toUpperCase();
+    if (counts[severity] !== undefined) counts[severity]++;
   });
   return { severityCount: counts };
 }
@@ -147,7 +146,7 @@ export async function fetchSecurityEventFilters(signal?: AbortSignal) {
 }
 
 export async function fetchThreatActorFilters(signal?: AbortSignal) {
-  return fetchSecurityEventFilters(signal); // Reuse IP based filters
+  return fetchSecurityEventFilters(signal);
 }
 
 export async function fetchThreatTopN(startTs?: number, endTs?: number, signal?: AbortSignal) {
@@ -161,4 +160,3 @@ export async function fetchThreatTopN(startTs?: number, endTs?: number, signal?:
     topHosts: data.top_hosts || [],
   };
 }
-

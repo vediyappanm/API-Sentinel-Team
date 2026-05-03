@@ -39,6 +39,21 @@ spec:
                 secretKeyRef:
                   name: {{ include "api-sentinel.fullname" . }}-secrets
                   key: KAFKA_BOOTSTRAP_SERVERS
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "api-sentinel.fullname" . }}-secrets
+                  key: JWT_SECRET
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "api-sentinel.fullname" . }}-secrets
+                  key: API_KEY
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "api-sentinel.fullname" . }}-secrets
+                  key: ENCRYPTION_KEY
             - name: KAFKA_SECURITY_PROTOCOL
               value: "{{ .Values.externalServices.kafkaSecurityProtocol }}"
             - name: KAFKA_SASL_MECHANISM
@@ -61,13 +76,13 @@ spec:
                   key: CLICKHOUSE_URL
           readinessProbe:
             httpGet:
-              path: /api/health
+              path: {{ .Values.probes.readinessPath }}
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /api/health
+              path: {{ .Values.probes.livenessPath }}
               port: 8000
             initialDelaySeconds: 15
             periodSeconds: 20

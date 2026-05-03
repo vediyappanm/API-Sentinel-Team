@@ -1,17 +1,20 @@
-"""Alert management — create, acknowledge, resolve, dismiss security alerts."""
-import uuid
+"""Alert management - create, acknowledge, resolve, dismiss security alerts."""
+
 import datetime
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from server.modules.persistence.database import get_db
+
 from server.models.core import Alert
+from server.modules.auth.rbac import RBAC, require_security_engineer
 from server.modules.integrations.dispatcher import dispatch_event
+from server.modules.persistence.database import get_db
 from server.modules.response.playbook_executor import execute_playbooks
 
 router = APIRouter()
-ACCOUNT_ID = 1000000
 
 
 class AlertCreate(BaseModel):
@@ -28,42 +31,51 @@ async def list_alerts(
     status: str | None = Query(None),
     severity: str | None = Query(None),
     limit: int = Query(100, le=500),
+    payload: dict = Depends(RBAC.require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(Alert).where(Alert.account_id == ACCOUNT_ID)
+    account_id = payload["account_id"]
+    query = select(Alert).where(Alert.account_id == account_id)
     if status:
-        q = q.where(Alert.status == status.upper())
+        query = query.where(Alert.status == status.upper())
     if severity:
-        q = q.where(Alert.severity == severity.upper())
-    q = q.order_by(Alert.created_at.desc()).limit(limit)
-    result = await db.execute(q)
+        query = query.where(Alert.severity == severity.upper())
+    query = query.order_by(Alert.created_at.desc()).limit(limit)
+    result = await db.execute(query)
     rows = result.scalars().all()
-    return [_serialize(r) for r in rows]
+    return [_serialize(row) for row in rows]
 
 
 @router.get("/summary")
-async def alert_summary(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Alert).where(Alert.account_id == ACCOUNT_ID)
-    )
+async def alert_summary(
+    payload: dict = Depends(RBAC.require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    account_id = payload["account_id"]
+    result = await db.execute(select(Alert).where(Alert.account_id == account_id))
     rows = result.scalars().all()
     return {
-        "total":        len(rows),
-        "open":         sum(1 for r in rows if r.status == "OPEN"),
-        "acknowledged": sum(1 for r in rows if r.status == "ACKNOWLEDGED"),
-        "resolved":     sum(1 for r in rows if r.status == "RESOLVED"),
-        "critical":     sum(1 for r in rows if r.severity == "CRITICAL"),
-        "high":         sum(1 for r in rows if r.severity == "HIGH"),
-        "medium":       sum(1 for r in rows if r.severity == "MEDIUM"),
-        "low":          sum(1 for r in rows if r.severity == "LOW"),
+        "total": len(rows),
+        "open": sum(1 for row in rows if row.status == "OPEN"),
+        "acknowledged": sum(1 for row in rows if row.status == "ACKNOWLEDGED"),
+        "resolved": sum(1 for row in rows if row.status == "RESOLVED"),
+        "critical": sum(1 for row in rows if row.severity == "CRITICAL"),
+        "high": sum(1 for row in rows if row.severity == "HIGH"),
+        "medium": sum(1 for row in rows if row.severity == "MEDIUM"),
+        "low": sum(1 for row in rows if row.severity == "LOW"),
     }
 
 
 @router.post("/")
-async def create_alert(body: AlertCreate, db: AsyncSession = Depends(get_db)):
+async def create_alert(
+    body: AlertCreate,
+    payload: dict = Depends(require_security_engineer),
+    db: AsyncSession = Depends(get_db),
+):
+    account_id = payload["account_id"]
     alert = Alert(
         id=str(uuid.uuid4()),
-        account_id=ACCOUNT_ID,
+        account_id=account_id,
         title=body.title,
         message=body.message,
         severity=body.severity.upper(),
@@ -85,7 +97,7 @@ async def create_alert(body: AlertCreate, db: AsyncSession = Depends(get_db)):
             "source_ip": alert.source_ip,
             "endpoint": alert.endpoint,
         },
-        ACCOUNT_ID,
+        account_id,
         db,
     )
     await execute_playbooks(db, alert, evidence={"summary": alert.message or ""})
@@ -97,9 +109,10 @@ async def create_alert(body: AlertCreate, db: AsyncSession = Depends(get_db)):
 async def acknowledge_alert(
     alert_id: str,
     by: str = Query("analyst"),
+    payload: dict = Depends(require_security_engineer),
     db: AsyncSession = Depends(get_db),
 ):
-    alert = await _get_alert(alert_id, db)
+    alert = await _get_alert(alert_id, payload["account_id"], db)
     alert.status = "ACKNOWLEDGED"
     alert.acknowledged_by = by
     await db.commit()
@@ -107,8 +120,12 @@ async def acknowledge_alert(
 
 
 @router.patch("/{alert_id}/resolve")
-async def resolve_alert(alert_id: str, db: AsyncSession = Depends(get_db)):
-    alert = await _get_alert(alert_id, db)
+async def resolve_alert(
+    alert_id: str,
+    payload: dict = Depends(require_security_engineer),
+    db: AsyncSession = Depends(get_db),
+):
+    alert = await _get_alert(alert_id, payload["account_id"], db)
     alert.status = "RESOLVED"
     alert.resolved_at = datetime.datetime.now(datetime.timezone.utc)
     await db.commit()
@@ -116,16 +133,20 @@ async def resolve_alert(alert_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/{alert_id}")
-async def dismiss_alert(alert_id: str, db: AsyncSession = Depends(get_db)):
-    alert = await _get_alert(alert_id, db)
+async def dismiss_alert(
+    alert_id: str,
+    payload: dict = Depends(require_security_engineer),
+    db: AsyncSession = Depends(get_db),
+):
+    alert = await _get_alert(alert_id, payload["account_id"], db)
     await db.delete(alert)
     await db.commit()
     return {"status": "dismissed", "id": alert_id}
 
 
-async def _get_alert(alert_id: str, db: AsyncSession) -> Alert:
+async def _get_alert(alert_id: str, account_id: int, db: AsyncSession) -> Alert:
     result = await db.execute(
-        select(Alert).where(Alert.id == alert_id, Alert.account_id == ACCOUNT_ID)
+        select(Alert).where(Alert.id == alert_id, Alert.account_id == account_id)
     )
     alert = result.scalar_one_or_none()
     if not alert:
@@ -133,17 +154,17 @@ async def _get_alert(alert_id: str, db: AsyncSession) -> Alert:
     return alert
 
 
-def _serialize(r: Alert) -> dict:
+def _serialize(alert: Alert) -> dict:
     return {
-        "id":              r.id,
-        "title":           r.title,
-        "message":         r.message,
-        "severity":        r.severity,
-        "category":        r.category,
-        "source_ip":       r.source_ip,
-        "endpoint":        r.endpoint,
-        "status":          r.status,
-        "acknowledged_by": r.acknowledged_by,
-        "resolved_at":     r.resolved_at.isoformat() if r.resolved_at else None,
-        "created_at":      r.created_at.isoformat() if r.created_at else None,
+        "id": alert.id,
+        "title": alert.title,
+        "message": alert.message,
+        "severity": alert.severity,
+        "category": alert.category,
+        "source_ip": alert.source_ip,
+        "endpoint": alert.endpoint,
+        "status": alert.status,
+        "acknowledged_by": alert.acknowledged_by,
+        "resolved_at": alert.resolved_at.isoformat() if alert.resolved_at else None,
+        "created_at": alert.created_at.isoformat() if alert.created_at else None,
     }

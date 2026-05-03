@@ -151,13 +151,21 @@ async def record_malicious_event(
 
     detected_at = ev.detected_at or _now_ms()
 
-    # Upsert ThreatActor
     actor_result = await db.execute(
-        select(ThreatActor).where(ThreatActor.source_ip == ev.actor)
+        select(ThreatActor).where(
+            ThreatActor.source_ip == ev.actor,
+            ThreatActor.account_id == account_id,
+        )
     )
     actor = actor_result.scalar_one_or_none()
     if not actor:
-        actor = ThreatActor(source_ip=ev.actor, status="MONITORING", event_count=0, risk_score=0.0)
+        actor = ThreatActor(
+            account_id=account_id,
+            source_ip=ev.actor,
+            status="MONITORING",
+            event_count=0,
+            risk_score=0.0,
+        )
         db.add(actor)
         await db.flush()
     actor.event_count = (actor.event_count or 0) + 1
@@ -443,7 +451,13 @@ async def modify_actor_status(
     db: AsyncSession = Depends(get_db),
 ):
     """Update a single actor's status (proto: ModifyThreatActorStatusRequest)."""
-    result = await db.execute(select(ThreatActor).where(ThreatActor.source_ip == req.ip))
+    account_id = payload.get("account_id")
+    result = await db.execute(
+        select(ThreatActor).where(
+            ThreatActor.source_ip == req.ip,
+            ThreatActor.account_id == account_id,
+        )
+    )
     actor = result.scalar_one_or_none()
     if not actor:
         raise HTTPException(status_code=404, detail="Actor not found")
@@ -455,12 +469,17 @@ async def modify_actor_status(
 @router.post("/actors/bulk-status", response_model=BulkModifyThreatActorStatusResponse)
 async def bulk_modify_actor_status(
     req: BulkModifyThreatActorStatusRequest,
+    payload: dict = Depends(RBAC.require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """Bulk-update actor statuses (proto: BulkModifyThreatActorStatusRequest)."""
+    account_id = payload.get("account_id")
     await db.execute(
         update(ThreatActor)
-        .where(ThreatActor.source_ip.in_(req.ips))
+        .where(
+            ThreatActor.source_ip.in_(req.ips),
+            ThreatActor.account_id == account_id,
+        )
         .values(status=req.status.upper())
     )
     await db.commit()
@@ -897,7 +916,10 @@ async def bulk_update_sessions(
     updated = 0
     for doc in req.session_documents:
         result = await db.execute(
-            select(AgenticSession).where(AgenticSession.session_identifier == doc.session_identifier)
+            select(AgenticSession).where(
+                AgenticSession.session_identifier == doc.session_identifier,
+                AgenticSession.account_id == account_id,
+            )
         )
         session = result.scalar_one_or_none()
         if not session:
@@ -919,12 +941,13 @@ async def bulk_update_sessions(
 
 @router.get("/sessions")
 async def list_sessions(
-    account_id: int = 1000000,
     malicious_only: bool = False,
     limit: int = 50,
+    payload: dict = Depends(RBAC.require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """List agentic sessions."""
+    account_id = payload.get("account_id")
     stmt = select(AgenticSession).where(AgenticSession.account_id == account_id).limit(limit)
     if malicious_only:
         stmt = stmt.where(AgenticSession.is_malicious == True)

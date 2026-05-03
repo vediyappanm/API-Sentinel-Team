@@ -1,17 +1,16 @@
 import { get, post } from '@/lib/api-client';
-
-/* ───── Types for New Engine ───── */
+import type { ApiCollectionId } from '@/services/discovery.service';
 
 export interface AktoIssue {
   id: string;
   creationTime: number;
-  severity: string;                     // HIGH, MEDIUM, LOW, CRITICAL
+  severity: string;
   testSubType: string;
   testCategory: string;
-  issueStatus: string;                  // OPEN, IGNORED, FIXED, FALSE_POSITIVE
+  issueStatus: string;
   url: string;
   method: string;
-  apiCollectionId: number;
+  apiCollectionId: ApiCollectionId;
   lastSeen: number;
 }
 
@@ -22,7 +21,7 @@ export interface AktoIssueSummary {
   severityBreakdown: Record<string, number>;
 }
 
-/* ───── API Calls ───── */
+const DEFAULT_COLLECTION_ID: ApiCollectionId = 'default-inventory';
 
 export async function fetchAllIssues(
   skip: number = 0,
@@ -34,17 +33,17 @@ export async function fetchAllIssues(
 ) {
   const data = await get<{ total: number; vulnerabilities: any[] }>('/vulnerabilities/', signal);
 
-  const issues: AktoIssue[] = (data.vulnerabilities || []).map((v) => ({
-    id: v.id,
-    creationTime: Date.now(),
-    severity: v.severity || 'LOW',
-    testSubType: v.type || 'Generic Vulnerability',
-    testCategory: v.category || 'Security',
-    issueStatus: v.status || 'OPEN',
-    url: v.url || '/',
-    method: v.method || 'GET',
-    apiCollectionId: 1000000,
-    lastSeen: Date.now(),
+  const issues: AktoIssue[] = (data.vulnerabilities || []).map((vulnerability) => ({
+    id: vulnerability.id,
+    creationTime: vulnerability.created_at ? new Date(vulnerability.created_at).getTime() : Date.now(),
+    severity: vulnerability.severity || 'LOW',
+    testSubType: vulnerability.type || 'Generic Vulnerability',
+    testCategory: vulnerability.category || 'Security',
+    issueStatus: vulnerability.status || 'OPEN',
+    url: vulnerability.url || '/',
+    method: vulnerability.method || 'GET',
+    apiCollectionId: vulnerability.api_collection_id ?? vulnerability.collection_id ?? DEFAULT_COLLECTION_ID,
+    lastSeen: vulnerability.created_at ? new Date(vulnerability.created_at).getTime() : Date.now(),
   }));
 
   return {
@@ -63,14 +62,14 @@ export async function fetchIssueSummary(signal?: AbortSignal) {
     LOW: 0,
   };
 
-  data.issues.forEach(i => {
-    if (breakdown[i.severity] !== undefined) breakdown[i.severity]++;
+  data.issues.forEach((issue) => {
+    if (breakdown[issue.severity] !== undefined) breakdown[issue.severity]++;
   });
 
   return {
     totalIssues: data.totalIssuesCount,
-    openIssues: data.issues.filter(i => i.issueStatus === 'OPEN').length,
-    fixedIssues: data.issues.filter(i => i.issueStatus === 'FIXED').length,
+    openIssues: data.issues.filter((issue) => issue.issueStatus === 'OPEN').length,
+    fixedIssues: data.issues.filter((issue) => issue.issueStatus === 'FIXED').length,
     severityBreakdown: breakdown,
   };
 }
@@ -86,14 +85,13 @@ export async function fetchVulnerableRequests(
   filters?: Record<string, unknown>,
   signal?: AbortSignal,
 ) {
-  // Similar to fetchAllIssues but mapped to AktoTestRunResult
   const data = await fetchAllIssues(skip, limit, filters, undefined, undefined, signal);
   return {
-    testingRunResults: data.issues.map(i => ({
-      hexId: i.id,
-      testSubType: i.testSubType,
-      testCategory: i.testCategory,
-      apiInfoKey: { url: i.url, method: i.method, apiCollectionId: 1000000 },
+    testingRunResults: data.issues.map((issue) => ({
+      hexId: issue.id,
+      testSubType: issue.testSubType,
+      testCategory: issue.testCategory,
+      apiInfoKey: { url: issue.url, method: issue.method, apiCollectionId: issue.apiCollectionId },
       vulnerable: true,
     })),
     total: data.totalIssuesCount,
@@ -118,36 +116,33 @@ export async function fetchIssuesByDay(startTs: number, endTs: number, signal?: 
 export async function fetchAllSubCategories(signal?: AbortSignal) {
   const data = await get<{ templates: any[] }>('/tests/templates', signal);
   return {
-    subCategories: (data.templates || []).map(t => ({
-      name: t.name,
-      superCategory: { name: t.category || 'Vulnerability' }
-    }))
+    subCategories: (data.templates || []).map((template) => ({
+      name: template.name,
+      superCategory: { name: template.category || 'Vulnerability' },
+    })),
   };
 }
 
-/* ───── Run Logic ───── */
-
 export async function startTestSelection(
   templateIds: string[],
-  endpointIds: { url: string, method: string, apiCollectionId: number }[],
-  signal?: AbortSignal
+  endpointIds: { url: string; method: string; apiCollectionId: ApiCollectionId }[],
+  signal?: AbortSignal,
 ) {
-  return post('/tests/run', {
-    template_ids: templateIds,
-    endpoint_ids: endpointIds.map(e => `${e.method} ${e.url}`) // simplified for the stub
-  }, signal);
+  return post(
+    '/tests/run',
+    {
+      template_ids: templateIds,
+      endpoint_ids: endpointIds.map((endpoint) => `${endpoint.method} ${endpoint.url}`),
+    },
+    signal,
+  );
 }
-
-/* ───── Reports ───── */
 
 export async function generateReportPDF(
   framework: string = 'OWASP_API_2023',
   format: string = 'html',
   signal?: AbortSignal,
 ) {
-  // Use the new compliance export endpoint
-  // Note: if format is HTML, backend returns HTMLResponse. 
-  // If JSON, it returns the report JSON.
   return get<any>(`/compliance/reports/${framework}/export?format=${format}`, signal);
 }
 
@@ -158,4 +153,3 @@ export async function fetchComplianceReport(framework: string = 'OWASP_API_2023'
 export async function downloadReportPDF(reportId: string, signal?: AbortSignal) {
   return { downloadUrl: `/api/compliance/reports/${reportId}/export?format=html` };
 }
-

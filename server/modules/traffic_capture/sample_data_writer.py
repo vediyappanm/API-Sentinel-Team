@@ -18,9 +18,13 @@ class SampleDataWriter:
         request: dict,
         response: dict,
         db: AsyncSession,
+        account_id: int | None = None,
     ) -> None:
+        if account_id is None:
+            raise ValueError("SampleDataWriter.save requires an explicit account_id")
         record = SampleData(
             id=str(uuid.uuid4()),
+            account_id=account_id,
             endpoint_id=endpoint_id,
             request=request,
             response=response,

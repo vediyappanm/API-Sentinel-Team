@@ -16,7 +16,7 @@ const AuditLogs: React.FC = () => {
   return (
     <div className="space-y-5 animate-fade-in max-w-5xl mx-auto pb-10">
       <div className="flex items-center gap-3">
-        <button onClick={() => navigate('/settings')} className="w-8 h-8 rounded-lg border border-border-subtle bg-bg-surface flex items-center justify-center text-text-muted hover:text-text-primary hover:border-brand/20 transition-all">
+        <button onClick={() => navigate('/admin/settings')} className="w-8 h-8 rounded-lg border border-border-subtle bg-bg-surface flex items-center justify-center text-text-muted hover:text-text-primary hover:border-brand/20 transition-all">
           <ArrowLeft size={16} />
         </button>
         <div>
@@ -30,7 +30,7 @@ const AuditLogs: React.FC = () => {
           <div className="flex items-center gap-2">
             <ClipboardList size={14} className="text-brand" />
             <span className="text-xs font-bold text-text-primary">Audit Trail</span>
-            <span className="text-[10px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted">{total}</span>
+            <span className="text-[11px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted">{total}</span>
           </div>
           {totalPages > 1 && (
             <div className="flex items-center gap-2 text-xs text-text-muted">
@@ -51,19 +51,19 @@ const AuditLogs: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead><tr className="border-b border-border-subtle bg-bg-base/50">
-                <th className="text-left px-5 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-text-muted">Timestamp</th>
-                <th className="text-left px-5 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-text-muted">User</th>
-                <th className="text-left px-5 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-text-muted">Action</th>
-                <th className="text-left px-5 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-text-muted">Resource</th>
-                <th className="text-left px-5 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-text-muted">Details</th>
+                <th className="text-left px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted">Timestamp</th>
+                <th className="text-left px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted">User</th>
+                <th className="text-left px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted">Action</th>
+                <th className="text-left px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted">Resource</th>
+                <th className="text-left px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted">Details</th>
               </tr></thead>
               <tbody className="divide-y divide-border-subtle">
                 {logs.map(log => (
                   <tr key={log.id} className="data-row-interactive hover:bg-white/[0.02] transition-colors">
-                    <td className="px-5 py-3 text-[10px] text-text-muted font-mono whitespace-nowrap">{new Date(log.timestamp).toLocaleString()}</td>
+                    <td className="px-5 py-3 text-[11px] text-text-muted font-mono whitespace-nowrap">{new Date(log.timestamp).toLocaleString()}</td>
                     <td className="px-5 py-3 text-[12px] text-text-primary">{log.user}</td>
                     <td className="px-5 py-3">
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/20">{log.action}</span>
+                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/20">{log.action}</span>
                     </td>
                     <td className="px-5 py-3 text-[11px] text-text-muted">{log.resource || '-'}</td>
                     <td className="px-5 py-3 text-[11px] text-text-muted max-w-[200px] truncate">{log.details || '-'}</td>

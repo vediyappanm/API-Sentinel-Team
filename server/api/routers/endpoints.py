@@ -5,12 +5,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, and_
 from server.modules.persistence.database import get_db, get_read_db
 from server.models.core import APIEndpoint, EndpointRevision
-from server.modules.auth.rbac import RBAC
+from server.modules.auth.rbac import RBAC, Permission
+from server.modules.validation.input_validator import InputValidator, ValidationError
 from server.api.rate_limiter import limiter
 from server.modules.cache.redis_cache import get_cache_version, get_json, set_json, bump_cache_version
+from server.modules.api_inventory.lineage import EndpointLineageService
 from server.config import settings
 
 router = APIRouter()
+_lineage = EndpointLineageService()
 
 
 @router.get("/")
@@ -23,20 +26,40 @@ async def get_endpoints(
     limit: int = Query(200),
     offset: int = Query(0),
     db: AsyncSession = Depends(get_read_db),
-    user: dict = Depends(RBAC.require_auth),
+    user: dict = Depends(RBAC.require_permission(Permission.ENDPOINTS_READ)),
 ):
     """List all discovered API endpoints with optional filters."""
+    try:
+        # Validate numeric parameters
+        validated_limit = InputValidator.validate_integer(limit, "limit", min_value=1, max_value=10000)
+        validated_offset = InputValidator.validate_integer(offset, "offset", min_value=0, max_value=1000000)
+
+        # Validate string parameters
+        validated_host = None
+        if host:
+            validated_host = InputValidator.validate_string(host, "host", max_length=256, allow_empty=False)
+
+        validated_method = None
+        if method:
+            validated_method = InputValidator.validate_string(method, "method", max_length=10, allow_empty=False)
+
+        validated_collection_id = None
+        if collection_id:
+            validated_collection_id = InputValidator.validate_uuid(collection_id, "collection_id")
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     account_id = user["account_id"]
     filters = [APIEndpoint.account_id == account_id]
-    if host:
-        filters.append(APIEndpoint.host == host)
-    if method:
-        filters.append(APIEndpoint.method == method.upper())
-    if collection_id:
-        filters.append(APIEndpoint.collection_id == collection_id)
+    if validated_host:
+        filters.append(APIEndpoint.host == validated_host)
+    if validated_method:
+        filters.append(APIEndpoint.method == validated_method.upper())
+    if validated_collection_id:
+        filters.append(APIEndpoint.collection_id == validated_collection_id)
 
     cache_version = await get_cache_version(account_id)
-    cache_key = f"endpoints:{account_id}:{cache_version}:{host}:{method}:{collection_id}:{limit}:{offset}"
+    cache_key = f"endpoints:{account_id}:{cache_version}:{validated_host}:{validated_method}:{validated_collection_id}:{validated_limit}:{validated_offset}"
     cached = await get_json(cache_key)
     if cached:
         return cached
@@ -45,8 +68,8 @@ async def get_endpoints(
         select(APIEndpoint)
         .where(and_(*filters))
         .order_by(APIEndpoint.last_seen.desc())
-        .limit(limit)
-        .offset(offset)
+        .limit(validated_limit)
+        .offset(validated_offset)
     )
     endpoints = result.scalars().all()
 
@@ -77,7 +100,10 @@ async def get_endpoints(
 
 
 @router.get("/hosts")
-async def list_hosts(db: AsyncSession = Depends(get_db), user: dict = Depends(RBAC.require_auth)):
+async def list_hosts(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(RBAC.require_permission(Permission.ENDPOINTS_READ)),
+):
     """Return distinct hosts for grouping into collections."""
     from sqlalchemy import distinct
     account_id = user["account_id"]
@@ -89,7 +115,11 @@ async def list_hosts(db: AsyncSession = Depends(get_db), user: dict = Depends(RB
 
 
 @router.get("/{endpoint_id}")
-async def get_endpoint(endpoint_id: str, db: AsyncSession = Depends(get_db), user: dict = Depends(RBAC.require_auth)):
+async def get_endpoint(
+    endpoint_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(RBAC.require_permission(Permission.ENDPOINTS_READ)),
+):
     account_id = user["account_id"]
     result = await db.execute(select(APIEndpoint).where(
         and_(APIEndpoint.id == endpoint_id, APIEndpoint.account_id == account_id)
@@ -117,7 +147,7 @@ async def list_endpoint_revisions(
     endpoint_id: str,
     limit: int = Query(20, le=200),
     db: AsyncSession = Depends(get_read_db),
-    user: dict = Depends(RBAC.require_auth),
+    user: dict = Depends(RBAC.require_permission(Permission.ENDPOINTS_READ)),
 ):
     account_id = user["account_id"]
     result = await db.execute(
@@ -143,6 +173,24 @@ async def list_endpoint_revisions(
     }
 
 
+@router.get("/{endpoint_id}/lineage")
+async def get_endpoint_lineage(
+    endpoint_id: str,
+    limit: int = Query(10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(RBAC.require_permission(Permission.ENDPOINTS_READ)),
+):
+    try:
+        return await _lineage.build(
+            db,
+            account_id=user["account_id"],
+            endpoint_id=endpoint_id,
+            limit=limit,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
 @router.post("/")
 async def create_endpoint(
     method: str = Body(...),
@@ -152,7 +200,7 @@ async def create_endpoint(
     port: int = Body(None),
     collection_id: str = Body(None),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(RBAC.require_auth),
+    user: dict = Depends(RBAC.require_permission(Permission.ENDPOINTS_WRITE)),
 ):
     account_id = user["account_id"]
     ep = APIEndpoint(
@@ -178,7 +226,7 @@ async def update_endpoint(
     tags: dict = Body(None),
     collection_id: str = Body(None),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(RBAC.require_auth),
+    user: dict = Depends(RBAC.require_permission(Permission.ENDPOINTS_WRITE)),
 ):
     account_id = user["account_id"]
     values = {}
@@ -198,7 +246,11 @@ async def update_endpoint(
 
 
 @router.delete("/{endpoint_id}")
-async def delete_endpoint(endpoint_id: str, db: AsyncSession = Depends(get_db), user: dict = Depends(RBAC.require_auth)):
+async def delete_endpoint(
+    endpoint_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(RBAC.require_permission(Permission.ENDPOINTS_DELETE)),
+):
     account_id = user["account_id"]
     result = await db.execute(select(APIEndpoint).where(
         and_(APIEndpoint.id == endpoint_id, APIEndpoint.account_id == account_id)

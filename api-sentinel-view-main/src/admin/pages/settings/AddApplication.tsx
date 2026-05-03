@@ -1,150 +1,266 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Globe, Terminal, Upload, Wifi, CheckCircle2, Copy, Loader2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle2,
+  Copy,
+  Globe,
+  Layers3,
+  Network,
+  Users,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { post } from '@/lib/api-client';
 import { useQueryClient } from '@tanstack/react-query';
+
 import GlassCard from '@/components/ui/GlassCard';
+import { post } from '@/lib/api-client';
+import { useOnboarding } from '@/lib/onboarding-context';
+import { useTeamData } from '@/hooks/use-admin';
+import { toast } from '@/hooks/use-toast';
 
-type TrafficSource = 'burp' | 'aws' | 'nginx' | 'envoy' | 'manual' | null;
-
-const TRAFFIC_SOURCES: Array<{ id: TrafficSource; label: string; icon: React.FC<{ size?: number }>; desc: string; color: string }> = [
-  { id: 'burp', label: 'Burp Suite', icon: Terminal, desc: 'Send traffic via Burp Suite proxy extension', color: '#632CA6' },
-  { id: 'aws', label: 'AWS Traffic Mirroring', icon: Wifi, desc: 'Mirror VPC traffic to collector', color: '#3B82F6' },
-  { id: 'nginx', label: 'NGINX / Kong', icon: Globe, desc: 'Use API gateway plugin to forward traffic', color: '#22C55E' },
-  { id: 'envoy', label: 'Envoy Proxy', icon: Globe, desc: 'Configure Envoy sidecar to send traffic', color: '#7C3AED' },
-  { id: 'manual', label: 'Manual Upload', icon: Upload, desc: 'Upload HAR, Postman, or Swagger files', color: '#EAB308' },
-];
+const TRAFFIC_OPTIONS = [
+  { id: 'nginx', label: 'NGINX / Kong', description: 'Mirror ingress traffic or use a plugin at the edge.' },
+  { id: 'envoy', label: 'Envoy / Istio', description: 'Capture API calls from sidecars or service-mesh telemetry.' },
+  { id: 'aws', label: 'AWS Mirroring', description: 'Attach traffic mirroring to a controlled production path.' },
+  { id: 'manual', label: 'HAR / Postman Import', description: 'Seed the catalogue while passive traffic is being wired.' },
+] as const;
 
 const AddApplication: React.FC = () => {
   const navigate = useNavigate();
-  const qc = useQueryClient();
-  const [step, setStep] = useState(1);
-  const [appName, setAppName] = useState('');
-  const [selectedSource, setSelectedSource] = useState<TrafficSource>(null);
+  const queryClient = useQueryClient();
+  const onboarding = useOnboarding();
+  const team = useTeamData();
   const [creating, setCreating] = useState(false);
-  const [created, setCreated] = useState(false);
-  const [collectionId, setCollectionId] = useState<number | null>(null);
 
-  const handleCreate = async () => {
-    if (!appName.trim()) return;
+  const owners = team.data?.users ?? [];
+  const telemetrySnippet = [
+    `export APPSENTINEL_CONTROLLER_URL=https://collector.company.internal`,
+    `export APPSENTINEL_SENSOR_KEY=<sensor-key>`,
+    `export APPSENTINEL_TRAFFIC_SOURCE=${onboarding.data.trafficSource}`,
+  ].join('\n');
+
+  const createApplication = async () => {
+    if (!onboarding.data.applicationName.trim()) {
+      toast({
+        title: 'Application name required',
+        description: 'Provide a production-facing application name before creating the collection.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setCreating(true);
     try {
-      const res = await post<{ id?: number }>('/api/createCollection', { collectionName: appName.trim() });
-      setCollectionId(res?.id ?? null);
-      setCreated(true);
-      qc.invalidateQueries({ queryKey: ['discovery', 'collections'] });
-      setStep(2);
-    } catch { /* error handled */ }
-    setCreating(false);
+      const response = await post<{ id?: string }>('/collections/', {
+        name: onboarding.data.applicationName.trim(),
+        host: onboarding.data.applicationDomain.trim() || undefined,
+        type: 'MIRRORING',
+      });
+
+      onboarding.registerApplication({
+        name: onboarding.data.applicationName.trim(),
+        domain: onboarding.data.applicationDomain.trim(),
+        collectionId: response.id ? String(response.id) : null,
+      });
+      onboarding.markStepComplete('application');
+      queryClient.invalidateQueries({ queryKey: ['discovery', 'collections'] });
+      toast({
+        title: 'Application created',
+        description: 'The collection is ready for discovery, testing, and protection policies.',
+      });
+      navigate('/admin/onboarding');
+    } catch {
+      toast({
+        title: 'Application creation failed',
+        description: 'The backend rejected the collection request. Check auth and API availability.',
+        variant: 'destructive',
+      });
+    } finally {
+      setCreating(false);
+    }
   };
 
-  const aktoToken = `AKTO_TOKEN=<your-api-key>`;
-  const collectorUrl = `AKTO_COLLECTOR_URL=http://<your-server>:9090`;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(telemetrySnippet);
+      toast({
+        title: 'Bootstrap snippet copied',
+        description: 'Use it in your sensor or gateway rollout documentation.',
+      });
+    } catch {
+      toast({
+        title: 'Copy failed',
+        description: 'Clipboard access was denied by the browser.',
+        variant: 'destructive',
+      });
+    }
+  };
 
   return (
-    <div className="space-y-5 animate-fade-in max-w-3xl mx-auto pb-10">
+    <div className="space-y-5 animate-fade-in max-w-6xl mx-auto pb-10">
       <div className="flex items-center gap-3">
-        <button onClick={() => navigate('/organization')} className="w-8 h-8 rounded-lg border border-border-subtle bg-bg-surface flex items-center justify-center text-text-muted hover:text-text-primary hover:border-brand/20 transition-all">
+        <button onClick={() => navigate('/admin/settings')} className="w-8 h-8 rounded-lg border border-border-subtle bg-bg-surface flex items-center justify-center text-text-muted hover:text-text-primary hover:border-brand/20 transition-all">
           <ArrowLeft size={16} />
         </button>
         <div>
-          <h2 className="text-sm font-bold text-text-primary">Add Application</h2>
-          <p className="text-[11px] text-text-muted">Register a new application and connect API traffic</p>
+          <h2 className="text-sm font-bold text-text-primary">Register Application</h2>
+          <p className="text-[11px] text-text-muted">Map a production surface to domains, owners, and traffic sources.</p>
         </div>
       </div>
 
-      {/* Step indicator */}
-      <div className="flex items-center gap-3">
-        {[1, 2, 3].map(s => (
-          <div key={s} className="flex items-center gap-2">
-            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${step >= s ? 'bg-brand text-white shadow-[0_0_8px_rgba(99,44,175,0.3)]' : 'bg-bg-elevated text-text-muted border border-border-subtle'}`}>
-              {step > s ? <CheckCircle2 size={14} /> : s}
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <GlassCard variant="elevated" className="p-6 space-y-6">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">Application name</label>
+              <input
+                value={onboarding.data.applicationName}
+                onChange={(event) => onboarding.update({ applicationName: event.target.value })}
+                placeholder="customer-api-prod"
+                className="w-full rounded-xl border border-border-subtle bg-bg-base px-4 py-3 text-sm text-text-primary outline-none transition-all focus:border-brand/30 focus:ring-1 focus:ring-brand/20"
+              />
             </div>
-            <span className={`text-[11px] font-medium ${step >= s ? 'text-text-primary' : 'text-text-muted'}`}>
-              {s === 1 ? 'Name' : s === 2 ? 'Traffic Source' : 'Connect'}
-            </span>
-            {s < 3 && <div className={`w-12 h-px transition-all ${step > s ? 'bg-brand' : 'bg-border-subtle'}`} />}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">Primary domain</label>
+              <input
+                value={onboarding.data.applicationDomain}
+                onChange={(event) => onboarding.update({ applicationDomain: event.target.value })}
+                placeholder="api.company.com"
+                className="w-full rounded-xl border border-border-subtle bg-bg-base px-4 py-3 text-sm text-text-primary outline-none transition-all focus:border-brand/30 focus:ring-1 focus:ring-brand/20"
+              />
+            </div>
           </div>
-        ))}
-      </div>
 
-      {/* Step 1: Name */}
-      {step === 1 && (
-        <GlassCard variant="elevated" className="p-6 space-y-5">
-          <div>
-            <label className="block text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-2">Application Name</label>
-            <input type="text" value={appName} onChange={e => setAppName(e.target.value)} placeholder="e.g., customer-api-prod"
-              className="w-full rounded-lg border border-border-subtle bg-bg-base px-4 py-3 text-sm text-text-primary placeholder-text-muted focus:border-brand/50 focus:outline-none focus:ring-1 focus:ring-brand/20 transition-all" />
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">Environment</label>
+              <select
+                value={onboarding.data.environment}
+                onChange={(event) => onboarding.update({ environment: event.target.value as typeof onboarding.data.environment })}
+                className="w-full rounded-xl border border-border-subtle bg-bg-base px-4 py-3 text-sm text-text-primary outline-none transition-all focus:border-brand/30 focus:ring-1 focus:ring-brand/20"
+              >
+                <option value="production">Production</option>
+                <option value="staging">Staging</option>
+                <option value="development">Development</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">Business unit</label>
+              <input
+                value={onboarding.data.businessUnit}
+                onChange={(event) => onboarding.update({ businessUnit: event.target.value })}
+                placeholder="Core Platform"
+                className="w-full rounded-xl border border-border-subtle bg-bg-base px-4 py-3 text-sm text-text-primary outline-none transition-all focus:border-brand/30 focus:ring-1 focus:ring-brand/20"
+              />
+            </div>
           </div>
-          <button onClick={handleCreate} disabled={!appName.trim() || creating}
-            className="px-5 py-2.5 rounded-lg bg-brand text-sm font-bold text-white hover:bg-brand-dark transition-colors disabled:opacity-50 flex items-center gap-2">
-            {creating && <Loader2 size={14} className="animate-spin" />}
-            Create Application
-          </button>
-        </GlassCard>
-      )}
 
-      {/* Step 2: Traffic Source */}
-      {step === 2 && (
-        <div className="space-y-4">
-          <p className="text-[11px] text-text-muted">Choose how to send API traffic to the platform:</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {TRAFFIC_SOURCES.map(src => (
-              <GlassCard key={src.id} variant="default" className={`p-4 cursor-pointer ${selectedSource === src.id ? 'border-brand/40' : ''}`}
-                hoverLift onClick={() => { setSelectedSource(src.id); setStep(3); }}>
-                <div className="flex items-start gap-3">
-                  <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${src.color}12` }}>
-                    <src.icon size={18} />
-                  </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">
+              <Users size={12} />
+              Assigned owners
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              {(owners.length > 0 ? owners : [{ login: 'owner@company.com', role: 'ADMIN' }]).map((owner) => (
+                <label key={owner.login} className="flex items-center gap-3 rounded-xl border border-border-subtle bg-bg-base px-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={onboarding.data.assignedUsers.includes(owner.login)}
+                    onChange={() => onboarding.toggleAssignedUser(owner.login)}
+                    className="h-4 w-4 rounded"
+                    style={{ accentColor: 'var(--brand)' }}
+                  />
                   <div>
-                    <div className="text-sm font-semibold text-text-primary">{src.label}</div>
-                    <div className="text-[11px] text-text-muted mt-0.5">{src.desc}</div>
+                    <div className="text-sm font-medium text-text-primary">{owner.login}</div>
+                    <div className="text-[11px] text-text-muted">{owner.role}</div>
                   </div>
-                </div>
-              </GlassCard>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Step 3: Connection Instructions */}
-      {step === 3 && (
-        <GlassCard variant="elevated" className="p-6 space-y-5">
-          {created && (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-sev-low/10 border border-sev-low/20 text-xs text-sev-low">
-              <CheckCircle2 size={14} />
-              Application "{appName}" created successfully{collectionId ? ` (ID: ${collectionId})` : ''}
-            </div>
-          )}
-
-          <div>
-            <h3 className="text-sm font-semibold text-text-primary mb-3">
-              Connect via {TRAFFIC_SOURCES.find(s => s.id === selectedSource)?.label}
-            </h3>
-            <p className="text-[11px] text-text-muted mb-4">Configure your traffic source with the following environment variables:</p>
-            <div className="space-y-2">
-              {[aktoToken, collectorUrl].map(line => (
-                <div key={line} className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-bg-base border border-border-subtle">
-                  <code className="text-[11px] text-text-primary flex-1 font-mono">{line}</code>
-                  <button onClick={() => navigator.clipboard.writeText(line)}
-                    className="p-1 rounded hover:bg-bg-elevated text-text-muted hover:text-brand transition-colors">
-                    <Copy size={12} />
-                  </button>
-                </div>
+                </label>
               ))}
             </div>
           </div>
 
-          <div className="text-[11px] text-text-muted space-y-1">
-            <p>Once traffic starts flowing, endpoints will appear automatically in the Discovery section.</p>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">
+              <Network size={12} />
+              Traffic source
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {TRAFFIC_OPTIONS.map((option) => (
+                <GlassCard
+                  key={option.id}
+                  variant={onboarding.data.trafficSource === option.id ? 'accent' : 'default'}
+                  className="p-4"
+                  hoverLift
+                  onClick={() => onboarding.update({ trafficSource: option.id })}
+                >
+                  <div className="text-sm font-bold text-text-primary">{option.label}</div>
+                  <p className="mt-1 text-[11px] leading-5 text-text-secondary">{option.description}</p>
+                </GlassCard>
+              ))}
+            </div>
           </div>
 
-          <div className="flex gap-3">
-            <button onClick={() => navigate('/discovery')} className="px-5 py-2.5 rounded-lg bg-brand text-sm font-bold text-white hover:bg-brand-dark transition-colors">Go to Discovery</button>
-            <button onClick={() => navigate('/organization')} className="px-5 py-2.5 rounded-lg border border-border-subtle text-sm text-text-muted hover:text-text-primary hover:border-brand/20 transition-all">Back to Organization</button>
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={createApplication}
+              disabled={creating}
+              className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
+            >
+              {creating ? 'Creating...' : 'Create application'}
+              <ArrowRight size={15} />
+            </button>
+            <button
+              onClick={() => navigate('/admin/onboarding')}
+              className="rounded-xl border border-border-subtle px-4 py-3 text-sm font-semibold text-text-secondary transition-colors hover:border-brand/20 hover:text-text-primary"
+            >
+              Return to onboarding
+            </button>
           </div>
         </GlassCard>
-      )}
+
+        <div className="space-y-4">
+          <GlassCard variant="accent" className="p-5">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-brand">
+              <Layers3 size={12} />
+              Mapping guidance
+            </div>
+            <ul className="mt-3 space-y-2 text-[11px] leading-5 text-text-secondary">
+              <li>Register production domains first to keep discovery clean and ownership explicit.</li>
+              <li>Use assigned owners for escalation, audit context, and protection rollout reviews.</li>
+              <li>Mirror the same application name in reports, discovery, and protection policies.</li>
+            </ul>
+          </GlassCard>
+
+          <GlassCard variant="default" className="p-5">
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">Bootstrap snippet</div>
+              <button onClick={copy} className="rounded-lg border border-border-subtle px-2 py-1 text-[11px] text-text-secondary transition-colors hover:border-brand/20 hover:text-text-primary">
+                <Copy size={12} />
+              </button>
+            </div>
+            <pre className="mt-3 overflow-x-auto rounded-xl bg-[#0f172a] p-4 text-[11px] leading-6 text-slate-200"><code>{telemetrySnippet}</code></pre>
+          </GlassCard>
+
+          <GlassCard variant="default" className="p-5">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">
+              <Globe size={12} />
+              Current registration
+            </div>
+            <div className="mt-3 text-sm font-semibold text-text-primary">
+              {onboarding.data.collectionId ? `Collection ${onboarding.data.collectionId}` : 'Not yet created'}
+            </div>
+            <div className="mt-1 text-[11px] text-text-secondary">
+              {onboarding.data.applicationName || 'No application name set'}
+            </div>
+            {onboarding.data.collectionId && (
+              <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-600">
+                <CheckCircle2 size={12} />
+                Application mapped
+              </div>
+            )}
+          </GlassCard>
+        </div>
+      </div>
     </div>
   );
 };

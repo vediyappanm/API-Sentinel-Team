@@ -87,7 +87,7 @@ const ThreatActors: React.FC = () => {
             { name: 'Medium', value: sev['MEDIUM'] ?? 0, color: '#F97316' },
             { name: 'Low', value: sev['LOW'] ?? 0, color: '#EAB308' },
           ]} size={90} innerRadius={28} outerRadius={40} centerLabel="Risk" />
-          <div className="space-y-1.5 text-[10px] text-text-muted uppercase font-semibold">Threat Level</div>
+          <div className="space-y-1.5 text-[11px] text-text-muted uppercase font-semibold">Threat Level</div>
         </GlassCard>
 
         <GeoMap threats={geoThreats} height={150} showControls={false} />
@@ -98,12 +98,12 @@ const ThreatActors: React.FC = () => {
       {/* Table */}
       <div className="bg-bg-surface border border-border-subtle rounded-xl overflow-hidden flex flex-col min-h-[400px]">
         <div className="p-3 border-b border-border-subtle flex items-center justify-between">
-          <span className="text-sm font-bold text-text-primary flex items-center gap-2">Threats <span className="text-[10px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted flex items-center gap-1"><Calendar size={10} /> Last 30 Days</span></span>
+          <span className="text-sm font-bold text-text-primary flex items-center gap-2">Threats <span className="text-[11px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted flex items-center gap-1"><Calendar size={10} /> Last 30 Days</span></span>
           <div className="flex items-center gap-3 text-xs text-text-muted">
             <span>{page * pageSize + 1}-{Math.min((page + 1) * pageSize, total)} of {total}</span>
             <div className="flex gap-1">
-              <button disabled={page === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[10px] disabled:opacity-30 hover:border-brand/20 transition-all">Prev</button>
-              <button disabled={(page + 1) * pageSize >= total} onClick={() => setPage(p => p + 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[10px] disabled:opacity-30 hover:border-brand/20 transition-all">Next</button>
+              <button disabled={page === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[11px] disabled:opacity-30 hover:border-brand/20 transition-all">Prev</button>
+              <button disabled={(page + 1) * pageSize >= total} onClick={() => setPage(p => p + 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[11px] disabled:opacity-30 hover:border-brand/20 transition-all">Next</button>
             </div>
             <button className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-elevated outline-none transition-colors"><Filter size={14} /></button>
           </div>
@@ -111,17 +111,17 @@ const ThreatActors: React.FC = () => {
 
         {isLoading ? <TableSkeleton columns={8} rows={pageSize} /> : (
           <div className="overflow-x-auto flex-1">
-            <table className="w-full text-left border-collapse min-w-[1100px]">
+            <table className="w-full text-left border-collapse min-w-[650px]">
               <thead className="bg-bg-base/50">
                 <tr>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-10"><input type="checkbox" className="accent-brand" /></th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-[20%]">Actor / IP</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-16 text-center">Risk</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Attempts</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-[22%]">Techniques</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-20">Location</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-28">Actions</th>
-                  <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted w-24 text-center">Last Seen</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-10"><input type="checkbox" className="accent-brand" /></th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-[20%]">Actor / IP</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-16 text-center">Risk</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Attempts</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-[22%]">Techniques</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20">Location</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-28">Actions</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-24 text-center">Last Seen</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle">
@@ -132,22 +132,22 @@ const ThreatActors: React.FC = () => {
                       <td className="px-4 py-3"><input type="checkbox" className="accent-brand" /></td>
                       <td className="px-4 py-3 text-[12px] font-mono text-text-primary">{row.latestApiIp || row.id}</td>
                       <td className="px-4 py-3 text-center">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ color: riskColor, background: `${riskColor}12`, border: `1px solid ${riskColor}25` }}>{row.severity || '-'}</span>
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ color: riskColor, background: `${riskColor}12`, border: `1px solid ${riskColor}25` }}>{row.severity || '-'}</span>
                       </td>
                       <td className="px-4 py-3 text-center text-[12px] font-mono font-bold text-text-primary">{row.totalRequests}</td>
                       <td className="px-4 py-3 text-[11px] text-text-muted">{(row.latestApiAttackType || []).join(', ') || '-'}</td>
                       <td className="px-4 py-3 text-[11px] text-text-secondary">{row.country || '-'}</td>
                       <td className="px-4 py-3">
                         {row.actorStatus === 'BLOCKED' ? (
-                          <button onClick={() => modifyStatus({ actorId: row.id, status: 'MONITORING' })} className="text-[10px] font-bold px-2 py-1 rounded-md bg-sev-low/10 text-sev-low border border-sev-low/20 hover:bg-sev-low/20 transition-all">Unblock</button>
+                          <button onClick={() => modifyStatus({ actorId: row.id, status: 'MONITORING' })} className="text-[11px] font-bold px-2 py-1 rounded-md bg-sev-low/10 text-sev-low border border-sev-low/20 hover:bg-sev-low/20 transition-all">Unblock</button>
                         ) : (
                           <div className="flex gap-1.5">
-                            <button onClick={() => modifyStatus({ actorId: row.id, status: 'BLOCKED' })} className="text-[10px] font-bold px-2 py-1 rounded-md bg-sev-critical/10 text-sev-critical border border-sev-critical/20 hover:bg-sev-critical/20 transition-all">Block</button>
-                            <button onClick={() => modifyStatus({ actorId: row.id, status: 'WHITELISTED' })} className="text-[10px] font-bold px-2 py-1 rounded-md bg-brand/10 text-brand border border-brand/20 hover:bg-brand/20 transition-all">Allow</button>
+                            <button onClick={() => modifyStatus({ actorId: row.id, status: 'BLOCKED' })} className="text-[11px] font-bold px-2 py-1 rounded-md bg-sev-critical/10 text-sev-critical border border-sev-critical/20 hover:bg-sev-critical/20 transition-all">Block</button>
+                            <button onClick={() => modifyStatus({ actorId: row.id, status: 'WHITELISTED' })} className="text-[11px] font-bold px-2 py-1 rounded-md bg-brand/10 text-brand border border-brand/20 hover:bg-brand/20 transition-all">Allow</button>
                           </div>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-[10px] font-mono text-text-muted text-center">{formatTs(row.lastSeenAt)}</td>
+                      <td className="px-4 py-3 text-[11px] font-mono text-text-muted text-center">{formatTs(row.lastSeenAt)}</td>
                     </tr>
                   );
                 })}

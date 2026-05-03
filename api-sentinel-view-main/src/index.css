@@ -48,6 +48,52 @@
     --popover-foreground: 240 15% 15%;
     --primary: 270 62% 46%;
     --primary-foreground: 0 0% 100%;
+  }
+
+  /* Dark Theme */
+  .dark {
+    --bg-base: #0F0F15;
+    --bg-surface: #1A1A25;
+    --bg-elevated: #252530;
+    --bg-sidebar: #15151E;
+    --bg-hover: #2A2A35;
+    --bg-selected: rgba(124, 58, 237, 0.15);
+
+    --brand: #7C3AED;
+    --brand-light: #905CF7;
+    --brand-dark: #5E27C7;
+    --brand-glow: rgba(124, 58, 237, 0.15);
+    --brand-border: rgba(124, 58, 237, 0.35);
+
+    --sev-critical: #EF4444;
+    --sev-high: #F97316;
+    --sev-medium: #EAB308;
+    --sev-low: #22C55E;
+    --sev-info: #3B82F6;
+
+    --text-primary: #F4F4F8;
+    --text-secondary: #B0B0C0;
+    --text-muted: #808090;
+    --text-disabled: #505060;
+    --text-brand: #905CF7;
+
+    --border-subtle: #2A2A35;
+    --border-default: #353540;
+
+    /* Shadcn/UI HSL Variables (Dark Theme) */
+    --background: 240 15% 8%;
+    --foreground: 240 15% 92%;
+    --card: 240 15% 10%;
+    --card-foreground: 240 15% 92%;
+    --popover: 240 15% 10%;
+    --popover-foreground: 240 15% 92%;
+    --primary: 270 72% 64%;
+    --primary-foreground: 240 15% 8%;
+  }
+}
+
+@layer base {
+  :root {
     --secondary: 240 10% 94%;
     --secondary-foreground: 240 15% 15%;
     --muted: 240 10% 94%;

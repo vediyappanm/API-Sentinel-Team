@@ -63,7 +63,7 @@ const PolicyConfiguration: React.FC = () => {
 
           {boolEntries.length > 0 && (
             <GlassCard variant="default" className="p-4">
-              <p className="text-[10px] text-text-muted uppercase tracking-wider font-semibold mb-3">Feature Flags</p>
+              <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold mb-3">Feature Flags</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {boolEntries.map(([key, value]) => {
                   const color = getColor(key, value);
@@ -76,7 +76,7 @@ const PolicyConfiguration: React.FC = () => {
                       <div className="flex-1 min-w-0">
                         <span className="text-[12px] text-text-primary block truncate">{key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase())}</span>
                       </div>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${value ? 'bg-sev-low/10 text-sev-low border border-sev-low/20' : 'bg-bg-elevated text-text-muted border border-border-subtle'}`}>
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${value ? 'bg-sev-low/10 text-sev-low border border-sev-low/20' : 'bg-bg-elevated text-text-muted border border-border-subtle'}`}>
                         {value ? 'Enabled' : 'Disabled'}
                       </span>
                     </div>
@@ -88,7 +88,7 @@ const PolicyConfiguration: React.FC = () => {
 
           {numEntries.length > 0 && (
             <GlassCard variant="default" className="p-4">
-              <p className="text-[10px] text-text-muted uppercase tracking-wider font-semibold mb-3">Thresholds & Limits</p>
+              <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold mb-3">Thresholds & Limits</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {numEntries.map(([key, value]) => {
                   const color = getColor(key, value);
@@ -111,7 +111,7 @@ const PolicyConfiguration: React.FC = () => {
 
           {otherEntries.length > 0 && (
             <GlassCard variant="default" className="p-4">
-              <p className="text-[10px] text-text-muted uppercase tracking-wider font-semibold mb-3">Other Settings</p>
+              <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold mb-3">Other Settings</p>
               <div className="space-y-2">
                 {otherEntries.map(([key, value]) => {
                   const color = getColor(key, value);

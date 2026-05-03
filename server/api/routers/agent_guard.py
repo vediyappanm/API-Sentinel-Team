@@ -39,7 +39,12 @@ async def create_session(
     db: AsyncSession = Depends(get_db)
 ):
     account_id = payload["account_id"]
-    existing = await db.execute(select(AgenticSession).where(AgenticSession.session_identifier == session_identifier))
+    existing = await db.execute(
+        select(AgenticSession).where(
+            AgenticSession.session_identifier == session_identifier,
+            AgenticSession.account_id == account_id,
+        )
+    )
     if existing.scalar_one_or_none():
         raise HTTPException(409, "Session already exists")
     session = AgenticSession(id=str(uuid.uuid4()), account_id=account_id,
@@ -61,7 +66,13 @@ async def inspect_message(
     Inspect an agent message for guardrail violations.
     Returns action: ALLOW | WARN | BLOCK
     """
-    result = await db.execute(select(AgenticSession).where(AgenticSession.id == session_id))
+    account_id = payload["account_id"]
+    result = await db.execute(
+        select(AgenticSession).where(
+            AgenticSession.id == session_id,
+            AgenticSession.account_id == account_id,
+        )
+    )
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(404, "Session not found")
@@ -115,7 +126,13 @@ async def list_sessions(
 
 @router.get("/sessions/{session_id}")
 async def get_session(session_id: str, payload: dict = Depends(RBAC.require_auth), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(AgenticSession).where(AgenticSession.id == session_id))
+    account_id = payload["account_id"]
+    result = await db.execute(
+        select(AgenticSession).where(
+            AgenticSession.id == session_id,
+            AgenticSession.account_id == account_id,
+        )
+    )
     s = result.scalar_one_or_none()
     if not s:
         raise HTTPException(404, "Session not found")

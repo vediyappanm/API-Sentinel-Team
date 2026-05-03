@@ -7,15 +7,13 @@ async def test_full_test_run_pipeline(client: AsyncClient):
     # 1. Signup / Auth
     signup_resp = await client.post("/api/auth/signup", json={
         "email": "admin@test.com",
-        "password": "testpass123",
+        "password": "Testpass1234!",
         "account_name": "TestCorp"
     })
     assert signup_resp.status_code == 200
-    token = signup_resp.json()["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
 
     # 2. Create endpoint
-    ep_resp = await client.post("/api/endpoints/", headers=headers, json={
+    ep_resp = await client.post("/api/endpoints/", json={
         "method": "GET",
         "path": "/api/users/123",
         "host": "localhost",
@@ -25,12 +23,12 @@ async def test_full_test_run_pipeline(client: AsyncClient):
     endpoint_id = ep_resp.json()["id"]
 
     # 3. List templates to get one
-    templates_resp = await client.get("/api/tests/templates", headers=headers)
+    templates_resp = await client.get("/api/tests/templates")
     assert templates_resp.status_code == 200
     template_ids = [t["id"] for t in templates_resp.json()["templates"][:1]]
 
     # 4. Trigger test run
-    run_resp = await client.post("/api/tests/run", headers=headers, json={
+    run_resp = await client.post("/api/tests/run", json={
         "endpoint_ids": [endpoint_id],
         "template_ids": template_ids
     })
@@ -38,6 +36,6 @@ async def test_full_test_run_pipeline(client: AsyncClient):
     run_id = run_resp.json()["run_id"]
 
     # 5. Fetch results (might be empty initially as it's background, but let's check structure)
-    results_resp = await client.get(f"/api/tests/runs/{run_id}", headers=headers)
+    results_resp = await client.get(f"/api/tests/runs/{run_id}")
     assert results_resp.status_code == 200
     assert "results" in results_resp.json()

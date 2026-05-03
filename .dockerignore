@@ -1,0 +1,30 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+venv311/
+.venv/
+
+# VCS and local metadata
+.git/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node and frontend build artifacts
+api-sentinel-view-main/node_modules/
+api-sentinel-view-main/dist/
+
+# Runtime and local db artifacts
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Python build outputs
+build/
+dist/
+*.egg-info/

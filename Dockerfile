@@ -1,32 +1,32 @@
 FROM python:3.11-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    libpcap-dev \
-    gcc \
     curl \
+    gcc \
+    libpcap-dev \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-RUN python -m spacy download en_core_web_lg || python -m spacy download en_core_web_sm
+RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Copy the server directory
 COPY server/ ./server/
-COPY alembic.ini .
 COPY migrations/ ./migrations/
+COPY tests-library/ ./tests-library/
+COPY alembic.ini .
 
-# Expose FastAPI port
-EXPOSE 8000
-
-# Create a non-root user
 RUN useradd -m -u 1000 appuser && \
+    mkdir -p /app/data/archives && \
     chown -R appuser:appuser /app
+
 USER appuser
 
-# Run Uvicorn
+EXPOSE 8000
+
 CMD ["uvicorn", "server.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

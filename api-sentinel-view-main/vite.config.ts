@@ -16,6 +16,7 @@ export default defineConfig(({ mode }) => ({
         target: "http://127.0.0.1:8000",
         changeOrigin: true,
         secure: false,
+        ws: true,
       },
     },
   },
@@ -23,6 +24,54 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+    },
+  },
+  build: {
+    chunkSizeWarningLimit: 800,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) {
+            return;
+          }
+
+          if (id.includes("recharts")) {
+            return "charts-vendor";
+          }
+
+          if (id.includes("react-simple-maps")) {
+            return "maps-vendor";
+          }
+
+          if (
+            id.includes("@radix-ui") ||
+            id.includes("cmdk") ||
+            id.includes("sonner") ||
+            id.includes("vaul")
+          ) {
+            return "ui-vendor";
+          }
+
+          if (
+            id.includes("@tanstack/react-query") ||
+            id.includes("react-router-dom")
+          ) {
+            return "app-vendor";
+          }
+
+          if (id.includes("lucide-react")) {
+            return "icons-vendor";
+          }
+
+          if (
+            id.includes("react-dom") ||
+            id.includes("/react/") ||
+            id.includes("\\react\\")
+          ) {
+            return "react-vendor";
+          }
+        },
+      },
     },
   },
 }));

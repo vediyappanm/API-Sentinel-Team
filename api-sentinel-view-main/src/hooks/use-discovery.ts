@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import {
+  type ApiCollectionId,
   fetchApiCollections,
   fetchApiInfosForCollection,
   fetchSeverityCounts,
@@ -22,7 +23,7 @@ export function useApiCollections() {
 }
 
 export function useApiInfos(
-  collectionId: number | null,
+  collectionId: ApiCollectionId | null,
   page: number = 0,
   pageSize: number = 50,
   sortKey?: string,
@@ -39,7 +40,7 @@ export function useApiInfos(
   });
 }
 
-export function useSeverityCounts(apiCollectionIds: number[]) {
+export function useSeverityCounts(apiCollectionIds: ApiCollectionId[]) {
   return useQuery({
     queryKey: ['discovery', 'severityCounts', apiCollectionIds],
     queryFn: ({ signal }) => fetchSeverityCounts(apiCollectionIds, signal),
@@ -67,7 +68,7 @@ export function useRecentEndpoints(startTs: number, endTs: number) {
   });
 }
 
-export function useAccessTypes(apiCollectionId: number | null) {
+export function useAccessTypes(apiCollectionId: ApiCollectionId | null) {
   return useQuery({
     queryKey: ['discovery', 'accessTypes', apiCollectionId],
     queryFn: ({ signal }) => fetchAccessTypes(apiCollectionId!, signal),

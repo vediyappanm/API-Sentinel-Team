@@ -79,7 +79,7 @@ const ApiTree: React.FC = () => {
                           <Folder size={16} className="text-brand shrink-0" />
                         )}
                         <span className="text-sm font-medium text-text-primary flex-1">{name}</span>
-                        <span className="text-[10px] tabular-nums font-semibold text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-border-subtle">
+                        <span className="text-[11px] tabular-nums font-semibold text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-border-subtle">
                           {urlCount} endpoints
                         </span>
                         {/* Risk indicator */}

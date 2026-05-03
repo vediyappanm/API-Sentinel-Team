@@ -33,7 +33,7 @@ const SensorHealth: React.FC = () => {
           <span className="text-xs font-bold text-text-primary flex items-center gap-2">
             <Radio size={14} className="text-sev-low" />
             Sensors
-            <span className="text-[10px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted">{sensors.length}</span>
+            <span className="text-[11px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted">{sensors.length}</span>
           </span>
           <button onClick={() => qc.invalidateQueries({ queryKey: ['admin', 'modules'] })}
             className="w-7 h-7 rounded-lg border border-border-subtle bg-bg-surface flex items-center justify-center text-muted-foreground hover:text-brand transition-all outline-none">
@@ -43,11 +43,11 @@ const SensorHealth: React.FC = () => {
 
         {isLoading ? <TableSkeleton columns={6} rows={3} /> : (
           <div className="overflow-x-auto flex-1">
-            <table className="w-full text-left border-collapse table-fixed min-w-[900px]">
+            <table className="w-full text-left border-collapse table-fixed min-w-[550px]">
               <thead className="bg-bg-base/50">
                 <tr>
                   {['Host Name', 'Module', 'Version', 'IP Address', 'Status', 'Last Heartbeat'].map(h => (
-                    <th key={h} className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted">{h}</th>
+                    <th key={h} className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -66,7 +66,7 @@ const SensorHealth: React.FC = () => {
                           <span className="text-[11px] font-bold" style={{ color: isUp ? '#22C55E' : '#EF4444' }}>{isUp ? 'Up' : 'Down'}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-[10px] text-text-muted font-mono">{formatTs(row.lastHeartbeat)}</td>
+                      <td className="px-4 py-3 text-[11px] text-text-muted font-mono">{formatTs(row.lastHeartbeat)}</td>
                     </tr>
                   );
                 })}

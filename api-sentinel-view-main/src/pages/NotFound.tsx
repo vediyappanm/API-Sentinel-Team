@@ -34,7 +34,7 @@ const NotFound = () => {
               Go Back
             </button>
             <Link
-              to="/dashboard"
+              to="/app/dashboard"
               className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-brand hover:bg-brand-light transition-all shadow-[0_0_15px_rgba(99,44,175,0.15)]"
             >
               <Home size={14} />

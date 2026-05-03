@@ -7,6 +7,7 @@ import QueryError from '@/components/shared/QueryError';
 import TableSkeleton from '@/components/shared/TableSkeleton';
 import MetricWidget from '@/components/ui/MetricWidget';
 import GlassCard from '@/components/ui/GlassCard';
+import { del, fetchWithSession, get, post } from '@/lib/api-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -38,54 +39,46 @@ interface AutoBlockResult {
 
 // ─── API calls ────────────────────────────────────────────────────────────────
 
-function authHeaders(): HeadersInit {
-  const token = localStorage.getItem('sentinel_token');
+function normalizeBlockedIp(item: any): BlockedIP {
   return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ip: item.ip,
+    reason: item.reason ?? 'Blocked',
+    blocked_by: item.blocked_by ?? 'MANUAL',
+    risk_score: item.risk_score ?? 0,
+    event_count: item.event_count ?? 0,
+    blocked_at: item.blocked_at ?? item.created_at ?? new Date().toISOString(),
+    expires_at: item.expires_at ?? null,
   };
 }
 
 async function fetchBlocklist(signal?: AbortSignal): Promise<BlocklistResponse> {
-  const res = await fetch('/api/blocklist/', { headers: authHeaders(), signal });
-  if (!res.ok) throw new Error('Failed to fetch blocklist');
-  const json = await res.json();
-  if (Array.isArray(json)) return { items: json, total: json.length };
-  return json;
+  const json = await get<any>('/blocklist/', signal);
+  if (Array.isArray(json)) {
+    const items = json.map(normalizeBlockedIp);
+    return { items, total: items.length };
+  }
+  const items = (json.items ?? []).map(normalizeBlockedIp);
+  return { items, total: json.total ?? items.length };
 }
 
 async function blockIP(payload: BlockIPPayload): Promise<void> {
-  const res = await fetch('/api/blocklist/', {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error('Failed to block IP');
+  await post('/blocklist/', payload);
 }
 
 async function unblockIP(ip: string): Promise<void> {
-  const res = await fetch(`/api/blocklist/${encodeURIComponent(ip)}`, {
-    method: 'DELETE',
-    headers: authHeaders(),
-  });
-  if (!res.ok) throw new Error('Failed to unblock IP');
+  await del(`/blocklist/${encodeURIComponent(ip)}`);
 }
 
 async function autoBlockHighRisk(): Promise<AutoBlockResult> {
-  const res = await fetch('/api/blocklist/auto', {
-    method: 'POST',
-    headers: authHeaders(),
-  });
-  if (!res.ok) throw new Error('Auto-block failed');
-  return res.json();
+  const json = await post<any>('/blocklist/auto');
+  return {
+    blocked_count: json.blocked_count ?? json.newly_blocked ?? 0,
+    ips: json.ips ?? [],
+  };
 }
 
 async function exportNginx(): Promise<void> {
-  const token = localStorage.getItem('sentinel_token');
-  const res = await fetch('/api/blocklist/export/nginx', {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  if (!res.ok) throw new Error('Export failed');
+  const res = await fetchWithSession('/blocklist/export/nginx');
   const text = await res.text();
   const blob = new Blob([text], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
@@ -162,17 +155,17 @@ const BlockModal: React.FC<BlockModalProps> = ({ onClose, onSubmit, isLoading })
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="flex flex-col gap-1.5">
-            <label className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">IP Address <span className="text-sev-critical">*</span></label>
+            <label className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">IP Address <span className="text-sev-critical">*</span></label>
             <input type="text" value={ip} onChange={(e) => setIp(e.target.value)} placeholder="e.g. 192.168.1.100" required
               className="bg-bg-base border border-border-subtle rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-brand/50 focus:ring-1 focus:ring-brand/20 placeholder:text-text-muted font-mono transition-all" />
           </div>
           <div className="flex flex-col gap-1.5">
-            <label className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">Reason</label>
+            <label className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">Reason</label>
             <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for blocking..."
               className="bg-bg-base border border-border-subtle rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-brand/50 focus:ring-1 focus:ring-brand/20 placeholder:text-text-muted transition-all" />
           </div>
           <div className="flex flex-col gap-1.5">
-            <label className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">Expires In (hours)</label>
+            <label className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">Expires In (hours)</label>
             <input type="number" value={expiresHours} onChange={(e) => setExpiresHours(e.target.value)} placeholder="Leave blank for permanent" min="1"
               className="bg-bg-base border border-border-subtle rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-brand/50 focus:ring-1 focus:ring-brand/20 placeholder:text-text-muted transition-all" />
           </div>
@@ -287,7 +280,7 @@ const BlockList: React.FC = () => {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
         <MetricWidget label="Total Blocked" value={stats.total} icon={Ban} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, stats.total + Math.floor(Math.random() * 4 - 2)))} sparkColor="#EF4444" />
         <MetricWidget label="Auto-Blocked" value={stats.auto} icon={Zap} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, stats.auto + Math.floor(Math.random() * 3 - 1)))} sparkColor="#F97316" />
         <MetricWidget label="Manual" value={stats.manual} icon={Shield} iconColor="#3B82F6" iconBg="rgba(59,130,246,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, stats.manual + Math.floor(Math.random() * 3 - 1)))} sparkColor="#3B82F6" />
@@ -334,18 +327,18 @@ const BlockList: React.FC = () => {
           <span className="text-sm font-bold text-text-primary flex items-center gap-2">
             <Ban size={14} className="text-sev-critical" />
             Blocked IPs
-            <span className="text-[10px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted">{filtered.length} entries</span>
+            <span className="text-[11px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted">{filtered.length} entries</span>
           </span>
           <button className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-elevated outline-none transition-colors"><Filter size={14} /></button>
         </div>
 
         {isLoading ? <TableSkeleton columns={8} rows={8} /> : (
           <div className="overflow-x-auto flex-1">
-            <table className="w-full text-left border-collapse min-w-[1000px]">
+            <table className="w-full text-left border-collapse min-w-[600px]">
               <thead className="bg-bg-base/50">
                 <tr>
                   {['IP Address', 'Reason', 'Blocked By', 'Risk Score', 'Events', 'Blocked At', 'Expires', 'Actions'].map(h => (
-                    <th key={h} className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted whitespace-nowrap">{h}</th>
+                    <th key={h} className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -362,26 +355,26 @@ const BlockList: React.FC = () => {
                     <td className="px-4 py-3 text-[11px] text-text-secondary max-w-[200px] truncate">{item.reason || '-'}</td>
                     <td className="px-4 py-3">
                       {item.blocked_by === 'AUTO' ? (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-sev-critical/20 bg-sev-critical/10 text-sev-critical">AUTO</span>
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full border border-sev-critical/20 bg-sev-critical/10 text-sev-critical">AUTO</span>
                       ) : (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-border-subtle bg-bg-elevated text-text-muted">MANUAL</span>
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full border border-border-subtle bg-bg-elevated text-text-muted">MANUAL</span>
                       )}
                     </td>
                     <td className="px-4 py-3 min-w-[120px]"><RiskBar score={item.risk_score} /></td>
                     <td className="px-4 py-3 text-[12px] font-mono font-bold text-text-primary tabular-nums">{item.event_count?.toLocaleString() ?? '-'}</td>
-                    <td className="px-4 py-3 text-[10px] font-mono text-text-muted whitespace-nowrap">{item.blocked_at ? formatDate(item.blocked_at) : '-'}</td>
+                    <td className="px-4 py-3 text-[11px] font-mono text-text-muted whitespace-nowrap">{item.blocked_at ? formatDate(item.blocked_at) : '-'}</td>
                     <td className="px-4 py-3">
                       {item.expires_at ? (
-                        <span className={`text-[10px] font-mono whitespace-nowrap ${isExpiringSoon(item.expires_at) ? 'text-sev-medium' : 'text-text-muted'}`}>
+                        <span className={`text-[11px] font-mono whitespace-nowrap ${isExpiringSoon(item.expires_at) ? 'text-sev-medium' : 'text-text-muted'}`}>
                           {formatDate(item.expires_at)}
                         </span>
                       ) : (
-                        <span className="text-[10px] text-text-muted">Permanent</span>
+                        <span className="text-[11px] text-text-muted">Permanent</span>
                       )}
                     </td>
                     <td className="px-4 py-3">
                       <button onClick={() => setConfirmUnblockIp(item.ip)}
-                        className="text-[10px] font-bold px-2 py-1 rounded-md bg-sev-low/10 text-sev-low border border-sev-low/20 hover:bg-sev-low/20 transition-all">
+                        className="text-[11px] font-bold px-2 py-1 rounded-md bg-sev-low/10 text-sev-low border border-sev-low/20 hover:bg-sev-low/20 transition-all">
                         Unblock
                       </button>
                     </td>

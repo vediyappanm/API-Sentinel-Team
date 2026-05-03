@@ -7,7 +7,7 @@ const ProtectionLayout: React.FC = () => {
   const navigate = useNavigate();
 
   const segments = location.pathname.split('/').filter(Boolean);
-  const activeTab = segments[1] || '';
+  const activeTab = segments[2] || '';
 
   const tabs = [
     { key: '', label: 'Security Events' },
@@ -15,10 +15,11 @@ const ProtectionLayout: React.FC = () => {
     { key: 'enforcement', label: 'Enforcement History' },
     { key: 'policy', label: 'Policy Configuration' },
     { key: 'settings', label: 'Settings' },
+    { key: 'mcp-shield', label: 'MCP Shield' },
   ];
 
   const handleTabChange = (key: string) => {
-    navigate(key ? `/protection/${key}` : '/protection');
+    navigate(key ? `/app/protection/${key}` : '/app/protection');
   };
 
   return (

@@ -30,7 +30,11 @@ async def test_apply_governance_rules_creates_violation(db_session):
     await db_session.commit()
 
     result = await db_session.execute(
-        select(PolicyViolation).where(PolicyViolation.account_id == 1000000)
+        select(PolicyViolation).where(
+            PolicyViolation.account_id == 1000000,
+            PolicyViolation.rule_id == rule.id,
+            PolicyViolation.endpoint_id == endpoint.id,
+        )
     )
     violations = result.scalars().all()
     assert len(violations) == 1

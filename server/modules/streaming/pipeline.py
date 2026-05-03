@@ -22,6 +22,7 @@ from server.modules.streaming.schema_registry import get_registry
 from server.modules.ml.feature_store import update_feature_vector
 from server.modules.ml.model_registry import ensure_default_models, list_models
 from server.modules.ml.runner import run_model
+from server.modules.detection.pipeline import unified_detection_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,22 @@ class StreamPipeline:
         if quality is not None and quality < settings.STREAM_MIN_QUALITY_SCORE:
             return
 
+        if unified_detection_pipeline.is_enabled() and not event.get("detection_processed"):
+            async with AsyncSessionLocal() as db:
+                await unified_detection_pipeline.process(
+                    db,
+                    account_id=account_id,
+                    source_type="stream_enriched",
+                    raw_event=event,
+                    persist_request_log=False,
+                    existing_endpoint_id=endpoint_id,
+                    existing_actor_id=actor_id,
+                    context_source="STREAM_ENRICHED",
+                    shadow=(unified_detection_pipeline.mode() == "shadow"),
+                )
+                if unified_detection_pipeline.is_active():
+                    await db.commit()
+
         # Update metrics cache
         hour_ts = _hour_bucket(ts_ms)
         metric_key = (account_id, endpoint_id, hour_ts)
@@ -174,6 +191,46 @@ class StreamPipeline:
         if now_ts - last_ts < settings.STREAM_ALERT_SUPPRESS_SECONDS:
             return
         self._last_alert[key] = now_ts
+
+        pipeline_mode = unified_detection_pipeline.mode()
+        aggregate_event = {
+            "endpoint_id": endpoint_id,
+            "path": event.get("path"),
+            "method": event.get("method", "POST"),
+            "status_code": event.get("response_code", 401),
+            "timestamp_ms": event.get("timestamp_ms"),
+            "count": count,
+            "distinct_actors": len(actors),
+            "actor_id": "multiple",
+            "source_ip": "multiple",
+        }
+
+        if pipeline_mode == "active":
+            async with AsyncSessionLocal() as db:
+                await unified_detection_pipeline.process(
+                    db,
+                    account_id=account_id,
+                    source_type="auth_failure_aggregate",
+                    raw_event=aggregate_event,
+                    persist_request_log=False,
+                    existing_endpoint_id=endpoint_id,
+                    context_source="STREAM_AGGREGATE",
+                )
+                await db.commit()
+            return
+
+        if pipeline_mode == "shadow":
+            async with AsyncSessionLocal() as db:
+                await unified_detection_pipeline.process(
+                    db,
+                    account_id=account_id,
+                    source_type="auth_failure_aggregate",
+                    raw_event=aggregate_event,
+                    persist_request_log=False,
+                    existing_endpoint_id=endpoint_id,
+                    context_source="STREAM_AGGREGATE",
+                    shadow=True,
+                )
 
         async with AsyncSessionLocal() as db:
             confidence = min(0.99, 0.6 + (count / max(1, settings.STREAM_AUTH_FAILURE_THRESHOLD)) * 0.2)

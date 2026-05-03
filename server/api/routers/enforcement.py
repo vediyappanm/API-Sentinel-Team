@@ -7,13 +7,14 @@ from sqlalchemy import select, delete
 
 from server.modules.auth.rbac import RBAC
 from server.modules.persistence.database import get_db
-from server.models.core import EndpointBlock, RateLimitOverride
+from server.models.core import EndpointBlock, RateLimitOverride, ResponseActionLog
 from server.modules.enforcement.engine import (
     push_waf_rule,
     rate_limit_override,
     token_invalidate,
     circuit_breaker,
 )
+from server.modules.response.incident_orchestrator import handle_incident
 
 router = APIRouter(tags=["Enforcement"])
 
@@ -158,3 +159,64 @@ async def delete_endpoint_block(
         raise HTTPException(404, "Block not found")
     await db.commit()
     return {"deleted": block_id}
+
+
+@router.get("/audit")
+async def list_enforcement_audit(
+    limit: int = Query(default=100, le=500),
+    db: AsyncSession = Depends(get_db),
+    payload: dict = Depends(RBAC.require_auth),
+):
+    """List enforcement audit trail (last N ResponseActionLog entries)."""
+    account_id = payload.get("account_id")
+    result = await db.execute(
+        select(ResponseActionLog)
+        .where(ResponseActionLog.account_id == account_id)
+        .order_by(ResponseActionLog.created_at.desc())
+        .limit(limit)
+    )
+    rows = result.scalars().all()
+    return {
+        "total": len(rows),
+        "actions": [
+            {
+                "id": r.id,
+                "alert_id": r.alert_id,
+                "action_type": r.action_type,
+                "status": r.status,
+                "details": r.details,
+                "created_at": r.created_at,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.post("/auto-remediate")
+async def auto_remediate_threat(
+    source_ip: str = Body(...),
+    endpoint_id: str | None = Body(default=None),
+    reason: str | None = Body(default=None),
+    db: AsyncSession = Depends(get_db),
+    payload: dict = Depends(RBAC.require_auth),
+):
+    """Trigger automatic remediation for a known threat actor."""
+    account_id = payload.get("account_id")
+
+    # Route through incident orchestrator
+    result = await handle_incident(
+        db,
+        account_id,
+        "manual.auto_remediate",
+        "HIGH",
+        source_ip,
+        endpoint_id,
+        {"reason": reason or "Manual remediation triggered"},
+    )
+
+    return {
+        "alert_id": result["alert_id"],
+        "actor_id": result["actor_id"],
+        "risk_score": result["actor_risk_score"],
+        "auto_blocked": result["auto_blocked"],
+    }

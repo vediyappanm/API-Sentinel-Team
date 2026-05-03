@@ -1,7 +1,9 @@
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from typing import Optional
 from fastapi import Request
+import jwt
+
+from server.config import settings
 
 def get_rate_limit_key(request: Request) -> str:
     """
@@ -19,10 +21,14 @@ def get_rate_limit_key(request: Request) -> str:
         
         auth_header = request.headers.get("authorization", "")
         if auth_header.startswith("Bearer "):
-            from server.modules.auth.jwt_issuer import JWTIssuer
             try:
                 token = auth_header[7:]
-                payload = JWTIssuer.verify_token(token)
+                payload = jwt.decode(
+                    token,
+                    settings.JWT_SECRET,
+                    algorithms=[settings.JWT_ALGORITHM],
+                    options={"verify_exp": True},
+                )
                 account_id = payload.get("account_id")
             except Exception:
                 pass

@@ -27,6 +27,7 @@ from server.models.core import (
     Vulnerability,
 )
 from server.modules.detection.engine import detect_api_behavior
+from server.modules.detection.pipeline import unified_detection_pipeline
 from server.modules.business_logic.graph_builder import detect_transition_violation
 from server.modules.cache.redis_cache import bump_cache_version
 from server.modules.ingestion.parsers import detect_attacks, parse_log_line
@@ -43,6 +44,7 @@ from server.modules.vulnerability_detector.pii_scanner import PIIScanner
 from server.modules.streaming.event_bus import get_event_bus, tenant_topic, track_topic
 from server.modules.agentic.mcp_security import record_tool_invocation
 from server.modules.agentic.mcp_parser import parse_mcp_invocation
+from server.modules.vulnerability_detector.store import create_or_merge_vulnerability
 from server.config import settings
 
 logger = logging.getLogger(__name__)
@@ -236,14 +238,10 @@ async def process_stream_lines(job_id: str, account_id: int, payload: Dict[str, 
                 set_current_account_id(account_id)
                 await apply_tenant_context(db)
 
-        blocked_result = await db.execute(
-            select(BlockedIP.ip).where(BlockedIP.account_id == account_id)
-        )
-        blocked_ips = set(blocked_result.scalars().all())
-
         logs: List[Dict[str, Any]] = []
         events: List[Dict[str, Any]] = []
         alerts: List[Dict[str, Any]] = []
+        pipeline_mode = unified_detection_pipeline.mode()
 
         lines_processed = 0
         threats_detected = 0
@@ -254,44 +252,69 @@ async def process_stream_lines(job_id: str, account_id: int, payload: Dict[str, 
             if not parsed:
                 continue
             lines_processed += 1
-            attacks = detect_attacks(parsed["path"], parsed["ua"])
+            if pipeline_mode == "active":
+                result = await unified_detection_pipeline.process(
+                    db,
+                    account_id=account_id,
+                    source_type="stream_line",
+                    raw_event=parsed,
+                    persist_request_log=True,
+                    context_source="GATEWAY_LOG",
+                )
+                attacks = [
+                    {"category": signal.category, "severity": signal.severity}
+                    for signal in result["signals"]
+                ]
+                threats_detected += len(attacks)
+            else:
+                if pipeline_mode == "shadow":
+                    await unified_detection_pipeline.process(
+                        db,
+                        account_id=account_id,
+                        source_type="stream_line",
+                        raw_event=parsed,
+                        persist_request_log=False,
+                        context_source="GATEWAY_LOG",
+                        shadow=True,
+                    )
 
-            log_id = str(uuid.uuid4())
-            logs.append({
-                "id": log_id,
-                "account_id": account_id,
-                "source_ip": parsed["ip"],
-                "method": parsed["method"],
-                "path": parsed["path"],
-                "response_code": parsed["status"],
-                "created_at": parsed["time"],
-            })
-
-            for attack in attacks:
-                threats_detected += 1
-                events.append({
-                    "id": str(uuid.uuid4()),
+                attacks = detect_attacks(parsed["path"], parsed["ua"])
+                log_id = str(uuid.uuid4())
+                logs.append({
+                    "id": log_id,
                     "account_id": account_id,
-                    "actor": parsed["ip"],
-                    "ip": parsed["ip"],
-                    "url": parsed["path"],
+                    "source_ip": parsed["ip"],
                     "method": parsed["method"],
-                    "category": attack["category"],
-                    "severity": attack["severity"],
-                    "detected_at": int(parsed["time"].timestamp() * 1000),
-                    "status": "OPEN",
+                    "path": parsed["path"],
+                    "response_code": parsed["status"],
+                    "created_at": parsed["time"],
                 })
-                if attack["severity"] in {"CRITICAL", "HIGH"}:
-                    alerts.append({
+
+                for attack in attacks:
+                    threats_detected += 1
+                    events.append({
                         "id": str(uuid.uuid4()),
                         "account_id": account_id,
-                        "title": f"{attack['category']} detected from {parsed['ip']}",
-                        "message": f"Attack pattern matched on {parsed['method']} {parsed['path']}",
-                        "severity": attack["severity"],
+                        "actor": parsed["ip"],
+                        "ip": parsed["ip"],
+                        "url": parsed["path"],
+                        "method": parsed["method"],
                         "category": attack["category"],
-                        "source_ip": parsed["ip"],
-                        "endpoint": parsed["path"],
+                        "severity": attack["severity"],
+                        "detected_at": int(parsed["time"].timestamp() * 1000),
+                        "status": "OPEN",
                     })
+                    if attack["severity"] in {"CRITICAL", "HIGH"}:
+                        alerts.append({
+                            "id": str(uuid.uuid4()),
+                            "account_id": account_id,
+                            "title": f"{attack['category']} detected from {parsed['ip']}",
+                            "message": f"Attack pattern matched on {parsed['method']} {parsed['path']}",
+                            "severity": attack["severity"],
+                            "category": attack["category"],
+                            "source_ip": parsed["ip"],
+                            "endpoint": parsed["path"],
+                        })
             events_for_ws.append({
                 "type": "log_entry",
                 "data": {
@@ -351,6 +374,7 @@ async def process_http_traffic(job_id: str, account_id: int, payload: Dict[str, 
     api_collection_id = payload.get("apiCollectionId", payload.get("api_collection_id", 0))
 
     threats = []
+    pipeline_mode = unified_detection_pipeline.mode()
     payload_combined = (request_payload or "") + " " + (path or "")
     sql_patterns = ["'", "OR 1=1", "UNION SELECT", "--", "DROP TABLE"]
     cmd_patterns = [";ls", "|cat", "&&id", "`whoami`", "$(id)"]
@@ -372,44 +396,66 @@ async def process_http_traffic(job_id: str, account_id: int, payload: Dict[str, 
     async with AsyncSessionLocal() as db:
         set_current_account_id(account_id)
         await apply_tenant_context(db)
-        await db.execute(
-            insert(RequestLog),
-            [{
-                "id": str(uuid.uuid4()),
-                "account_id": account_id,
-                "source_ip": source_ip,
-                "method": method,
-                "path": path,
-                "response_code": status_code,
-            }],
-        )
+        if pipeline_mode == "active":
+            result = await unified_detection_pipeline.process(
+                db,
+                account_id=account_id,
+                source_type="http_traffic",
+                raw_event=payload,
+                persist_request_log=True,
+                context_source="HTTP_TRAFFIC",
+            )
+            threats = [(signal.category, signal.severity) for signal in result["signals"]]
+        else:
+            if pipeline_mode == "shadow":
+                await unified_detection_pipeline.process(
+                    db,
+                    account_id=account_id,
+                    source_type="http_traffic",
+                    raw_event=payload,
+                    persist_request_log=False,
+                    context_source="HTTP_TRAFFIC",
+                    shadow=True,
+                )
 
-        events = []
-        for category, severity in threats:
-            events.append({
-                "id": str(uuid.uuid4()),
-                "account_id": account_id,
-                "actor": source_ip,
-                "ip": source_ip,
-                "url": path,
-                "method": method,
-                "payload": (request_payload or "")[:2000],
-                "event_type": "EVENT_TYPE_SINGLE",
-                "category": category,
-                "sub_category": category,
-                "severity": severity,
-                "detected_at": int(time.time() * 1000),
-                "status": "OPEN",
-                "api_collection_id": api_collection_id,
-                "event_metadata": {
-                    "request_headers": request_headers,
-                    "response_headers": response_headers,
-                    "response_payload": (response_payload or "")[:2000],
-                },
-            })
+            await db.execute(
+                insert(RequestLog),
+                [{
+                    "id": str(uuid.uuid4()),
+                    "account_id": account_id,
+                    "source_ip": source_ip,
+                    "method": method,
+                    "path": path,
+                    "response_code": status_code,
+                }],
+            )
 
-        if events:
-            await db.execute(insert(MaliciousEventRecord), events)
+            events = []
+            for category, severity in threats:
+                events.append({
+                    "id": str(uuid.uuid4()),
+                    "account_id": account_id,
+                    "actor": source_ip,
+                    "ip": source_ip,
+                    "url": path,
+                    "method": method,
+                    "payload": (request_payload or "")[:2000],
+                    "event_type": "EVENT_TYPE_SINGLE",
+                    "category": category,
+                    "sub_category": category,
+                    "severity": severity,
+                    "detected_at": int(time.time() * 1000),
+                    "status": "OPEN",
+                    "api_collection_id": api_collection_id,
+                    "event_metadata": {
+                        "request_headers": request_headers,
+                        "response_headers": response_headers,
+                        "response_payload": (response_payload or "")[:2000],
+                    },
+                })
+
+            if events:
+                await db.execute(insert(MaliciousEventRecord), events)
         await db.commit()
 
     await bump_cache_version(account_id)
@@ -433,6 +479,7 @@ async def process_event_batch(job_id: str, account_id: int, payload: Dict[str, A
     async with AsyncSessionLocal() as db:
         set_current_account_id(account_id)
         await apply_tenant_context(db)
+        pipeline_mode = unified_detection_pipeline.mode()
         try:
             retention_policy = await get_retention_policy(db, account_id)
         except Exception:
@@ -570,6 +617,7 @@ async def process_event_batch(job_id: str, account_id: int, payload: Dict[str, A
                     "latency_ms": resp.get("latency_ms"),
                     "quality_score": quality_score,
                     "protocol": event.get("protocol", "HTTP/1.1"),
+                    "detection_processed": pipeline_mode in {"shadow", "active"},
                 }
                 try:
                     topic = tenant_topic(account_id, "enriched")
@@ -644,15 +692,30 @@ async def process_event_batch(job_id: str, account_id: int, payload: Dict[str, A
                 await _apply_governance_rules(db, account_id, endpoint)
                 await _apply_openapi_conformance(db, account_id, endpoint)
                 await _update_risk_score(db, endpoint, account_id)
-                await detect_api_behavior(
-                    db,
-                    account_id,
-                    actor_id,
-                    endpoint.id,
-                    endpoint.path or path,
-                    event.get("observed_at") or int(time.time() * 1000),
-                    resp.get("latency_ms"),
-                )
+                if pipeline_mode in {"shadow", "active"}:
+                    result = await unified_detection_pipeline.process(
+                        db,
+                        account_id=account_id,
+                        source_type="api_traffic",
+                        raw_event=event,
+                        persist_request_log=False,
+                        existing_endpoint_id=endpoint.id,
+                        existing_actor_id=actor_id,
+                        context_source="EVENT_BATCH",
+                        shadow=(pipeline_mode == "shadow"),
+                    )
+                    if pipeline_mode == "active":
+                        threats += len(result["signals"])
+                else:
+                    await detect_api_behavior(
+                        db,
+                        account_id,
+                        actor_id,
+                        endpoint.id,
+                        endpoint.path or path,
+                        event.get("observed_at") or int(time.time() * 1000),
+                        resp.get("latency_ms"),
+                    )
 
             elif etype == "gateway_log":
                 lines = event.get("lines") or []
@@ -661,30 +724,51 @@ async def process_event_batch(job_id: str, account_id: int, payload: Dict[str, A
                     if not parsed:
                         continue
                     processed += 1
-                    attacks = detect_attacks(parsed["path"], parsed["ua"])
-                    db.add(RequestLog(
-                        id=str(uuid.uuid4()),
-                        account_id=account_id,
-                        source_ip=parsed["ip"],
-                        method=parsed["method"],
-                        path=parsed["path"],
-                        response_code=parsed["status"],
-                        created_at=parsed["time"],
-                    ))
-                    for attack in attacks:
-                        threats += 1
-                        db.add(MaliciousEventRecord(
+                    if pipeline_mode == "active":
+                        result = await unified_detection_pipeline.process(
+                            db,
+                            account_id=account_id,
+                            source_type="gateway_log",
+                            raw_event=parsed,
+                            persist_request_log=True,
+                            context_source="GATEWAY_LOG",
+                        )
+                        threats += len(result["signals"])
+                    else:
+                        if pipeline_mode == "shadow":
+                            await unified_detection_pipeline.process(
+                                db,
+                                account_id=account_id,
+                                source_type="gateway_log",
+                                raw_event=parsed,
+                                persist_request_log=False,
+                                context_source="GATEWAY_LOG",
+                                shadow=True,
+                            )
+                        attacks = detect_attacks(parsed["path"], parsed["ua"])
+                        db.add(RequestLog(
                             id=str(uuid.uuid4()),
                             account_id=account_id,
-                            actor=parsed["ip"],
-                            ip=parsed["ip"],
-                            url=parsed["path"],
+                            source_ip=parsed["ip"],
                             method=parsed["method"],
-                            category=attack["category"],
-                            severity=attack["severity"],
-                            detected_at=int(parsed["time"].timestamp() * 1000),
-                            status="OPEN",
+                            path=parsed["path"],
+                            response_code=parsed["status"],
+                            created_at=parsed["time"],
                         ))
+                        for attack in attacks:
+                            threats += 1
+                            db.add(MaliciousEventRecord(
+                                id=str(uuid.uuid4()),
+                                account_id=account_id,
+                                actor=parsed["ip"],
+                                ip=parsed["ip"],
+                                url=parsed["path"],
+                                method=parsed["method"],
+                                category=attack["category"],
+                                severity=attack["severity"],
+                                detected_at=int(parsed["time"].timestamp() * 1000),
+                                status="OPEN",
+                            ))
 
             elif etype == "test_result":
                 processed += 1
@@ -701,14 +785,18 @@ async def process_event_batch(job_id: str, account_id: int, payload: Dict[str, A
                 )
                 db.add(tr)
                 if event.get("is_vulnerable"):
-                    db.add(Vulnerability(
-                        account_id=account_id,
-                        template_id=event.get("template_id"),
-                        endpoint_id=event.get("endpoint_id"),
-                        severity=event.get("severity", "MEDIUM"),
-                        status="OPEN",
-                        evidence=event.get("evidence", {}),
-                    ))
+                    await create_or_merge_vulnerability(
+                        db,
+                        {
+                            "account_id": account_id,
+                            "template_id": event.get("template_id"),
+                            "endpoint_id": event.get("endpoint_id"),
+                            "severity": event.get("severity", "MEDIUM"),
+                            "type": event.get("template_id"),
+                            "status": "OPEN",
+                            "evidence": event.get("evidence", {}),
+                        },
+                    )
 
         await db.commit()
 

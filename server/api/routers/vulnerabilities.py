@@ -4,8 +4,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, and_, func
 from server.modules.persistence.database import get_db
 from server.modules.auth.rbac import RBAC
+from server.modules.validation.input_validator import InputValidator, ValidationError
 from server.models.core import Vulnerability
 from server.api.rate_limiter import limiter
+from server.modules.utils.finding_fingerprint import vulnerability_fingerprint
 
 router = APIRouter()
 
@@ -53,14 +55,46 @@ async def get_vulnerabilities(
     payload: dict = Depends(RBAC.require_auth),
     db: AsyncSession = Depends(get_db),
 ):
+    try:
+        # Validate numeric parameters
+        validated_limit = InputValidator.validate_integer(limit, "limit", min_value=1, max_value=10000)
+        validated_offset = InputValidator.validate_integer(offset, "offset", min_value=0, max_value=1000000)
+
+        # Validate string parameters (allowed values: CRITICAL, HIGH, MEDIUM, LOW for severity)
+        validated_severity = None
+        if severity:
+            validated_severity = InputValidator.validate_string(
+                severity, "severity", max_length=20, allow_empty=False
+            ).upper()
+            if validated_severity not in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
+                raise ValidationError("severity: Must be one of CRITICAL, HIGH, MEDIUM, LOW")
+
+        # Validate type parameter
+        validated_type = None
+        if type:
+            validated_type = InputValidator.validate_string(
+                type, "type", max_length=50, allow_empty=False
+            ).upper()
+
+        # Validate status parameter (allowed values: OPEN, CLOSED, ACCEPTED_RISK)
+        validated_status = None
+        if status:
+            validated_status = InputValidator.validate_string(
+                status, "status", max_length=20, allow_empty=False
+            ).upper()
+            if validated_status not in ("OPEN", "CLOSED", "ACCEPTED_RISK"):
+                raise ValidationError("status: Must be one of OPEN, CLOSED, ACCEPTED_RISK")
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     account_id = payload.get("account_id")
     filters = [Vulnerability.account_id == account_id]
-    if severity:
-        filters.append(Vulnerability.severity == severity.upper())
-    if type:
-        filters.append(Vulnerability.type == type.upper())
-    if status:
-        filters.append(Vulnerability.status == status.upper())
+    if validated_severity:
+        filters.append(Vulnerability.severity == validated_severity)
+    if validated_type:
+        filters.append(Vulnerability.type == validated_type)
+    if validated_status:
+        filters.append(Vulnerability.status == validated_status)
     if false_positive is not None:
         filters.append(Vulnerability.false_positive == false_positive)
 
@@ -68,7 +102,7 @@ async def get_vulnerabilities(
         select(Vulnerability)
         .where(and_(*filters))
         .order_by(Vulnerability.created_at.desc())
-        .limit(limit).offset(offset)
+        .limit(validated_limit).offset(validated_offset)
     )
     vulns = result.scalars().all()
     return {
@@ -77,7 +111,8 @@ async def get_vulnerabilities(
             {"id": v.id, "template_id": v.template_id, "endpoint_id": v.endpoint_id,
              "url": v.url, "method": v.method, "severity": v.severity, "type": v.type,
              "description": v.description, "status": v.status, "false_positive": v.false_positive,
-             "evidence": v.evidence, "created_at": str(v.created_at)}
+             "evidence": v.evidence, "fingerprint": vulnerability_fingerprint(v),
+             "created_at": str(v.created_at)}
             for v in vulns
         ],
     }
@@ -131,7 +166,8 @@ async def get_vulnerability(
     return {"id": v.id, "template_id": v.template_id, "endpoint_id": v.endpoint_id,
             "url": v.url, "method": v.method, "severity": v.severity, "type": v.type,
             "description": v.description, "status": v.status, "false_positive": v.false_positive,
-            "evidence": v.evidence, "created_at": str(v.created_at)}
+            "evidence": v.evidence, "fingerprint": vulnerability_fingerprint(v),
+            "created_at": str(v.created_at)}
 
 
 @router.post("/{vuln_id}/status")

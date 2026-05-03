@@ -12,6 +12,8 @@ from server.models.core import ActorProfile, Alert, EvidenceRecord
 from server.modules.evidence.package import save_evidence_package
 from server.modules.integrations.dispatcher import dispatch_event
 from server.modules.response.playbook_executor import execute_playbooks
+from server.modules.response.incident_orchestrator import handle_incident
+from server.modules.detection.pipeline import unified_detection_pipeline
 
 
 def _now() -> datetime.datetime:
@@ -80,6 +82,29 @@ async def detect_api_behavior(
 ):
     if not actor_id:
         return
+
+    if unified_detection_pipeline.is_enabled():
+        return await unified_detection_pipeline.process(
+            db,
+            account_id=account_id,
+            source_type="stream_enriched",
+            raw_event={
+                "endpoint_id": endpoint_id,
+                "actor_id": actor_id,
+                "path": path,
+                "method": "GET",
+                "response_code": 200,
+                "timestamp_ms": timestamp_ms,
+                "latency_ms": latency_ms,
+                "protocol": "HTTP/1.1",
+                "detection_processed": False,
+            },
+            persist_request_log=False,
+            existing_endpoint_id=endpoint_id,
+            existing_actor_id=actor_id,
+            context_source="LEGACY_ENGINE",
+            shadow=(unified_detection_pipeline.mode() == "shadow"),
+        )
 
     profile, rate_per_min, now = await update_actor_profile(
         db,
@@ -171,4 +196,15 @@ async def detect_api_behavior(
         account_id,
         db,
     )
-    await execute_playbooks(db, alert, evidence={"summary": reason})
+
+    # Route through incident orchestrator for unified response handling
+    incident_type = "alert.rate_burst" if "rate_burst" in signals else "alert.slow_response"
+    await handle_incident(
+        db,
+        account_id,
+        incident_type,
+        severity,
+        actor_id,
+        endpoint_id,
+        {"reason": reason, "confidence": confidence, "signals": signals},
+    )

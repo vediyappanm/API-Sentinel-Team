@@ -7,17 +7,17 @@ const TestingLayout: React.FC = () => {
   const navigate = useNavigate();
 
   const segments = location.pathname.split('/').filter(Boolean);
-  const activeTab = segments[1] || '';
+  const activeTab = segments[2] || '';
 
   const tabs = [
     { key: '', label: 'Vulnerabilities' },
     { key: 'dashboard', label: 'Test Dashboard' },
-    { key: 'configuration', label: 'Configuration' },
-    { key: 'inspector', label: 'Test Inspector' },
+    { key: 'configuration', label: 'Profiles & Prep' },
+    { key: 'inspector', label: 'Run Inspector' },
   ];
 
   const handleTabChange = (key: string) => {
-    navigate(key ? `/testing/${key}` : '/testing');
+    navigate(key ? `/app/testing/${key}` : '/app/testing');
   };
 
   return (

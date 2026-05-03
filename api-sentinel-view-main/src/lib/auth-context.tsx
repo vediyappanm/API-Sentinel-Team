@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { post, get, setToken, getToken, ApiError } from './api-client';
+import { post, get, setToken, ApiError } from './api-client';
 
 function friendlyError(err: unknown, action: 'login' | 'signup'): string {
   if (err instanceof ApiError) {
@@ -16,7 +16,17 @@ function friendlyError(err: unknown, action: 'login' | 'signup'): string {
   return 'Network error - is the backend running?';
 }
 
-export type UserRole = 'ADMIN' | 'MEMBER' | 'GUEST';
+export type UserRole =
+  | 'PLATFORM_ADMIN'
+  | 'ADMIN'
+  | 'SECURITY_ENGINEER'
+  | 'DEVELOPER'
+  | 'MEMBER'
+  | 'AUDITOR'
+  | 'VIEWER'
+  | 'GUEST';
+
+export type WorkspaceKey = 'customer' | 'admin' | 'platform';
 
 export interface User {
   login: string;
@@ -30,42 +40,90 @@ interface AuthState {
   isLoading: boolean;
   error: string | null;
   isAdmin: boolean;
+  role: UserRole;
+  isTenantAdmin: boolean;
+  canAccessCustomerWorkspace: boolean;
+  canAccessAdminWorkspace: boolean;
+  canAccessPlatformWorkspace: boolean;
+  canAccessWorkspace: (workspace: WorkspaceKey) => boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string) => Promise<void>;
   // signup derives account_name from email prefix
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
 
-const DEFAULT_ADMIN: User = {
-  login: 'admin@sentinel.io',
-  name: 'Admin',
-  role: 'ADMIN',
-  accounts: { '1000000': { accountId: 1000000, name: 'Helios', isDefault: true } },
-};
+const CUSTOMER_WORKSPACE_ROLES: UserRole[] = [
+  'ADMIN',
+  'SECURITY_ENGINEER',
+  'DEVELOPER',
+  'MEMBER',
+  'AUDITOR',
+  'VIEWER',
+];
+
+const ADMIN_WORKSPACE_ROLES: UserRole[] = [
+  'ADMIN',
+  'SECURITY_ENGINEER',
+];
+
+const PLATFORM_WORKSPACE_ROLES: UserRole[] = [
+  'PLATFORM_ADMIN',
+];
+
+function normalizeRole(role?: string | null): UserRole {
+  const normalized = role?.toUpperCase();
+  switch (normalized) {
+    case 'PLATFORM_ADMIN':
+    case 'ADMIN':
+    case 'SECURITY_ENGINEER':
+    case 'DEVELOPER':
+    case 'MEMBER':
+    case 'AUDITOR':
+    case 'VIEWER':
+      return normalized;
+    default:
+      return 'GUEST';
+  }
+}
+
+function buildUserFromProfile(
+  profile: { email?: string; role?: string; account_id?: number },
+  defaultAccountName: string,
+): User | null {
+  if (!profile?.email) {
+    return null;
+  }
+
+  const accounts = profile.account_id != null
+    ? {
+        [String(profile.account_id)]: {
+          accountId: profile.account_id,
+          name: defaultAccountName,
+          isDefault: true,
+        },
+      }
+    : {};
+
+  return {
+    login: profile.email,
+    name: profile.email.split('@')[0],
+    role: normalizeRole(profile.role),
+    accounts,
+  };
+}
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) {
-      setUser(null);
-      setIsLoading(false);
-      return;
-    }
-
     get<{ email?: string; role?: string; account_id?: number }>('/auth/me')
       .then(profile => {
-        if (profile?.email) {
-          setUser({
-            login: profile.email,
-            name: profile.email.split('@')[0],
-            role: (profile.role as UserRole) ?? 'ADMIN',
-            accounts: { [String(profile.account_id ?? 1000000)]: { accountId: profile.account_id ?? 1000000, name: 'My Org', isDefault: true } },
-          });
+        const nextUser = buildUserFromProfile(profile, 'My Org');
+        if (nextUser) {
+          setUser(nextUser);
         } else {
           setToken(null);
           setUser(null);
@@ -82,13 +140,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setToken(res.access_token);
       }
       const profile = await get<{ email?: string; role?: string; account_id?: number }>('/auth/me');
-      if (profile.email) {
-        setUser({
-          login: profile.email,
-          name: profile.email.split('@')[0],
-          role: (profile.role as UserRole) ?? 'ADMIN',
-          accounts: { [String(profile.account_id ?? 1000000)]: { accountId: profile.account_id ?? 1000000, name: 'My Org', isDefault: true } },
-        });
+      const nextUser = buildUserFromProfile(profile, 'My Org');
+      if (nextUser) {
+        setUser(nextUser);
       }
     } catch (err) {
       throw new Error(friendlyError(err, 'login'));
@@ -103,26 +157,57 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setToken(res.access_token);
       }
       const profile = await get<{ email?: string; role?: string; account_id?: number }>('/auth/me');
-      if (profile.email) {
-        setUser({
-          login: profile.email,
-          name: profile.email.split('@')[0],
-          role: (profile.role as UserRole) ?? 'ADMIN',
-          accounts: { [String(profile.account_id ?? 1000000)]: { accountId: profile.account_id ?? 1000000, name: accountName, isDefault: true } },
-        });
+      const nextUser = buildUserFromProfile(profile, accountName);
+      if (nextUser) {
+        setUser(nextUser);
       }
     } catch (err) {
       throw new Error(friendlyError(err, 'signup'));
     }
   };
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await post('/auth/logout');
+    } catch {
+      // Clear the client session even if backend logout fails.
+    }
     setToken(null);
     setUser(null);
-    window.location.href = '/';
+    window.location.assign('/login');
+  };
+
+  const role = user ? normalizeRole(user.role) : 'GUEST';
+  const isAdmin = role === 'ADMIN';
+  const isTenantAdmin = ADMIN_WORKSPACE_ROLES.includes(role);
+  const canAccessCustomerWorkspace = CUSTOMER_WORKSPACE_ROLES.includes(role) || isTenantAdmin;
+  const canAccessAdminWorkspace = isTenantAdmin;
+  const canAccessPlatformWorkspace = PLATFORM_WORKSPACE_ROLES.includes(role);
+  const canAccessWorkspace = (workspace: WorkspaceKey) => {
+    if (workspace === 'customer') {
+      return canAccessCustomerWorkspace;
+    }
+    if (workspace === 'admin') {
+      return canAccessAdminWorkspace;
+    }
+    return canAccessPlatformWorkspace;
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, error: null, isAdmin: user?.role === 'ADMIN', login, signup, logout }}>
+    <AuthContext.Provider value={{
+      user,
+      isLoading,
+      error: null,
+      isAdmin,
+      role,
+      isTenantAdmin,
+      canAccessCustomerWorkspace,
+      canAccessAdminWorkspace,
+      canAccessPlatformWorkspace,
+      canAccessWorkspace,
+      login,
+      signup,
+      logout,
+    }}>
       {children}
     </AuthContext.Provider>
   );

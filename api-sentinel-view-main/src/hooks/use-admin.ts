@@ -8,6 +8,11 @@ import {
   dismissTrafficAlert,
   fetchThreatConfiguration,
   modifyThreatConfiguration,
+  fetchAccountSettings,
+  modifyAccountSettings,
+  fetchApiKeys,
+  createApiKey,
+  revokeApiKey,
 } from '@/services/admin.service';
 
 export function useModuleInfo() {
@@ -80,6 +85,54 @@ export function useUpdateThreatConfig() {
     mutationFn: (config: Record<string, unknown>) => modifyThreatConfiguration(config),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'threatConfig'] });
+    },
+  });
+}
+
+export function useAccountSettings() {
+  return useQuery({
+    queryKey: ['admin', 'accountSettings'],
+    queryFn: ({ signal }) => fetchAccountSettings(signal),
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+  });
+}
+
+export function useUpdateAccountSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (settings: Record<string, unknown>) => modifyAccountSettings(settings),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'accountSettings'] });
+    },
+  });
+}
+
+export function useApiKeys() {
+  return useQuery({
+    queryKey: ['admin', 'apiKeys'],
+    queryFn: ({ signal }) => fetchApiKeys(signal),
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+  });
+}
+
+export function useCreateApiKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { name: string; scopes: string[]; expiresInDays?: number | null }) => createApiKey(payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'apiKeys'] });
+    },
+  });
+}
+
+export function useRevokeApiKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (apiKeyId: string) => revokeApiKey(apiKeyId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'apiKeys'] });
     },
   });
 }

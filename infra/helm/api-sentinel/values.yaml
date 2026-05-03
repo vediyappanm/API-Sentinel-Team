@@ -30,11 +30,30 @@ resources:
 env:
   APP_NAME: "API Security Engine"
   DEBUG: "false"
-  DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/api_security"
-  REDIS_URL: "redis://redis:6379/0"
-  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
-  KAFKA_ENABLED: "true"
   TENANT_RLS_ENABLED: "true"
+  TESTS_LIBRARY_PATH: "/app/tests-library"
+  CORS_ORIGINS_OVERRIDE: "https://app.example.com"
+  UNIFIED_PIPELINE_MODE: "shadow"
+  STARTUP_BOOTSTRAP_SCHEMA: "false"
+  STARTUP_ENABLE_DEMO_BOOTSTRAP: "false"
+  STARTUP_ENSURE_DEFAULT_PLAYBOOKS: "false"
+  STARTUP_ENABLE_ANALYTICS_PROCESSOR: "false"
+  STARTUP_ENABLE_ARCHIVER: "false"
+
+secrets:
+  databaseUrl: "postgresql+asyncpg://app_user:change-me@postgres:5432/api_security"
+  redisUrl: "redis://redis:6379/0"
+  kafkaBootstrapServers: "kafka:9092"
+  jwtSecret: "replace-me-with-64-char-secret"
+  apiKey: "replace-me-with-api-key"
+  encryptionKey: "replace-me-with-fernet-key"
+
+probes:
+  readinessPath: /api/health/ready
+  livenessPath: /api/health/live
+
+migrations:
+  enabled: true
 
 hpa:
   enabled: true
@@ -49,8 +68,6 @@ serviceAccount:
     eks.amazonaws.com/role-arn: ""
 
 externalServices:
-  redisUrl: "redis://redis:6379/0"
-  kafkaBootstrap: "kafka:9092"
   s3Bucket: "api-sentinel-archive"
   clickhouseUrl: "http://clickhouse:8123"
   s3Region: "us-east-1"
@@ -62,8 +79,8 @@ externalServices:
 postgresql:
   enabled: true
   auth:
-    username: postgres
-    password: postgres
+    username: app_user
+    password: change-me
     database: api_security
 
 redis:
