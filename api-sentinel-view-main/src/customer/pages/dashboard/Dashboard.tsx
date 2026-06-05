@@ -21,6 +21,7 @@ import { useThreatCategoryCount, useActorsGeoCount } from '@/hooks/use-protectio
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/auth-context';
+import type { DashboardThreatData } from '@/services/dashboard.service';
 
 function daysAgoTs(days: number) {
   return Math.floor((Date.now() - days * 86400_000) / 1000);
@@ -51,20 +52,37 @@ const Dashboard: React.FC = () => {
   const categoryCount = useThreatCategoryCount();
   const geoCount = useActorsGeoCount();
 
+  type IssueKpis = NonNullable<typeof issues.data> & {
+    highIssues?: number;
+    mediumIssues?: number;
+    lowIssues?: number;
+  };
+  type TimelineEntry = { date: string; total: number; blocked: number; successful: number };
+  const issueKpis = issues.data as IssueKpis | undefined;
+  const threatDataResult: DashboardThreatData = threats.data?.threatData ?? {
+    totalActors: 0,
+    blockedActors: 0,
+    whitelistedActors: 0,
+    highActors: 0,
+    mediumActors: 0,
+    lowActors: 0,
+  };
+  const historicalData = historical.data;
+
   const kpi = {
-    threatActors: (threats.data as any)?.threatData?.totalActors ?? 0,
-    blocked: (threats.data as any)?.threatData?.blockedActors ?? 0,
-    securityEvents: (historical.data as any)?.totalThreats ?? 0,
+    threatActors: threatDataResult.totalActors,
+    blocked: threatDataResult.blockedActors,
+    securityEvents: historicalData?.totalThreats ?? 0,
     critical: issues.data?.criticalIssues ?? 0,
-    resolved: (historical.data as any)?.resolvedIssues ?? 0,
-    unauth: (historical.data as any)?.unauthApis ?? 0,
-    whitelisted: (threats.data as any)?.threatData?.whitelistedActors ?? 0,
+    resolved: historicalData?.resolvedIssues ?? 0,
+    unauth: historicalData?.unauthApis ?? 0,
+    whitelisted: threatDataResult.whitelistedActors,
   };
 
   // Real 7-day sparkline data from timeline
   const sparkFromTimeline = (metric: string) => {
     if (timelineData && timelineData.length > 0) {
-      return timelineData.map((d: any) => {
+      return timelineData.map((d) => {
         if (metric === 'events') return d.total || 0;
         if (metric === 'blocked') return d.blocked || 0;
         return d.total || 0;
@@ -75,28 +93,28 @@ const Dashboard: React.FC = () => {
   };
 
   // Security posture score (0-100 based on severity distribution)
-  const totalIssues = (issues.data?.criticalIssues ?? 0) + ((issues.data as any)?.highIssues ?? 0) + ((issues.data as any)?.mediumIssues ?? 0) + ((issues.data as any)?.lowIssues ?? 0);
+  const totalIssues = (issueKpis?.criticalIssues ?? 0) + (issueKpis?.highIssues ?? 0) + (issueKpis?.mediumIssues ?? 0) + (issueKpis?.lowIssues ?? 0);
   const resolvedRatio = totalIssues > 0 ? (kpi.resolved / (totalIssues + kpi.resolved)) * 100 : 85;
   const postureScore = Math.min(Math.round(resolvedRatio), 100) || 72;
-  const evidencePackages = (historical.data as any)?.totalThreats ?? 0;
+  const evidencePackages = historicalData?.totalThreats ?? 0;
   const behavioralDays = 90;
   const blgCoverage = Math.min(100, Math.max(0, postureScore));
-  const mcpSessions = (threats.data as any)?.threatData?.mcpSessions ?? 0;
+  const mcpSessions = threatDataResult.mcpSessions ?? 0;
 
   const threatData = [
-    { name: 'High', value: (threats.data as any)?.threatData?.highActors ?? 0, color: '#EF4444' },
-    { name: 'Medium', value: (threats.data as any)?.threatData?.mediumActors ?? 0, color: '#F97316' },
-    { name: 'Low', value: (threats.data as any)?.threatData?.lowActors ?? 0, color: '#EAB308' },
+    { name: 'High', value: threatDataResult.highActors, color: '#EF4444' },
+    { name: 'Medium', value: threatDataResult.mediumActors, color: '#F97316' },
+    { name: 'Low', value: threatDataResult.lowActors, color: '#EAB308' },
   ];
 
-  const timelineData = useMemo(() => {
+  const timelineData = useMemo<TimelineEntry[]>(() => {
     const trend = issuesTrend.data?.issuesTrend;
     if (trend && trend.length > 0) {
-      return trend.map((d: any) => ({
+      return trend.map((d) => ({
         date: new Date(d.ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        total: d.total,
-        blocked: d.blocked,
-        successful: d.successful,
+        total: d.total ?? d.count ?? 0,
+        blocked: d.blocked ?? 0,
+        successful: d.successful ?? 0,
       }));
     }
     return [];
@@ -105,8 +123,8 @@ const Dashboard: React.FC = () => {
   // Generate sparkline data (using timeline or mock)
   const sparkGen = (base: number) => Array.from({ length: 7 }, (_, i) => Math.max(0, base + Math.floor(Math.random() * base * 0.4 - base * 0.2)));
 
-  const categories = Object.entries((categoryCount.data as any)?.categoryCount ?? {});
-  const topCategories = categories.sort((a: any, b: any) => b[1] - a[1]).slice(0, 6);
+  const categories = Object.entries(categoryCount.data?.categoryCount ?? {});
+  const topCategories = categories.sort((a, b) => b[1] - a[1]).slice(0, 6);
   const maxCatVal = topCategories.length > 0 ? (topCategories[0][1] as number) : 1;
 
   // Real geo coordinates from threat actor IPs (using country data)
@@ -130,8 +148,8 @@ const Dashboard: React.FC = () => {
       return {
         lat: coords.lat + (Math.random() - 0.5) * 10, // Add slight randomization for visual spread
         lng: coords.lng + (Math.random() - 0.5) * 10,
-        severity: ((count as number) > 100 ? 'critical' : (count as number) > 50 ? 'high' : 'medium') as any,
-        count: count as number,
+        severity: count > 100 ? 'critical' as const : count > 50 ? 'high' as const : 'medium' as const,
+        count,
         country,
       };
     });
@@ -468,10 +486,10 @@ const Dashboard: React.FC = () => {
             </div>
             <div className="grid grid-cols-2 gap-y-4">
               {[
-                { label: 'Blocked', value: (historical.data as any)?.blockedThreats ?? 0, color: '#EF4444', icon: AlertTriangle },
-                { label: 'High', value: (sevBreakdown.data as any)?.severityCount?.HIGH ?? 0, color: '#F97316', icon: Zap },
-                { label: 'Medium', value: (sevBreakdown.data as any)?.severityCount?.MEDIUM ?? 0, color: '#EAB308', icon: Activity },
-                { label: 'Low', value: (sevBreakdown.data as any)?.severityCount?.LOW ?? 0, color: '#3B82F6', icon: Shield },
+                { label: 'Blocked', value: historicalData?.blockedThreats ?? 0, color: '#EF4444', icon: AlertTriangle },
+                { label: 'High', value: sevBreakdown.data?.severityCount?.HIGH ?? 0, color: '#F97316', icon: Zap },
+                { label: 'Medium', value: sevBreakdown.data?.severityCount?.MEDIUM ?? 0, color: '#EAB308', icon: Activity },
+                { label: 'Low', value: sevBreakdown.data?.severityCount?.LOW ?? 0, color: '#3B82F6', icon: Shield },
               ].map((item) => (
                 <div key={item.label} className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: `${item.color}15` }}>
@@ -537,7 +555,7 @@ const Dashboard: React.FC = () => {
           </button>
         </div>
         <div className="space-y-1">
-          {timelineData.length > 0 ? timelineData.slice(-5).reverse().map((entry: any, i: number) => (
+          {timelineData.length > 0 ? timelineData.slice(-5).reverse().map((entry, i) => (
             <div
               key={i}
               className="flex items-center gap-3 py-2 px-3 rounded-lg data-row-interactive"

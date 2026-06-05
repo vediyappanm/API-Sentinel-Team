@@ -21,7 +21,7 @@ function getPasswordValidationError(password: string, isSignup: boolean): string
     if (!/\d/.test(password)) {
       return 'Password must include at least one number';
     }
-    if (!/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password)) {
+    if (!/[!@#$%^&*()_+\-=[\]{}|;:,.<>?]/.test(password)) {
       return 'Password must include at least one special character';
     }
   }
@@ -288,15 +288,17 @@ const Login: React.FC = () => {
           {/* Error */}
           {displayError && (
             <div
-              className="rounded-lg px-4 py-2.5 text-xs flex items-center gap-2 animate-fade-in"
+              role="alert"
+              aria-live="assertive"
+              className="rounded-lg px-4 py-2.5 text-sm flex items-start gap-2 animate-fade-in leading-snug"
               style={{
                 background: 'rgba(239, 68, 68, 0.08)',
                 border: '1px solid rgba(239, 68, 68, 0.2)',
                 color: '#dc2626',
               }}
             >
-              <div className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
-              {displayError}
+              <div className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0 mt-1.5" aria-hidden />
+              <span>{displayError}</span>
             </div>
           )}
 

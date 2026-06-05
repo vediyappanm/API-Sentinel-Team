@@ -3,10 +3,11 @@ from fastapi import APIRouter, Depends, Body, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from server.modules.auth.rbac import RBAC
+from server.modules.auth.rbac import Permission, RBAC
 from server.modules.persistence.database import get_db, get_read_db
 from server.modules.agentic.mcp_security import record_tool_invocation
 from server.models.core import AgentIdentity, MCPToolInvocation, AgenticViolation
+from server.modules.utils.redactor import Redactor
 
 router = APIRouter(tags=["Agentic"])
 
@@ -22,7 +23,7 @@ async def ingest_invocation(
     parent_agent_id: str | None = Body(default=None),
     human_principal: str | None = Body(default=None),
     db: AsyncSession = Depends(get_db),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.AGENT_GUARD_INSPECT)),
 ):
     account_id = payload.get("account_id")
     await record_tool_invocation(
@@ -45,7 +46,7 @@ async def ingest_invocation(
 async def list_identities(
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_read_db),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.AGENT_GUARD_READ)),
 ):
     account_id = payload.get("account_id")
     result = await db.execute(
@@ -62,9 +63,9 @@ async def list_identities(
                 "agent_id": r.agent_id,
                 "agent_type": r.agent_type,
                 "parent_agent_id": r.parent_agent_id,
-                "declared_scope": r.declared_scope,
-                "effective_scope": r.effective_scope,
-                "human_principal": r.human_principal,
+                "declared_scope": Redactor.redact_json(r.declared_scope or []),
+                "effective_scope": Redactor.redact_json(r.effective_scope or []),
+                "human_principal": Redactor.redact_text(r.human_principal or ""),
                 "created_at": str(r.created_at),
             }
             for r in rows
@@ -76,7 +77,7 @@ async def list_identities(
 async def list_invocations(
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_read_db),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.AGENT_GUARD_READ)),
 ):
     account_id = payload.get("account_id")
     result = await db.execute(
@@ -92,7 +93,7 @@ async def list_invocations(
             {
                 "agent_id": r.agent_id,
                 "tool_name": r.tool_name,
-                "parameters": r.parameters,
+                "parameters": Redactor.redact_json(r.parameters or {}),
                 "status": r.status,
                 "created_at": str(r.created_at),
             }
@@ -105,7 +106,7 @@ async def list_invocations(
 async def list_violations(
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_read_db),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.AGENT_GUARD_READ)),
 ):
     account_id = payload.get("account_id")
     result = await db.execute(
@@ -122,7 +123,7 @@ async def list_violations(
                 "agent_id": r.agent_id,
                 "type": r.violation_type,
                 "severity": r.severity,
-                "details": r.details,
+                "details": Redactor.redact_json(r.details or {}),
                 "created_at": str(r.created_at),
             }
             for r in rows

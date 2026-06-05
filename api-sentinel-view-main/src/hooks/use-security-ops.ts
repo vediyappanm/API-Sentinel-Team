@@ -3,8 +3,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createAuthProfile,
   createPentestProfile,
+  evaluateCicdGate,
+  evaluateCicdTriggerGate,
   fetchAuthProfiles,
+  fetchCicdTriggers,
   fetchDetectionMeta,
+  fetchGovernanceDashboard,
   fetchOpenApiHistory,
   fetchPentestArtifacts,
   fetchPentestMeta,
@@ -13,10 +17,17 @@ import {
   fetchTestRuns,
   fetchTestingEndpoints,
   fetchTestingTemplates,
+  fetchVulnerabilityLifecycle,
   preparePentestProfile,
+  recordVulnerabilityRetestOutcome,
   startTestRun,
+  syncVulnerabilityTicket,
   type CreateAuthProfilePayload,
   type CreatePentestProfilePayload,
+  type GatePolicyPack,
+  type RetestOutcomePayload,
+  type TicketSyncPayload,
+  type VulnerabilityLifecycleOptions,
 } from '@/services/security-ops.service';
 
 export function useDetectionMeta() {
@@ -34,6 +45,15 @@ export function usePentestMeta() {
     queryFn: ({ signal }) => fetchPentestMeta(signal),
     staleTime: 10_000,
     refetchInterval: 15_000,
+  });
+}
+
+export function useGovernanceDashboard() {
+  return useQuery({
+    queryKey: ['security-ops', 'governance-dashboard'],
+    queryFn: ({ signal }) => fetchGovernanceDashboard(signal),
+    staleTime: 5_000,
+    refetchInterval: 10_000,
   });
 }
 
@@ -152,5 +172,68 @@ export function useOpenApiHistory(limit: number = 10) {
     queryFn: ({ signal }) => fetchOpenApiHistory(limit, signal),
     staleTime: 30_000,
     refetchInterval: 60_000,
+  });
+}
+
+export function useCicdTriggers(limit: number = 25) {
+  return useQuery({
+    queryKey: ['security-ops', 'cicd-triggers', limit],
+    queryFn: ({ signal }) => fetchCicdTriggers(limit, signal),
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+  });
+}
+
+export function useCicdGateDecision(runId: string | null, policyPack: GatePolicyPack = 'strict') {
+  return useQuery({
+    queryKey: ['security-ops', 'cicd-gate', runId, policyPack],
+    queryFn: ({ signal }) => evaluateCicdGate(runId!, policyPack, signal),
+    enabled: Boolean(runId),
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+  });
+}
+
+export function useCicdTriggerGateDecision(triggerId: string | null, policyPack: GatePolicyPack = 'strict') {
+  return useQuery({
+    queryKey: ['security-ops', 'cicd-trigger-gate', triggerId, policyPack],
+    queryFn: ({ signal }) => evaluateCicdTriggerGate(triggerId!, policyPack, signal),
+    enabled: Boolean(triggerId),
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+  });
+}
+
+export function useVulnerabilityLifecycle(options: VulnerabilityLifecycleOptions = {}) {
+  return useQuery({
+    queryKey: ['security-ops', 'vulnerability-lifecycle', options],
+    queryFn: ({ signal }) => fetchVulnerabilityLifecycle(options, signal),
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+  });
+}
+
+export function useSyncVulnerabilityTicket() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ vulnerabilityId, payload }: { vulnerabilityId: string; payload: TicketSyncPayload }) =>
+      syncVulnerabilityTicket(vulnerabilityId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['security-ops', 'vulnerability-lifecycle'] });
+      queryClient.invalidateQueries({ queryKey: ['testing'] });
+    },
+  });
+}
+
+export function useRecordVulnerabilityRetestOutcome() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ vulnerabilityId, payload }: { vulnerabilityId: string; payload: RetestOutcomePayload }) =>
+      recordVulnerabilityRetestOutcome(vulnerabilityId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['security-ops', 'vulnerability-lifecycle'] });
+      queryClient.invalidateQueries({ queryKey: ['testing'] });
+      queryClient.invalidateQueries({ queryKey: ['security-ops', 'cicd-gate'] });
+    },
   });
 }

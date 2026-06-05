@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 from server.api.routers.audit_logs import log_action
 from server.modules.integrations.burp_importer import BurpImporter
@@ -10,6 +11,8 @@ from server.modules.test_executor.result_aggregator import ResultAggregator
 from server.modules.threat_engine.actor_tracker import ActorTracker
 from server.modules.traffic_capture.sample_data_writer import SampleDataWriter
 from server.modules.vulnerability_detector.store import create_or_merge_vulnerability
+
+FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
 
 
 @pytest.mark.asyncio
@@ -55,19 +58,14 @@ def test_burp_importer_requires_account_id():
         BurpImporter.parse_xml("<items></items>", account_id=None)
 
 
-def test_postman_importer_parse_from_file_requires_account_id(tmp_path):
-    collection_path = tmp_path / "collection.json"
-    collection_path.write_text('{"item":[]}', encoding="utf-8")
-
+def test_postman_importer_parse_from_file_requires_account_id():
+    collection_path = FIXTURES_DIR / "postman_minimal_collection.json"
     with pytest.raises(ValueError, match="account_id"):
         PostmanImporter.parse_from_file(str(collection_path), account_id=None)
 
 
-def test_source_code_scanner_requires_account_id(tmp_path):
-    repo_path = tmp_path / "repo"
-    repo_path.mkdir()
-    (repo_path / "app.py").write_text('print("ok")', encoding="utf-8")
-
+def test_source_code_scanner_requires_account_id():
+    repo_path = FIXTURES_DIR / "source_repo"
     with pytest.raises(ValueError, match="account_id"):
         scan_directory(str(repo_path), account_id=None)
 

@@ -26,6 +26,14 @@ SEVERITY_WEIGHTS = {
 }
 
 
+def _utc_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _utc_now_ms() -> int:
+    return int(_utc_now().timestamp() * 1000)
+
+
 async def correlate_threat(
     db: AsyncSession,
     account_id: int,
@@ -37,7 +45,7 @@ async def correlate_threat(
 ) -> Dict[str, Any]:
     """Compatibility shim around the unified correlation/enforcement flow."""
     if unified_detection_pipeline.is_enabled():
-        observed_at_ms = int(datetime.datetime.utcnow().timestamp() * 1000)
+        observed_at_ms = _utc_now_ms()
         envelope = DetectionEnvelope(
             source_type="legacy_correlation",
             event_type="legacy_event",
@@ -121,15 +129,16 @@ async def correlate_threat(
 
     risk_increment = SEVERITY_WEIGHTS.get(severity, 0.05)
     new_risk_score = min(1.0, actor.risk_score + risk_increment)
+    now = _utc_now()
     actor.risk_score = new_risk_score
-    actor.last_seen = datetime.datetime.utcnow()
+    actor.last_seen = now
 
     db.add(MaliciousEvent(
         account_id=account_id,
         actor_id=actor.id,
         event_type=event_type,
         severity=severity,
-        detected_at=datetime.datetime.utcnow(),
+        detected_at=now,
     ))
     db.add(MaliciousEventRecord(
         account_id=account_id,
@@ -142,7 +151,7 @@ async def correlate_threat(
         label="threat",
         status="OPEN",
         payload=payload_snippet,
-        detected_at=int(datetime.datetime.utcnow().timestamp() * 1000),
+        detected_at=int(now.timestamp() * 1000),
     ))
 
     auto_blocked = False

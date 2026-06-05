@@ -15,6 +15,18 @@ from server.modules.api_inventory.path_normalizer import PathNormalizer
 _path_normalizer = PathNormalizer()
 
 
+def _utc_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _datetime_from_sensor_ts(ts_raw: Any | None) -> datetime.datetime:
+    if ts_raw is None:
+        return _utc_now()
+    ts_int = int(ts_raw)
+    seconds = ts_int / 1000 if ts_int > 9_999_999_999 else ts_int
+    return datetime.datetime.fromtimestamp(seconds, tz=datetime.timezone.utc)
+
+
 async def _upsert_endpoint(db, account_id: int, method: str, path: str, host: str,
                             protocol: str, status: int, ts):
     """Auto-discover API endpoint from traffic — upsert by (account, method, path_pattern)."""
@@ -71,6 +83,8 @@ from server.modules.ingestion.queue import IngestionJobItem
 from server.modules.persistence.database import get_db
 from server.modules.auth.audit import log_action
 from server.modules.detection.pipeline import unified_detection_pipeline
+from server.modules.ingestion.redaction import redact_ingestion_path
+from server.modules.sensors.keys import resolve_sensor_by_key
 
 # ── Shared attack signatures (same as stream router) ─────────────────────────
 _ATTACK_SIGS = [
@@ -105,8 +119,7 @@ async def _resolve_sensor_auth(request: Request, db: AsyncSession):
     if not key:
         return None, None
 
-    res = await db.execute(select(Sensor).where(Sensor.sensor_key == key))
-    sensor = res.scalar_one_or_none()
+    sensor = await resolve_sensor_by_key(db, key)
     if sensor:
         return sensor, sensor.account_id
     return None, None
@@ -137,7 +150,7 @@ async def sensor_heartbeat(
     except Exception:
         pass
 
-    sensor.last_heartbeat = datetime.datetime.utcnow()
+    sensor.last_heartbeat = _utc_now()
     sensor.status = "ONLINE"
 
     metrics = body.get("metrics", {})
@@ -282,7 +295,7 @@ async def ingest_events_v2(
     if is_sensor_flat:
         # ── SENSOR FLAT FORMAT — process inline with attack detection ─────────
         if sensor:
-            sensor.last_heartbeat = datetime.datetime.utcnow()
+            sensor.last_heartbeat = _utc_now()
             sensor.lines_shipped = (sensor.lines_shipped or 0) + len(raw_events)
             sensor.status = "ONLINE"
 
@@ -296,6 +309,7 @@ async def ingest_events_v2(
             resp = ev.get("response") or {}
             method    = (req.get("method")  or ev.get("method")  or "GET").upper()
             path      = req.get("path")     or ev.get("path")     or "/"
+            safe_path = redact_ingestion_path(path)
             host      = req.get("host")     or ev.get("host")     or ""
             headers   = req.get("headers")  or ev.get("headers")  or {}
             status    = int(resp.get("status") or ev.get("status_code") or ev.get("status") or 0)
@@ -306,12 +320,7 @@ async def ingest_events_v2(
             dest_port = ev.get("dest_port")  or ev.get("dst_port") or 443
 
             ts_raw = ev.get("observed_at") or ev.get("ts")
-            if ts_raw is None:
-                ts = datetime.datetime.utcnow()
-            elif ts_raw > 9_999_999_999:
-                ts = datetime.datetime.utcfromtimestamp(ts_raw / 1000)
-            else:
-                ts = datetime.datetime.utcfromtimestamp(ts_raw)
+            ts = _datetime_from_sensor_ts(ts_raw)
 
             await _upsert_endpoint(db, account_id, method, path, host, protocol, status, ts)
             attacks = []
@@ -345,7 +354,7 @@ async def ingest_events_v2(
                     account_id=account_id,
                     source_ip=source_ip,
                     method=method,
-                    path=path,
+                    path=safe_path,
                     response_code=status,
                     created_at=ts,
                 )
@@ -368,7 +377,7 @@ async def ingest_events_v2(
                         account_id=account_id,
                         ip=source_ip,
                         actor=source_ip,
-                        url=f"{host}{path}",
+                        url=f"{host}{safe_path}",
                         method=method,
                         category=cat,
                         severity=sev,
@@ -409,17 +418,17 @@ async def ingest_events_v2(
                     db.add(Alert(
                         account_id=account_id,
                         title=f"{cat} from {source_ip}",
-                        message=f"{sev} {cat} on {method} {path}",
+                        message=f"{sev} {cat} on {method} {safe_path}",
                         severity=sev,
                         source_ip=source_ip,
-                        endpoint=path,
+                        endpoint=safe_path,
                         status="OPEN",
                     ))
 
             ws_batch.append({
                 "ip":        source_ip,
                 "method":    method,
-                "path":      path,
+                "path":      safe_path,
                 "status":    status,
                 "timestamp": ts.isoformat(),
                 "attacks":   attacks,

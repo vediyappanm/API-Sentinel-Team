@@ -18,6 +18,13 @@ from server.modules.integrations.dispatcher import dispatch_event
 from server.modules.integrations.webhook_client import WebhookClient
 from server.modules.integrations.jira_client import JiraClient
 from server.modules.integrations.azure_boards_client import AzureBoardsClient
+from server.modules.integrations.destination_guard import (
+    IntegrationDestinationError,
+    validate_integration_destination_config,
+)
+from server.modules.integrations.secrets import IntegrationSecretCodec
+from server.modules.response.playbook_secrets import PlaybookActionSecretCodec
+from server.modules.utils.redactor import Redactor
 
 SEVERITY_ORDER = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 
@@ -60,7 +67,7 @@ async def _resolve_integration_config(
             )
         )
         if integration and integration.type == integration_type:
-            return integration.config or {}
+            return IntegrationSecretCodec.runtime_config(integration)
         return None
     integration = await db.scalar(
         select(Integration).where(
@@ -70,7 +77,7 @@ async def _resolve_integration_config(
         )
     )
     if integration:
-        return integration.config or {}
+        return IntegrationSecretCodec.runtime_config(integration)
     return None
 
 
@@ -96,7 +103,7 @@ async def execute_playbooks(
         if not _severity_at_least(alert.severity, playbook.severity_threshold or "MEDIUM"):
             continue
 
-        for action in playbook.actions or []:
+        for action in PlaybookActionSecretCodec.decrypt_actions(playbook.actions or []):
             action_type = (action.get("type") or "").upper()
             status = "SUCCESS"
             details: Dict[str, Any] = {}
@@ -119,6 +126,7 @@ async def execute_playbooks(
                 elif action_type == "WEBHOOK":
                     url = action.get("url", "")
                     secret = action.get("secret", "")
+                    validate_integration_destination_config("webhook", {"url": url})
                     ok = await WebhookClient(url, secret=secret).send(
                         {"alert": alert.id, "payload": evidence or {}},
                         event_type="alert.playbook",
@@ -173,7 +181,7 @@ async def execute_playbooks(
                     title = action.get("title") or alert.title or "API Security Alert"
                     description = action.get("description") or alert.message or str(evidence or {})
                     integration_id = action.get("integration_id")
-                    cfg = action.get("config") or {}
+                    cfg = IntegrationSecretCodec.decrypt_config(action.get("config") or {})
                     if system == "jira":
                         if not cfg:
                             cfg = await _resolve_integration_config(
@@ -183,6 +191,7 @@ async def execute_playbooks(
                             status = "SKIPPED"
                             details["reason"] = "missing_jira_config"
                         else:
+                            validate_integration_destination_config("jira", cfg)
                             client = JiraClient(
                                 cfg.get("base_url", ""),
                                 cfg.get("email", ""),
@@ -220,9 +229,13 @@ async def execute_playbooks(
                 else:
                     status = "SKIPPED"
                     details["reason"] = "unknown_action"
+            except IntegrationDestinationError as exc:
+                status = "FAILED"
+                details["reason"] = "integration_destination_blocked"
+                details["error"] = str(exc)
             except Exception as exc:
                 status = "FAILED"
-                details["error"] = str(exc)
+                details["error"] = Redactor.redact_text(str(exc))
 
             log = ResponseActionLog(
                 id=str(uuid.uuid4()),

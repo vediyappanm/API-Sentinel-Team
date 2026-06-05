@@ -90,6 +90,8 @@ def scan_directory(root_path: str, account_id: int | None = None, repo_id: Optio
             if ext not in {'.py', '.java', '.go', '.js', '.ts', '.env', '.yml', '.yaml', '.json', '.xml', '.properties', '.conf'}:
                 continue
             try:
+                if filepath.is_symlink():
+                    continue
                 if filepath.stat().st_size > MAX_FILE_SIZE:
                     continue
                 content = filepath.read_text(encoding='utf-8', errors='ignore')

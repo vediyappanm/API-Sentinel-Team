@@ -15,8 +15,46 @@ except ImportError:
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from server.models.core import TestRun, TestSchedule
+from server.config import settings
+from server.models.core import APIEndpoint, TestRun, TestSchedule
+from server.modules.auth.audit import log_action
 from server.modules.persistence.database import AsyncSessionLocal
+from server.modules.pentest.auth_preflight import (
+    ActiveScanAuthError,
+    active_scan_auth_audit_context,
+    load_profile_and_auth_for_active_scan,
+)
+from server.modules.pentest.auth_scope import blocked_auth_profile_targets
+from server.modules.pentest.target_policy import build_target_guard_policy
+from server.modules.test_executor.kill_switch import KILL_SWITCH_REASON, kill_switch_enabled
+from server.modules.test_executor.target_guard import blocked_endpoint_targets
+
+
+class ScheduleValidationError(ValueError):
+    """Raised when a scheduled active scan would be unsafe or unrunnable."""
+
+    def __init__(self, reason: str, message: str, *, detail: dict | None = None):
+        super().__init__(message)
+        self.reason = reason
+        self.detail = {"reason": reason, "message": message}
+        if detail:
+            self.detail.update(detail)
+
+
+def _blocked_targets_with_policy(blocked_targets: list[dict]) -> list[dict]:
+    enriched: list[dict] = []
+    for target in blocked_targets:
+        target_url = str(target.get("url") or "")
+        reason = str(target.get("reason") or "target guard blocked endpoint")
+        target_guard_policy = target.get("target_guard_policy")
+        if not isinstance(target_guard_policy, dict):
+            target_guard_policy = build_target_guard_policy(
+                url=target_url,
+                base_url=target_url,
+                reason=reason,
+            )
+        enriched.append({**target, "target_guard_policy": target_guard_policy})
+    return enriched
 
 
 class TestScheduler:
@@ -47,12 +85,22 @@ class TestScheduler:
         endpoint_ids: list,
         account_id: int,
         db: AsyncSession,
+        pentest_profile_id: str | None = None,
     ) -> str:
         """
         Persist a schedule and register with APScheduler.
         cron_expression: e.g. "0 0 * * *" (daily at midnight)
         Returns the schedule id.
         """
+        self._validate_cron_expression(cron_expression)
+        await self._validate_schedule_plan(
+            db,
+            template_ids=template_ids,
+            endpoint_ids=endpoint_ids,
+            account_id=account_id,
+            pentest_profile_id=pentest_profile_id,
+        )
+
         schedule_id = str(uuid.uuid4())
         record = TestSchedule(
             id=schedule_id,
@@ -61,16 +109,117 @@ class TestScheduler:
             cron_expression=cron_expression,
             template_ids=template_ids,
             endpoint_ids=endpoint_ids,
+            pentest_profile_id=pentest_profile_id,
             enabled=True,
-            created_at=datetime.datetime.utcnow(),
+            created_at=datetime.datetime.now(datetime.timezone.utc),
         )
         db.add(record)
         await db.commit()
 
-        self._register_job(schedule_id, cron_expression, template_ids, endpoint_ids, account_id)
+        self._register_job(
+            schedule_id,
+            cron_expression,
+            template_ids,
+            endpoint_ids,
+            account_id,
+            pentest_profile_id,
+        )
         return schedule_id
 
-    def _register_job(self, schedule_id: str, cron_expr: str, template_ids: list, endpoint_ids: list, account_id: int):
+    def _validate_cron_expression(self, cron_expression: str) -> None:
+        parts = str(cron_expression or "").split()
+        if len(parts) != 5:
+            raise ScheduleValidationError(
+                "invalid_cron_expression",
+                "Schedule cron expression must contain exactly five fields.",
+            )
+        if APScheduler_AVAILABLE:
+            try:
+                CronTrigger(
+                    minute=parts[0],
+                    hour=parts[1],
+                    day=parts[2],
+                    month=parts[3],
+                    day_of_week=parts[4],
+                )
+            except Exception as exc:
+                raise ScheduleValidationError(
+                    "invalid_cron_expression",
+                    "Schedule cron expression is not valid.",
+                ) from exc
+
+    async def _validate_schedule_plan(
+        self,
+        db: AsyncSession,
+        *,
+        template_ids: list,
+        endpoint_ids: list,
+        account_id: int,
+        pentest_profile_id: str | None = None,
+    ) -> None:
+        planned_count = len(template_ids or []) * len(endpoint_ids or [])
+        max_budget = max(1, int(settings.PENTEST_MAX_TESTS_PER_RUN))
+        if planned_count > max_budget:
+            raise ScheduleValidationError(
+                "scan_budget_exceeded",
+                (
+                    f"Schedule plan has {planned_count} template/endpoint combinations; "
+                    f"maximum budget is {max_budget}."
+                ),
+                detail={"planned_tests": planned_count, "max_tests_per_run": max_budget},
+            )
+
+        endpoint_result = await db.execute(
+            select(APIEndpoint).where(
+                APIEndpoint.id.in_(endpoint_ids),
+                APIEndpoint.account_id == account_id,
+            )
+        )
+        endpoints = endpoint_result.scalars().all()
+        if len(endpoints) < len(endpoint_ids):
+            raise ScheduleValidationError(
+                "endpoint_scope_invalid",
+                "One or more scheduled endpoints are unavailable for this account.",
+            )
+
+        blocked_targets = _blocked_targets_with_policy(blocked_endpoint_targets(endpoints))
+        if blocked_targets:
+            raise ScheduleValidationError(
+                "target_guard_blocked",
+                "Pentest target guard blocked one or more scheduled endpoints.",
+                detail={"blocked_endpoints": blocked_targets},
+            )
+
+        try:
+            _, auth_profile = await load_profile_and_auth_for_active_scan(
+                db,
+                account_id=account_id,
+                pentest_profile_id=pentest_profile_id,
+            )
+        except ActiveScanAuthError as exc:
+            raise ScheduleValidationError(
+                exc.reason,
+                "Scheduled active scans require an auth-ready pentest profile.",
+                detail={"auth": exc.detail},
+            ) from exc
+
+        blocked_auth_targets = blocked_auth_profile_targets(auth_profile, endpoints)
+        if blocked_auth_targets:
+            raise ScheduleValidationError(
+                "auth_profile_scope_blocked",
+                "Auth profile scope blocked one or more scheduled endpoints.",
+                detail={"blocked_endpoints": blocked_auth_targets},
+            )
+
+    def _register_job(
+        self,
+        schedule_id: str,
+        cron_expr: str,
+        template_ids: list,
+        endpoint_ids: list,
+        account_id: int,
+        pentest_profile_id: str | None = None,
+    ):
         if not self._scheduler:
             print(f"[Scheduler] APScheduler not available — schedule {schedule_id} not registered.")
             return
@@ -88,16 +237,76 @@ class TestScheduler:
             self._trigger_run,
             trigger=trigger,
             id=schedule_id,
-            args=[schedule_id, template_ids, endpoint_ids, account_id],
+            args=[schedule_id, template_ids, endpoint_ids, account_id, pentest_profile_id],
             replace_existing=True,
         )
 
-    async def _trigger_run(self, schedule_id: str, template_ids: list, endpoint_ids: list, account_id: int):
+    async def _trigger_run(
+        self,
+        schedule_id: str,
+        template_ids: list,
+        endpoint_ids: list,
+        account_id: int,
+        pentest_profile_id: str | None = None,
+    ):
         """Called by APScheduler — import here to avoid circular imports."""
-        from server.api.routers.tests import _run_security_tasks
+        if kill_switch_enabled():
+            return {
+                "status": "blocked",
+                "reason": KILL_SWITCH_REASON,
+                "schedule_id": schedule_id,
+            }
 
         run_id = str(uuid.uuid4())
+        execution_mode = (settings.PENTEST_SCAN_EXECUTION_MODE or "background").strip().lower()
         async with AsyncSessionLocal() as db:
+            endpoint_result = await db.execute(
+                select(APIEndpoint).where(
+                    APIEndpoint.id.in_(endpoint_ids),
+                    APIEndpoint.account_id == account_id,
+                )
+            )
+            endpoints = endpoint_result.scalars().all()
+            if len(endpoints) < len(endpoint_ids):
+                return {
+                    "status": "blocked",
+                    "reason": "endpoint_scope_invalid",
+                    "schedule_id": schedule_id,
+                }
+            blocked_targets = _blocked_targets_with_policy(blocked_endpoint_targets(endpoints))
+            if blocked_targets:
+                return {
+                    "status": "blocked",
+                    "reason": "target_guard_blocked",
+                    "schedule_id": schedule_id,
+                    "blocked_endpoints": blocked_targets,
+                }
+            if pentest_profile_id is None:
+                schedule = await db.get(TestSchedule, schedule_id)
+                if schedule is not None and schedule.account_id == account_id:
+                    pentest_profile_id = schedule.pentest_profile_id
+            try:
+                pentest_profile, auth_profile = await load_profile_and_auth_for_active_scan(
+                    db,
+                    account_id=account_id,
+                    pentest_profile_id=pentest_profile_id,
+                )
+            except ActiveScanAuthError as exc:
+                return {
+                    "status": "blocked",
+                    "reason": exc.reason,
+                    "schedule_id": schedule_id,
+                    "detail": exc.detail,
+                }
+            blocked_auth_targets = blocked_auth_profile_targets(auth_profile, endpoints)
+            if blocked_auth_targets:
+                return {
+                    "status": "blocked",
+                    "reason": "auth_profile_scope_blocked",
+                    "schedule_id": schedule_id,
+                    "blocked_endpoints": blocked_auth_targets,
+                }
+
             db.add(
                 TestRun(
                     id=run_id,
@@ -105,11 +314,45 @@ class TestScheduler:
                     status="PENDING",
                     template_ids=template_ids,
                     endpoint_ids=endpoint_ids,
+                    pentest_profile_id=pentest_profile.id if pentest_profile is not None else None,
+                    trigger_source="schedule",
+                    source_schedule_id=schedule_id,
                 )
+            )
+            await log_action(
+                db=db,
+                account_id=account_id,
+                action="SCAN_RUN_QUEUED",
+                resource_type="test_run",
+                resource_id=run_id,
+                details={
+                    "source": "schedule",
+                    "schedule_id": schedule_id,
+                    "source_schedule_id": schedule_id,
+                    "template_count": len(template_ids or []),
+                    "endpoint_count": len(endpoint_ids or []),
+                    "planned_tests": len(template_ids or []) * len(endpoint_ids or []),
+                    "pentest_profile_id": pentest_profile.id if pentest_profile is not None else None,
+                    **active_scan_auth_audit_context(pentest_profile, auth_profile),
+                    "execution_mode": execution_mode,
+                    "trigger_source": "schedule",
+                },
             )
             await db.commit()
 
-        await _run_security_tasks(run_id, template_ids, endpoint_ids, account_id)
+        if execution_mode == "queued":
+            return {"status": "queued", "run_id": run_id, "source_schedule_id": schedule_id}
+
+        from server.api.routers.tests import _run_security_tasks
+
+        await _run_security_tasks(
+            run_id,
+            template_ids,
+            endpoint_ids,
+            account_id,
+            pentest_profile.id if pentest_profile is not None else pentest_profile_id,
+        )
+        return {"status": "started", "run_id": run_id, "source_schedule_id": schedule_id}
 
     async def cancel(self, schedule_id: str, db: AsyncSession) -> None:
         if self._scheduler:

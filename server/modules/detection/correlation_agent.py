@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.config import settings
 from server.models.core import Alert, EvidenceRecord, MaliciousEvent, MaliciousEventRecord, ThreatActor
 from server.modules.evidence.package import save_evidence_package
+from server.modules.ingestion.redaction import redact_ingestion_path
+from server.modules.utils.redactor import Redactor
 
 from .models import IncidentDecision, SEVERITY_SCORES, DetectionEnvelope, DetectionSignal
 from .state_store import state_store
@@ -25,6 +27,34 @@ def _severity_max(signals: list[DetectionSignal]) -> str:
 
 def _now_utc() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _redacted_text_blob(value: str) -> str:
+    redacted = Redactor.redact_json(value or "")
+    if isinstance(redacted, str):
+        return redacted
+    return json.dumps(redacted, default=str)
+
+
+def _redacted_envelope_payload(envelope: DetectionEnvelope) -> dict[str, Any]:
+    payload = Redactor.redact_json(envelope.model_dump())
+    if isinstance(payload, dict):
+        payload["path"] = redact_ingestion_path(envelope.path)
+        if envelope.endpoint_scope:
+            payload["endpoint_scope"] = redact_ingestion_path(envelope.endpoint_scope)
+        payload["query_params"] = {
+            str(key): Redactor.REDACT_VALUE for key in (envelope.query_params or {}).keys()
+        }
+        payload["request_headers"] = Redactor.redact_headers(envelope.request_headers or {})
+        payload["response_headers"] = Redactor.redact_headers(envelope.response_headers or {})
+        payload["request_body_text"] = _redacted_text_blob(envelope.request_body_text or "")
+        payload["response_body_text"] = _redacted_text_blob(envelope.response_body_text or "")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _redacted_signal_payload(signal: DetectionSignal) -> dict[str, Any]:
+    payload = Redactor.redact_json(signal.model_dump())
+    return payload if isinstance(payload, dict) else {}
 
 
 class CorrelationAgent:
@@ -75,6 +105,7 @@ class CorrelationAgent:
             decision.alert_id = alert.id
             decision.created_alert = True
             decision.alert_title = alert.title
+            safe_signals = [_redacted_signal_payload(signal) for signal in signals]
             evidence = EvidenceRecord(
                 account_id=envelope.account_id,
                 evidence_type="detection",
@@ -84,7 +115,7 @@ class CorrelationAgent:
                 summary=alert.message,
                 details={
                     "fingerprint": fingerprint,
-                    "signals": [signal.model_dump() for signal in signals],
+                    "signals": safe_signals,
                     "scores": scores,
                 },
             )
@@ -97,8 +128,8 @@ class CorrelationAgent:
                 "unified_detection",
                 alert.id,
                 {
-                    "envelope": envelope.model_dump(),
-                    "signals": [signal.model_dump() for signal in signals],
+                    "envelope": _redacted_envelope_payload(envelope),
+                    "signals": safe_signals,
                 },
                 {"scores": scores, "fingerprint": fingerprint},
             )
@@ -211,6 +242,7 @@ class CorrelationAgent:
         signals: list[DetectionSignal],
         actor: ThreatActor,
     ) -> None:
+        safe_path = redact_ingestion_path(envelope.path)
         for signal in signals:
             db.add(
                 MaliciousEvent(
@@ -226,9 +258,9 @@ class CorrelationAgent:
                     account_id=envelope.account_id,
                     actor=envelope.actor_id,
                     ip=envelope.source_ip,
-                    url=envelope.path,
+                    url=safe_path,
                     method=envelope.method,
-                    payload=envelope.request_body_text[:2000],
+                    payload=_redacted_text_blob(envelope.request_body_text[:2000]),
                     event_type=signal.incident_type,
                     category=signal.category,
                     sub_category=signal.detector_id,
@@ -253,6 +285,8 @@ class CorrelationAgent:
         fingerprint: str,
     ) -> Optional[Alert]:
         primary = max(signals, key=lambda s: (_SEVERITY_ORDER.get(s.severity, 0), s.confidence))
+        safe_path = redact_ingestion_path(envelope.path)
+        safe_endpoint = redact_ingestion_path(envelope.endpoint_scope or envelope.path)
         dedupe_allowed = await state_store.claim_dedupe_fingerprint(envelope.account_id, fingerprint, persist=True)
         recent_cutoff = _now_utc().replace(tzinfo=None) - datetime.timedelta(seconds=settings.DETECTION_ALERT_DEDUPE_SECONDS)
         result = await db.execute(
@@ -261,7 +295,7 @@ class CorrelationAgent:
                     Alert.account_id == envelope.account_id,
                     Alert.source_ip == envelope.source_ip,
                     Alert.category == primary.category,
-                    Alert.endpoint == (envelope.endpoint_scope or envelope.path),
+                    Alert.endpoint == safe_endpoint,
                     Alert.status == "OPEN",
                     Alert.created_at >= recent_cutoff,
                 )
@@ -276,12 +310,12 @@ class CorrelationAgent:
         message = "; ".join(signal.summary for signal in signals[:3])
         alert = Alert(
             account_id=envelope.account_id,
-            title=f"{primary.category} detected on {envelope.method} {envelope.path}",
-            message=message,
+            title=f"{primary.category} detected on {envelope.method} {safe_path}",
+            message=Redactor.redact_text(message),
             severity=_severity_max(signals),
             category=primary.category,
             source_ip=envelope.source_ip,
-            endpoint=envelope.endpoint_scope or envelope.path,
+            endpoint=safe_endpoint,
             status="OPEN",
         )
         db.add(alert)

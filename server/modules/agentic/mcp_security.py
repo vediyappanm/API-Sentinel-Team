@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from hashlib import sha256
 from typing import Optional, Tuple
 
 from sqlalchemy import select
@@ -17,12 +18,14 @@ from server.models.core import (
 )
 from server.config import settings
 from server.modules.enforcement.inline_mcp import apply_inline_decision
+from server.modules.llm.findings import persist_agentic_violation_finding, summarize_agentic_violation_details
+from server.modules.utils.redactor import Redactor
 
 INJECTION_PATTERNS = [
-    (re.compile(r"ignore\\s+previous\\s+instructions", re.I), "PROMPT_INJECTION", "CRITICAL"),
-    (re.compile(r"system:\\s*|developer:\\s*", re.I), "PROMPT_INJECTION", "HIGH"),
-    (re.compile(r"bypass\\s+safety|jailbreak|DAN\\s+mode", re.I), "PROMPT_INJECTION", "CRITICAL"),
-    (re.compile(r"you\\s+are\\s+now\\s+|act\\s+as\\s+if", re.I), "PROMPT_INJECTION", "HIGH"),
+    (re.compile(r"ignore\s+previous\s+instructions", re.I), "PROMPT_INJECTION", "CRITICAL"),
+    (re.compile(r"system:\s*|developer:\s*", re.I), "PROMPT_INJECTION", "HIGH"),
+    (re.compile(r"bypass\s+safety|jailbreak|DAN\s+mode", re.I), "PROMPT_INJECTION", "CRITICAL"),
+    (re.compile(r"you\s+are\s+now\s+|act\s+as\s+if", re.I), "PROMPT_INJECTION", "HIGH"),
 ]
 
 
@@ -40,6 +43,15 @@ def evaluate_trust_chain(declared_scope: list, effective_scope: list) -> list:
     declared = set(declared_scope or [])
     effective = set(effective_scope or [])
     return sorted(effective - declared)
+
+
+def _safe_result_metadata(result_text: Optional[str]) -> str:
+    text = result_text or ""
+    if not text:
+        return ""
+    redacted = Redactor.redact_text(text)
+    digest = sha256(redacted.encode("utf-8")).hexdigest()
+    return f"sha256:{digest}; length:{len(text)}; content_persisted:false"
 
 
 async def record_tool_invocation(
@@ -83,8 +95,8 @@ async def record_tool_invocation(
         account_id=account_id,
         agent_id=agent_id,
         tool_name=tool_name,
-        parameters=parameters or {},
-        result_excerpt=(result_text or "")[:1000],
+        parameters=Redactor.redact_json(parameters or {}),
+        result_excerpt=_safe_result_metadata(result_text),
         status="OK",
     )
     db.add(invocation)
@@ -100,13 +112,14 @@ async def record_tool_invocation(
         violations.append((category, severity, {"match": match}))
 
     for v_type, v_sev, v_details in violations:
+        safe_violation_details = summarize_agentic_violation_details(v_details)
         violation = AgenticViolation(
             id=str(uuid.uuid4()),
             account_id=account_id,
             agent_id=agent_id,
             violation_type=v_type,
             severity=v_sev,
-            details=v_details,
+            details=safe_violation_details,
         )
         db.add(violation)
 
@@ -126,14 +139,23 @@ async def record_tool_invocation(
             evidence_type="agentic",
             ref_id=alert.id,
             severity=v_sev,
-            summary=f"{v_type}: {v_details}",
+            summary=f"{v_type}: content_persisted=false",
             details={
                 "agent_id": agent_id,
                 "tool_name": tool_name,
                 "violation_type": v_type,
-                "violation_details": v_details,
+                "violation_details": safe_violation_details,
             },
         ))
+        await persist_agentic_violation_finding(
+            db,
+            account_id=account_id,
+            agent_id=agent_id,
+            tool_name=tool_name,
+            violation_type=v_type,
+            severity=v_sev,
+            details=v_details,
+        )
 
     if settings.INLINE_MCP_ENFORCEMENT_ENABLED and violations:
         await apply_inline_decision(

@@ -62,9 +62,9 @@ class LogShipper:
         self._retry_count     = 0
 
     def _build_heartbeat_url(self) -> str:
-        # Derive heartbeat URL: strip /ingest, add /<key>/heartbeat via sensors router
+        # Derive heartbeat URL without placing the sensor credential in the URL.
         base = self.endpoint.replace("/stream/ingest", "")
-        return f"{base}/sensors/{self.sensor_key}/heartbeat"
+        return f"{base}/sensors/heartbeat"
 
     def _open_log(self):
         """Open log file and seek to end on first run (only new lines)."""
@@ -108,7 +108,6 @@ class LogShipper:
             return True
         payload = {
             "lines": lines,
-            "sensor_key": self.sensor_key,
         }
         for attempt, delay in enumerate(RETRY_BACKOFF + [None]):
             try:
@@ -171,8 +170,7 @@ class LogShipper:
         signal.signal(signal.SIGTERM, self.stop)
 
         logger.info(
-            f"Log Shipper starting | sensor_key={self.sensor_key[:8]}... | "
-            f"log={self.log_path} | endpoint={self.endpoint}"
+            f"Log Shipper starting | log={self.log_path} | endpoint={self.endpoint}"
         )
 
         f = None

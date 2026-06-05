@@ -1,0 +1,63 @@
+# Example: isolated API Sentinel scan worker Job.
+# Replace image, API_BASE_URL, and the Secret references before applying.
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: api-sentinel-scan-worker-
+  namespace: api-sentinel
+  labels:
+    app: api-sentinel-scan-worker
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: api-sentinel-scan-worker
+    spec:
+      restartPolicy: Never
+      serviceAccountName: api-sentinel-scan-worker
+      automountServiceAccountToken: false
+      containers:
+        - name: api-sentinel-scan-worker
+          image: registry.example.com/api-sentinel/scan-worker:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - python
+            - -m
+            - server.modules.test_executor.scan_worker
+          env:
+            - name: API_SENTINEL_RUN_ID
+              value: replace-with-run-id
+            - name: API_SENTINEL_WORKER_ID
+              value: replace-with-worker-id
+            - name: API_SENTINEL_ENGINE
+              value: templates
+            - name: API_BASE_URL
+              value: https://api.example.com
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: api-sentinel-scan-worker
+                  key: database-url
+            - name: PENTEST_SCAN_WORKER_ISOLATION_MODE
+              value: kubernetes_job
+            - name: PENTEST_KILL_SWITCH_ENABLED
+              value: "false"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+              ephemeral-storage: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+              ephemeral-storage: 2Gi
+          volumeMounts:
+            - name: scan-sandbox
+              mountPath: /tmp/api-sentinel-scan
+      volumes:
+        - name: scan-sandbox
+          emptyDir:
+            sizeLimit: 2Gi

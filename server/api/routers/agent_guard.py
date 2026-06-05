@@ -8,7 +8,8 @@ from sqlalchemy import select, func
 
 from server.modules.persistence.database import get_db
 from server.models.core import AgenticSession, MaliciousEventRecord
-from server.modules.auth.rbac import RBAC
+from server.modules.auth.rbac import Permission, RBAC
+from server.modules.utils.redactor import Redactor
 
 router = APIRouter(tags=["Agent Guard"])
 
@@ -27,15 +28,23 @@ def _check_guardrails(text: str) -> List[dict]:
     for pattern, category, severity in GUARDRAIL_PATTERNS:
         m = pattern.search(text)
         if m:
-            violations.append({"category": category, "severity": severity, "match": m.group()[:100]})
+            violations.append({"category": category, "severity": severity, "match": Redactor.redact_text(m.group()[:100])})
     return violations
+
+
+def _safe_text(value: str | None) -> str:
+    return Redactor.redact_text(value or "")
+
+
+def _safe_conversation(value):
+    return Redactor.redact_json(value or [])
 
 
 @router.post("/sessions")
 async def create_session(
     session_identifier: str = Body(...),
     session_summary: Optional[str] = Body(None),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.AGENT_GUARD_INSPECT)),
     db: AsyncSession = Depends(get_db)
 ):
     account_id = payload["account_id"]
@@ -47,11 +56,15 @@ async def create_session(
     )
     if existing.scalar_one_or_none():
         raise HTTPException(409, "Session already exists")
-    session = AgenticSession(id=str(uuid.uuid4()), account_id=account_id,
-                             session_identifier=session_identifier, session_summary=session_summary)
+    session = AgenticSession(
+        id=str(uuid.uuid4()),
+        account_id=account_id,
+        session_identifier=session_identifier,
+        session_summary=_safe_text(session_summary),
+    )
     db.add(session)
     await db.commit()
-    return {"session_id": session.id, "session_identifier": session_identifier}
+    return {"session_id": session.id, "session_identifier": _safe_text(session_identifier)}
 
 
 @router.post("/sessions/{session_id}/inspect")
@@ -59,7 +72,7 @@ async def inspect_message(
     session_id: str,
     message: str = Body(..., embed=True),
     role: str = Body("user", embed=True),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.AGENT_GUARD_INSPECT)),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -81,11 +94,16 @@ async def inspect_message(
     is_blocked = any(v["severity"] == "CRITICAL" for v in violations)
 
     conversation = list(session.conversation_info or [])
-    conversation.append({"role": role, "content": message[:500], "violations": violations, "blocked": is_blocked})
-    session.conversation_info = conversation
+    conversation.append({
+        "role": _safe_text(role),
+        "content": _safe_text(message[:500]),
+        "violations": Redactor.redact_json(violations),
+        "blocked": is_blocked,
+    })
+    session.conversation_info = _safe_conversation(conversation)
     if violations:
         session.is_malicious = True
-        session.blocked_reason = violations[0]["category"]
+        session.blocked_reason = _safe_text(violations[0]["category"])
 
     if is_blocked:
         db.add(MaliciousEventRecord(
@@ -94,7 +112,9 @@ async def inspect_message(
             sub_category=violations[0]["category"],
             severity=violations[0]["severity"],
             label="guardrail", context_source="AGENTIC",
-            session_id=session_id, payload=message[:1000],
+            session_id=session_id,
+            payload=_safe_text(message[:1000]),
+            event_metadata={"content_redacted": True, "content_persisted": True},
         ))
 
     await db.commit()
@@ -106,7 +126,7 @@ async def inspect_message(
 
 @router.get("/sessions")
 async def list_sessions(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.AGENT_GUARD_READ)),
     is_malicious: Optional[bool] = Query(None),
     limit: int = Query(50), db: AsyncSession = Depends(get_db)
 ):
@@ -117,15 +137,19 @@ async def list_sessions(
     result = await db.execute(q.order_by(AgenticSession.created_at.desc()).limit(limit))
     sessions = result.scalars().all()
     return {"total": len(sessions), "sessions": [
-        {"id": s.id, "session_identifier": s.session_identifier, "is_malicious": s.is_malicious,
-         "blocked_reason": s.blocked_reason, "turn_count": len(s.conversation_info or []),
+        {"id": s.id, "session_identifier": _safe_text(s.session_identifier), "is_malicious": s.is_malicious,
+         "blocked_reason": _safe_text(s.blocked_reason), "turn_count": len(s.conversation_info or []),
          "created_at": s.created_at}
         for s in sessions
     ]}
 
 
 @router.get("/sessions/{session_id}")
-async def get_session(session_id: str, payload: dict = Depends(RBAC.require_auth), db: AsyncSession = Depends(get_db)):
+async def get_session(
+    session_id: str,
+    payload: dict = Depends(RBAC.require_permission(Permission.AGENT_GUARD_READ)),
+    db: AsyncSession = Depends(get_db),
+):
     account_id = payload["account_id"]
     result = await db.execute(
         select(AgenticSession).where(
@@ -136,12 +160,15 @@ async def get_session(session_id: str, payload: dict = Depends(RBAC.require_auth
     s = result.scalar_one_or_none()
     if not s:
         raise HTTPException(404, "Session not found")
-    return {"id": s.id, "session_identifier": s.session_identifier, "is_malicious": s.is_malicious,
-            "blocked_reason": s.blocked_reason, "conversation_info": s.conversation_info, "created_at": s.created_at}
+    return {"id": s.id, "session_identifier": _safe_text(s.session_identifier), "is_malicious": s.is_malicious,
+            "blocked_reason": _safe_text(s.blocked_reason), "conversation_info": _safe_conversation(s.conversation_info), "created_at": s.created_at}
 
 
 @router.get("/stats")
-async def guardrail_stats(payload: dict = Depends(RBAC.require_auth), db: AsyncSession = Depends(get_db)):
+async def guardrail_stats(
+    payload: dict = Depends(RBAC.require_permission(Permission.AGENT_GUARD_READ)),
+    db: AsyncSession = Depends(get_db),
+):
     account_id = payload["account_id"]
     total    = (await db.execute(select(func.count()).select_from(AgenticSession).where(AgenticSession.account_id == account_id))).scalar()
     malicious= (await db.execute(select(func.count()).select_from(AgenticSession).where(AgenticSession.account_id == account_id, AgenticSession.is_malicious == True))).scalar()
@@ -149,7 +176,7 @@ async def guardrail_stats(payload: dict = Depends(RBAC.require_auth), db: AsyncS
 
 
 @router.get("/guardrail-rules")
-async def list_guardrail_rules(payload: dict = Depends(RBAC.require_auth)):
+async def list_guardrail_rules(payload: dict = Depends(RBAC.require_permission(Permission.AGENT_GUARD_READ))):
     """Returns active guardrail pattern rules."""
     return {"rules": [
         {"category": cat, "severity": sev, "pattern": pat.pattern}

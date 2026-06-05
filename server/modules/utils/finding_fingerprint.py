@@ -15,11 +15,51 @@ _TRANSIENT_KEYS = {
     "created_at",
     "updated_at",
     "request_id",
+    "response_id",
     "trace_id",
     "scan_id",
     "job_id",
     "run_id",
+    "evidence_hash",
+    "hash_algorithm",
+    "reproduction",
+    "curl",
+    "sent_request",
+    "received_response",
+    "request",
+    "response",
+    "headers",
+    "body",
+    "context",
+    "context_variables",
+    "results",
+    "proof",
     "matched-at",
+    "fingerprint",
+    "first_seen_at",
+    "last_seen_at",
+    "occurrence_count",
+    "sla_due_at",
+    "ticket_url",
+    "lifecycle",
+    "occurrences",
+    "safety_policies",
+    "failure_text",
+    "stack_trace",
+    "traceback",
+    "excerpt",
+    "sample",
+    "actor",
+    "actor_id",
+    "source_ip",
+    "ip",
+    "violation_id",
+    "detected_at",
+    "agent_id",
+    "tool_name",
+    "matched_text",
+    "request_excerpt",
+    "response_excerpt",
 }
 
 _SEVERITY_ORDER = {
@@ -99,13 +139,15 @@ def vulnerability_fingerprint(data: Any) -> str:
     endpoint_identity = _normalize_text(_get_value(data, "endpoint_id"))
     if not endpoint_identity:
         endpoint_identity = _normalize_url(_get_value(data, "url"))
+    evidence = _get_value(data, "evidence")
+    source_fingerprint = _source_fingerprint_from_evidence(evidence)
     payload = {
         "account_id": _get_value(data, "account_id", 0),
         "template_id": _normalize_text(_get_value(data, "template_id")).upper(),
         "endpoint": endpoint_identity,
         "method": _normalize_text(_get_value(data, "method")).upper(),
         "type": _normalize_text(_get_value(data, "type")).upper(),
-        "evidence_shape": _shape(_get_value(data, "evidence")),
+        "evidence_identity": source_fingerprint or _shape(evidence),
     }
     return _digest("vulnerability", payload)
 
@@ -133,6 +175,49 @@ def nuclei_fingerprint(finding: Any, target: str = "", account_id: int | None = 
         "matched_at": _normalize_url(_get_value(finding, "matched-at")),
     }
     return _digest("nuclei", payload)
+
+
+def zap_fingerprint(
+    alert: Any,
+    instance: Any,
+    *,
+    target: str = "",
+    account_id: int | None = None,
+    site_url: str | None = None,
+) -> str:
+    payload = {
+        "account_id": account_id or 0,
+        "target": _normalize_url(target or site_url or _get_value(alert, "url")),
+        "site": _normalize_url(site_url or target),
+        "plugin_id": _normalize_text(
+            _get_value(alert, "pluginid")
+            or _get_value(alert, "pluginId")
+            or _get_value(alert, "id")
+            or _get_value(alert, "alertRef")
+        ).upper(),
+        "name": _normalize_text(_get_value(alert, "alert") or _get_value(alert, "name")),
+        "method": _normalize_text(_get_value(instance, "method") or _get_value(alert, "method")).upper(),
+        "url": _normalize_url(
+            _get_value(instance, "uri")
+            or _get_value(instance, "url")
+            or _get_value(alert, "url")
+            or site_url
+            or target
+        ),
+        "param": _normalize_text(_get_value(instance, "param") or _get_value(alert, "param")),
+    }
+    return _digest("zap", payload)
+
+
+def _source_fingerprint_from_evidence(evidence: Any) -> str:
+    if isinstance(evidence, dict):
+        value = evidence.get("source_fingerprint")
+        if value:
+            return _normalize_text(value)
+        nested = evidence.get("value")
+        if nested is not evidence:
+            return _source_fingerprint_from_evidence(nested)
+    return ""
 
 
 def collapse_by_fingerprint(items: list[Any], fingerprint_fn) -> tuple[list[Any], list[dict[str, Any]]]:

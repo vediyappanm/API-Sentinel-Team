@@ -18,22 +18,41 @@ _lock = asyncio.Lock()
 _memory_counters: Dict[str, Tuple[int, int]] = {}
 
 
-def _window_key(account_id: int, window_start: int) -> str:
-    return f"quota:ingest:{account_id}:{window_start}"
+def _window_key(account_id: int, window_start: int, kind: str = "ingest") -> str:
+    return f"quota:{kind}:{account_id}:{window_start}"
 
 
 async def check_ingest_quota(account_id: int, cost: int = 1) -> QuotaStatus:
-    rpm = settings.INGESTION_RATE_LIMIT_RPM
+    return await _check_quota(
+        account_id,
+        cost=cost,
+        rpm=settings.INGESTION_RATE_LIMIT_RPM,
+        kind="ingest",
+    )
+
+
+async def check_cicd_gate_quota(account_id: int, cost: int = 1) -> QuotaStatus:
+    return await _check_quota(
+        account_id,
+        cost=cost,
+        rpm=settings.CICD_GATE_RATE_LIMIT_RPM,
+        kind="cicd_gate",
+    )
+
+
+async def _check_quota(account_id: int, *, cost: int, rpm: int, kind: str) -> QuotaStatus:
     now = int(time.time())
     window_start = now - (now % 60)
     reset_at = window_start + 60
-    key = _window_key(account_id, window_start)
+    key = _window_key(account_id, window_start, kind)
 
     # Prefer Redis when available
     try:
         current = await get_int(key)
         if current is not None:
-            new_val = await incr(key, ttl_seconds=70)
+            new_val = current
+            for _ in range(max(1, cost)):
+                new_val = await incr(key, ttl_seconds=70)
             allowed = new_val <= rpm
             remaining = max(0, rpm - new_val)
             return QuotaStatus(allowed=allowed, remaining=remaining, reset_at=reset_at)
@@ -63,11 +82,26 @@ async def check_ingest_quota(account_id: int, cost: int = 1) -> QuotaStatus:
 
 
 async def peek_ingest_quota(account_id: int) -> QuotaStatus:
-    rpm = settings.INGESTION_RATE_LIMIT_RPM
+    return await _peek_quota(
+        account_id,
+        rpm=settings.INGESTION_RATE_LIMIT_RPM,
+        kind="ingest",
+    )
+
+
+async def peek_cicd_gate_quota(account_id: int) -> QuotaStatus:
+    return await _peek_quota(
+        account_id,
+        rpm=settings.CICD_GATE_RATE_LIMIT_RPM,
+        kind="cicd_gate",
+    )
+
+
+async def _peek_quota(account_id: int, *, rpm: int, kind: str) -> QuotaStatus:
     now = int(time.time())
     window_start = now - (now % 60)
     reset_at = window_start + 60
-    key = _window_key(account_id, window_start)
+    key = _window_key(account_id, window_start, kind)
 
     try:
         current = await get_int(key)

@@ -4,8 +4,9 @@ from contextlib import asynccontextmanager
 from typing import Awaitable, Callable
 
 import structlog
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from slowapi.errors import RateLimitExceeded
@@ -21,7 +22,7 @@ from server.modules.auth.password_hasher import PasswordHasher
 from server.modules.config.logging_config import configure_logging
 from server.modules.enforcement.adaptive_rate_limiter import AdaptiveRequestGuard
 from server.modules.ingestion.queue import ingestion_queue
-from server.modules.persistence.database import AsyncSessionLocal, engine
+from server.modules.persistence.database import AsyncSessionLocal, engine, get_db
 from server.modules.recon.scheduler import ReconScheduler
 from server.modules.response.default_playbooks import ensure_default_playbooks
 from server.modules.scheduler.test_scheduler import TestScheduler
@@ -273,70 +274,32 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
 )
 app.add_middleware(AdaptiveRequestGuard)
 app.include_router(router, prefix="/api")
 
-# Root ingest route — eBPF sensor posts {"version":"v1","events":[...]} to POST /
+
+@app.post("/v1/events")
+async def sensor_v1_events(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Argus / api-sentinel-sensor: POST JSON with events; Bearer token = sensor API key."""
+    from server.api.routers.stream import handle_ebpf_ingest_request
+
+    return await handle_ebpf_ingest_request(request, db)
+
+
+# Legacy root path — same payload as POST /v1/events (no localhost hop).
 @app.post("/")
-async def root_ingest(request: Request):
-    """Accept eBPF sensor events and translate to stream/ingest format."""
-    import json as _json
-    from fastapi.responses import JSONResponse
-    auth = request.headers.get("Authorization", "")
-    try:
-        raw = await request.body()
-        # Handle gzip-compressed payloads
-        if raw[:2] == b'\x1f\x8b':
-            import gzip as _gzip
-            raw = _gzip.decompress(raw)
-        body = _json.loads(raw)
-    except Exception:
-        return JSONResponse({"accepted": 0, "status": "ok"}, status_code=200)
+async def root_ingest(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Accept eBPF sensor events at POST / (backward compatibility)."""
+    from server.api.routers.stream import handle_ebpf_ingest_request
 
-    events = body.get("events", [])
-    if not events:
-        return JSONResponse({"accepted": 0, "status": "ok"})
-
-    # Translate v1 events -> nginx combined log line strings for stream/ingest
-    # Format: IP - - [timestamp] "METHOD /path PROTOCOL" STATUS SIZE "referer" "UA"
-    import datetime as _dt
-    lines = []
-    for ev in events:
-        req = ev.get("request", {})
-        resp = ev.get("response", {})
-        src_ip = ev.get("source_ip") or req.get("headers", {}).get("x-forwarded-for", "0.0.0.0")
-        method = req.get("method", "GET")
-        path = req.get("path", "/")
-        query = req.get("query") or {}
-        if query:
-            qs = "&".join(f"{k}={v}" for k, v in query.items())
-            path = f"{path}?{qs}"
-        protocol = ev.get("protocol", "HTTP/1.1")
-        status = resp.get("status_code", 200)
-        size = resp.get("body_size") or len(str(resp.get("body") or ""))
-        ua = req.get("headers", {}).get("user-agent", "-")
-        referer = req.get("headers", {}).get("referer", "-")
-        ts = _dt.datetime.utcnow().strftime("%d/%b/%Y:%H:%M:%S +0000")
-        line = f'{src_ip} - - [{ts}] "{method} {path} {protocol}" {status} {size} "{referer}" "{ua}"'
-        lines.append(line)
-
-    # Extract sensor key from Bearer token header
-    sensor_key = auth.replace("Bearer ", "").strip() if auth.startswith("Bearer ") else ""
-
-    import httpx
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            "http://127.0.0.1:8000/api/stream/ingest",
-            json={"lines": lines, "sensor_key": sensor_key},
-            headers={
-                "Content-Type": "application/json",
-                "X-Sensor-Key": sensor_key,
-            },
-            timeout=10.0,
-        )
-    result = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {"status": "ok"}
-    result["accepted"] = len(lines)
-    return JSONResponse(result, status_code=200)
+    return await handle_ebpf_ingest_request(request, db)

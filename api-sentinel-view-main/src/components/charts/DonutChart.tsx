@@ -12,7 +12,18 @@ interface DonutChartProps {
   animated?: boolean;
 }
 
-const CustomTooltip = ({ active, payload }: any) => {
+interface DonutTooltipPayload {
+  name?: string;
+  value?: number | string;
+  payload?: { color?: string };
+}
+
+interface DonutTooltipProps {
+  active?: boolean;
+  payload?: DonutTooltipPayload[];
+}
+
+const CustomTooltip = ({ active, payload }: DonutTooltipProps) => {
   if (active && payload && payload.length) {
     const d = payload[0];
     return (
@@ -28,8 +39,18 @@ const CustomTooltip = ({ active, payload }: any) => {
   return null;
 };
 
-const renderActiveShape = (props: any) => {
-  const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props;
+interface ActiveShapeProps {
+  cx?: number;
+  cy?: number;
+  innerRadius?: number;
+  outerRadius?: number;
+  startAngle?: number;
+  endAngle?: number;
+  fill?: string;
+}
+
+const renderActiveShape = (props: unknown) => {
+  const { cx = 0, cy = 0, innerRadius = 0, outerRadius = 0, startAngle = 0, endAngle = 0, fill = '#E4E4EC' } = props as ActiveShapeProps;
   return (
     <Sector
       cx={cx}

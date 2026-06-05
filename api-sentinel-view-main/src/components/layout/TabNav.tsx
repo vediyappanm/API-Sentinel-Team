@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useCallback, useRef, useEffect, useState } from 'react';
 import { clsx } from 'clsx';
 
 interface Tab {
@@ -16,20 +16,38 @@ interface TabNavProps {
 export const TabNav: React.FC<TabNavProps> = ({ tabs, activeTab, onChange }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [indicator, setIndicator] = useState({ left: 0, width: 0 });
+  const tabSignature = tabs.map((tab) => tab.key).join('|');
 
-  useEffect(() => {
+  const updateIndicator = useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
     const activeEl = container.querySelector(`[data-tab-key="${activeTab}"]`) as HTMLElement | null;
-    if (activeEl) {
-      const containerRect = container.getBoundingClientRect();
-      const elRect = activeEl.getBoundingClientRect();
-      setIndicator({
-        left: elRect.left - containerRect.left,
-        width: elRect.width,
-      });
+    if (!activeEl) {
+      setIndicator({ left: 0, width: 0 });
+      return;
     }
+    const containerRect = container.getBoundingClientRect();
+    const elRect = activeEl.getBoundingClientRect();
+    setIndicator({
+      left: elRect.left - containerRect.left,
+      width: elRect.width,
+    });
   }, [activeTab]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(updateIndicator);
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateIndicator) : null;
+    if (containerRef.current) {
+      observer?.observe(containerRef.current);
+    }
+    window.addEventListener('resize', updateIndicator);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', updateIndicator);
+      observer?.disconnect();
+    };
+  }, [tabSignature, updateIndicator]);
 
   return (
     <div ref={containerRef} className="relative flex gap-1 px-6 bg-bg-base">

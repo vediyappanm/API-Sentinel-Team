@@ -125,6 +125,8 @@ class RBAC:
         except Exception as e:
             raise HTTPException(401, f"Invalid or expired token: {str(e)}")
             
+        if not payload.get("user_id") and payload.get("sub"):
+            payload["user_id"] = payload.get("sub")
         payload["_permissions"] = get_role_permissions(payload.get("role", "VIEWER"))
         set_current_account_id(payload.get("account_id"))
         return payload

@@ -11,9 +11,13 @@ class Encryption:
     @classmethod
     def get_instance(cls) -> Fernet:
         if cls._fernet is None:
-            # If no key is set, we use a default (not recommended for production)
+            # Development-only fallback. Production config validation requires a
+            # stable Fernet key so encrypted credentials survive restarts.
             key = settings.ENCRYPTION_KEY or Fernet.generate_key().decode()
-            cls._fernet = Fernet(key.encode())
+            try:
+                cls._fernet = Fernet(key.encode())
+            except Exception as exc:
+                raise ValueError("Invalid ENCRYPTION_KEY; generate one with Fernet.generate_key()") from exc
         return cls._fernet
 
     @classmethod

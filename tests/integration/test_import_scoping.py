@@ -1,7 +1,7 @@
 import base64
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from server.models.core import APIEndpoint, SampleData
 from server.modules.auth.jwt_issuer import JWTIssuer
@@ -22,6 +22,9 @@ def _auth_headers_for(account_id: int, role: str = "ADMIN") -> dict[str, str]:
 @pytest.mark.asyncio
 async def test_burp_import_scopes_sample_data_to_callers_account(client, db_session):
     account_id = 2002
+    default_account_count_before = await db_session.scalar(
+        select(func.count()).select_from(SampleData).where(SampleData.account_id == 1000000)
+    )
     request_blob = base64.b64encode(
         b"GET /orders HTTP/1.1\r\nHost: api.example.com\r\n\r\n"
     ).decode("utf-8")
@@ -56,8 +59,8 @@ async def test_burp_import_scopes_sample_data_to_callers_account(client, db_sess
     sample_result = await db_session.execute(
         select(SampleData).where(SampleData.account_id == account_id)
     )
-    default_account_sample_result = await db_session.execute(
-        select(SampleData).where(SampleData.account_id == 1000000)
+    default_account_count_after = await db_session.scalar(
+        select(func.count()).select_from(SampleData).where(SampleData.account_id == 1000000)
     )
 
     endpoint = endpoint_result.scalar_one_or_none()
@@ -66,4 +69,4 @@ async def test_burp_import_scopes_sample_data_to_callers_account(client, db_sess
     assert endpoint is not None
     assert sample is not None
     assert sample.request["method"] == "GET"
-    assert default_account_sample_result.scalar_one_or_none() is None
+    assert default_account_count_after == default_account_count_before

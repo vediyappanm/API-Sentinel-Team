@@ -57,6 +57,10 @@ _ATTACK_SIGNATURES = [
 ]
 
 
+def _utc_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
 def _detect_attacks(path: str, ua: str) -> list[tuple[str, str]]:
     """Return list of (category, severity) for any signatures matched."""
     target = unquote(path) + " " + (ua or "")
@@ -79,7 +83,7 @@ def _parse_nginx_log(text: str) -> list[dict]:
         try:
             ts = datetime.datetime.strptime(m.group("time"), _LOG_TIME_FMT)
         except Exception:
-            ts = datetime.datetime.utcnow()
+            ts = _utc_now()
         entries.append({
             "ip": m.group("ip"),
             "ts": ts,

@@ -4,7 +4,8 @@ from sqlalchemy.future import select
 from sqlalchemy import desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from server.modules.persistence.database import get_db
-from server.modules.auth.rbac import RBAC
+from server.modules.auth.rbac import Permission, RBAC
+from server.modules.utils.redactor import Redactor
 from server.models.core import ThreatActor, MaliciousEvent, MaliciousEventRecord
 import uuid, datetime, time
 
@@ -15,7 +16,7 @@ router = APIRouter()
 async def list_threat_actors(
     status: str = Query(None, description="MONITORING | BLOCKED | WHITELISTED"),
     limit: int = Query(100),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     count_stmt = select(func.count(ThreatActor.id)).where(ThreatActor.account_id == payload["account_id"])
@@ -40,7 +41,7 @@ async def list_threat_actors(
 
 @router.get("/events")
 async def list_malicious_events(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     limit: int = Query(50),
     start_ts: int = Query(None),
     end_ts: int = Query(None),
@@ -74,8 +75,8 @@ async def list_malicious_events(
                 "severity": e.severity,
                 "detected_at": str(e.created_at),
                 "timestamp": e.detected_at,
-                "path": e.url,
-                "url": e.url,
+                "path": Redactor.redact_text(e.url or ""),
+                "url": Redactor.redact_text(e.url or ""),
                 "method": e.method or "GET",
                 "category": e.category,
                 "subCategory": e.sub_category,
@@ -88,7 +89,7 @@ async def list_malicious_events(
 
 @router.get("/trend")
 async def threat_trend(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     start_ts: int = Query(None),
     end_ts: int = Query(None),
     db: AsyncSession = Depends(get_db)
@@ -132,7 +133,7 @@ async def threat_trend(
 
 @router.get("/geo")
 async def threat_geo(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Returns threat actor counts per country for the dashboard map."""
@@ -153,7 +154,7 @@ async def add_threat_actor(
     source_ip: str = Body(...),
     status: str = Body("MONITORING"),
     risk_score: float = Body(0.0),
-    payload: dict = Depends(RBAC.require_role(["ADMIN", "SECURITY_ENGINEER"])),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload["account_id"]
@@ -180,7 +181,7 @@ async def add_threat_actor(
 @router.post("/{ip}/block")
 async def block_actor(
     ip: str,
-    payload: dict = Depends(RBAC.require_role(["ADMIN", "SECURITY_ENGINEER"])),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_MANAGE)),
     db: AsyncSession = Depends(get_db)
 ):
     account_id = payload["account_id"]
@@ -199,7 +200,7 @@ async def block_actor(
 @router.post("/{ip}/whitelist")
 async def whitelist_actor(
     ip: str,
-    payload: dict = Depends(RBAC.require_role(["ADMIN", "SECURITY_ENGINEER"])),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_MANAGE)),
     db: AsyncSession = Depends(get_db)
 ):
     account_id = payload["account_id"]
@@ -224,7 +225,7 @@ async def log_malicious_event(
     severity: str = Body("MEDIUM"),
     url: str = Body("/"),
     method: str = Body("GET"),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload.get("account_id")
@@ -252,14 +253,19 @@ async def log_malicious_event(
     country = countries[hash(source_ip) % len(countries)]
     ts = int(time.time() * 1000)
 
-    event = MaliciousEvent(actor_id=actor.id, event_type=event_type, severity=severity.upper())
+    event = MaliciousEvent(
+        account_id=account_id,
+        actor_id=actor.id,
+        event_type=event_type,
+        severity=severity.upper(),
+    )
     db.add(event)
 
     record = MaliciousEventRecord(
         account_id=account_id,
         actor=actor.id,
         ip=source_ip,
-        url=url,
+        url=Redactor.redact_text(url),
         method=method,
         event_type=event_type,
         category=event_type.split('_')[0] if '_' in event_type else "General Attack",
@@ -277,7 +283,7 @@ async def log_malicious_event(
 
 @router.get("/stats")
 async def threat_stats(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db)
 ):
     account_id = payload["account_id"]
@@ -299,7 +305,7 @@ async def threat_stats(
 
 @router.get("/filters")
 async def threat_filters(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db)
 ):
     """Returns unique values for filtering (IPs, types)."""
@@ -315,7 +321,7 @@ async def threat_filters(
 @router.get("/top-n")
 async def threat_top_n(
     limit: int = Query(10),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db)
 ):
     """Returns top attacked endpoints/hosts."""

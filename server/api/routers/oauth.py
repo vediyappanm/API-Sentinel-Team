@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.core import OAuthProvider, User
 from server.modules.auth.jwt_issuer import JWTIssuer
+from server.modules.auth.oauth_secrets import OAuthProviderSecretCodec
 from server.modules.auth.oauth_github import GitHubOAuth
 from server.modules.auth.rbac import require_admin
 from server.modules.persistence.database import get_db
@@ -72,7 +73,7 @@ def _make_github_oauth(provider: OAuthProvider) -> GitHubOAuth:
         base = "http://localhost:8000"
     return GitHubOAuth(
         client_id=provider.client_id or "",
-        client_secret=provider.client_secret_enc or "",
+        client_secret=OAuthProviderSecretCodec.client_secret(provider),
         redirect_uri=f"{base}/api/oauth/github/callback",
     )
 
@@ -109,14 +110,14 @@ async def create_provider(
     payload: dict = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Register an OAuth provider. client_secret is still stored as-is."""
+    """Register an OAuth provider with encrypted client secret storage."""
     account_id = payload["account_id"]
     provider_row = OAuthProvider(
         id=str(uuid.uuid4()),
         account_id=account_id,
         provider=provider,
         client_id=client_id,
-        client_secret_enc=client_secret,
+        client_secret_enc=OAuthProviderSecretCodec.encrypt_secret(client_secret),
         allowed_domains=allowed_domains,
         scopes=scopes,
     )

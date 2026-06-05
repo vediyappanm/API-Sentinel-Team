@@ -37,13 +37,15 @@ interface AutoBlockResult {
   ips: string[];
 }
 
+type RawBlockedIP = Partial<BlockedIP> & { created_at?: string };
+
 // ─── API calls ────────────────────────────────────────────────────────────────
 
-function normalizeBlockedIp(item: any): BlockedIP {
+function normalizeBlockedIp(item: RawBlockedIP): BlockedIP {
   return {
-    ip: item.ip,
+    ip: item.ip ?? '',
     reason: item.reason ?? 'Blocked',
-    blocked_by: item.blocked_by ?? 'MANUAL',
+    blocked_by: item.blocked_by === 'AUTO' ? 'AUTO' : 'MANUAL',
     risk_score: item.risk_score ?? 0,
     event_count: item.event_count ?? 0,
     blocked_at: item.blocked_at ?? item.created_at ?? new Date().toISOString(),
@@ -52,7 +54,7 @@ function normalizeBlockedIp(item: any): BlockedIP {
 }
 
 async function fetchBlocklist(signal?: AbortSignal): Promise<BlocklistResponse> {
-  const json = await get<any>('/blocklist/', signal);
+  const json = await get<RawBlockedIP[] | { items?: RawBlockedIP[]; total?: number }>('/blocklist/', signal);
   if (Array.isArray(json)) {
     const items = json.map(normalizeBlockedIp);
     return { items, total: items.length };
@@ -70,7 +72,7 @@ async function unblockIP(ip: string): Promise<void> {
 }
 
 async function autoBlockHighRisk(): Promise<AutoBlockResult> {
-  const json = await post<any>('/blocklist/auto');
+  const json = await post<Partial<AutoBlockResult> & { newly_blocked?: number }>('/blocklist/auto');
   return {
     blocked_count: json.blocked_count ?? json.newly_blocked ?? 0,
     ips: json.ips ?? [],

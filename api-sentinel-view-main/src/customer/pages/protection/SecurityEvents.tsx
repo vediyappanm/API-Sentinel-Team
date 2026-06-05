@@ -14,6 +14,7 @@ import AnimatedCounter from '@/components/ui/AnimatedCounter';
 import ResponseActions from '@/components/widgets/ResponseActions';
 import { useSecurityEvents, useSeverityCount, useThreatCategoryCount } from '@/hooks/use-protection';
 import { useQueryClient } from '@tanstack/react-query';
+import type { AktoMaliciousEvent } from '@/services/protection.service';
 
 function formatTs(epoch: number) {
   if (!epoch) return '-';
@@ -41,7 +42,7 @@ const SecurityEvents: React.FC = () => {
   const [showResolved, setShowResolved] = useState(false);
   const [showAgg, setShowAgg] = useState(true);
   const [page, setPage] = useState(0);
-  const [selectedEvent, setSelectedEvent] = useState<any | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<AktoMaliciousEvent | null>(null);
   const [showDetailsPanel, setShowDetailsPanel] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const pageSize = 10;
@@ -64,7 +65,7 @@ const SecurityEvents: React.FC = () => {
   const filteredRows = useMemo(() => {
     if (!showResolved) {
       // Filter out resolved/closed events (assuming status field exists)
-      return rows.filter((r: any) => !r.status || r.status !== 'RESOLVED');
+      return rows.filter((r) => !r.status || r.status !== 'RESOLVED');
     }
     return rows;
   }, [rows, showResolved]);
@@ -72,7 +73,7 @@ const SecurityEvents: React.FC = () => {
   // Export handler
   const handleExport = () => {
     const csvHeaders = ['Severity', 'Action', 'Method', 'Endpoint', 'Timestamp', 'Category', 'Sub Category', 'Summary'];
-    const csvRows = filteredRows.map((row: any) => [
+    const csvRows = filteredRows.map((row) => [
       row.severity,
       row.action || 'DETECTED',
       row.method || 'GET',
@@ -94,8 +95,8 @@ const SecurityEvents: React.FC = () => {
 
   // Real layer split based on actual detection categories
   const layerSplit = useMemo(() => {
-    const cats = Object.entries((categoryCount.data as any)?.categoryCount || {});
-    const totalCategorized = cats.reduce((sum, [, cnt]) => sum + (cnt as number), 0);
+    const cats = Object.entries(categoryCount.data?.categoryCount || {});
+    const totalCategorized = cats.reduce((sum, [, cnt]) => sum + cnt, 0);
     
     // Map categories to detection layers
     const layers = {
@@ -109,18 +110,18 @@ const SecurityEvents: React.FC = () => {
     cats.forEach(([cat, cnt]) => {
       const c = (cat || '').toLowerCase();
       if (c.includes('injection') || c.includes('xss') || c.includes('traversal')) {
-        layers.realtime += cnt as number;
+        layers.realtime += cnt;
       } else if (c.includes('rate') || c.includes('brute') || c.includes('auth')) {
-        layers.slidingWindow += cnt as number;
+        layers.slidingWindow += cnt;
       } else if (c.includes('behavior') || c.includes('anomal')) {
-        layers.longWindowML += cnt as number;
+        layers.longWindowML += cnt;
       } else if (c.includes('business') || c.includes('logic') || c.includes('transition')) {
-        layers.businessLogic += cnt as number;
+        layers.businessLogic += cnt;
       } else if (c.includes('mcp') || c.includes('agent') || c.includes('prompt')) {
-        layers.agentic += cnt as number;
+        layers.agentic += cnt;
       } else {
         // Default to realtime for unknown categories
-        layers.realtime += cnt as number;
+        layers.realtime += cnt;
       }
     });
 
@@ -134,14 +135,14 @@ const SecurityEvents: React.FC = () => {
   }, [categoryCount.data]);
 
   const sevData = [
-    { name: 'Critical', value: (sc as any)?.CRITICAL ?? (sc as any)?.HIGH ?? 0, color: '#EF4444' },
-    { name: 'Major', value: (sc as any)?.MEDIUM ?? 0, color: '#F97316' },
-    { name: 'Minor', value: (sc as any)?.LOW ?? 0, color: '#EAB308' },
-    { name: 'Info', value: (sc as any)?.INFO ?? 0, color: '#22C55E' },
+    { name: 'Critical', value: sc.CRITICAL ?? sc.HIGH ?? 0, color: '#EF4444' },
+    { name: 'Major', value: sc.MEDIUM ?? 0, color: '#F97316' },
+    { name: 'Minor', value: sc.LOW ?? 0, color: '#EAB308' },
+    { name: 'Info', value: sc.INFO ?? 0, color: '#22C55E' },
   ];
   const totalEvents = filteredRows.length || sevData.reduce((s, d) => s + d.value, 0);
 
-  const categories = Object.entries((categoryCount.data as any)?.categoryCount ?? {}).sort((a: any, b: any) => b[1] - a[1]).slice(0, 6);
+  const categories = Object.entries(categoryCount.data?.categoryCount ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const maxCat = categories.length > 0 ? (categories[0][1] as number) : 1;
 
   return (
@@ -184,8 +185,8 @@ const SecurityEvents: React.FC = () => {
           <div className="mt-2 space-y-2">
             {categories.map(([cat, cnt]) => (
               <div key={cat} className="space-y-0.5">
-                <div className="flex justify-between items-center"><span className="text-[11px] text-text-secondary truncate max-w-[140px]">{cat}</span><span className="text-[11px] font-bold text-brand tabular-nums">{cnt as number}</span></div>
-                <div className="h-1 bg-black/[0.04] rounded-full overflow-hidden"><div className="h-full rounded-full bg-gradient-to-r from-brand to-brand-light transition-all duration-700" style={{ width: `${((cnt as number) / maxCat) * 100}%` }} /></div>
+                <div className="flex justify-between items-center"><span className="text-[11px] text-text-secondary truncate max-w-[140px]">{cat}</span><span className="text-[11px] font-bold text-brand tabular-nums">{cnt}</span></div>
+                <div className="h-1 bg-black/[0.04] rounded-full overflow-hidden"><div className="h-full rounded-full bg-gradient-to-r from-brand to-brand-light transition-all duration-700" style={{ width: `${(cnt / maxCat) * 100}%` }} /></div>
               </div>
             ))}
             {categories.length === 0 && <p className="text-xs text-text-muted mt-2">No data</p>}
@@ -247,7 +248,7 @@ const SecurityEvents: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle">
-                {filteredRows.slice(page * pageSize, (page + 1) * pageSize).map((row: any) => {
+                {filteredRows.slice(page * pageSize, (page + 1) * pageSize).map((row) => {
                   const sev = mapSev(row.severity);
                   return (
                     <tr 
@@ -372,7 +373,7 @@ const SecurityEvents: React.FC = () => {
                 <label className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Category</label>
                 <select className="w-full mt-1 px-3 py-2 rounded-lg bg-bg-base border border-border-subtle text-sm text-text-primary outline-none focus:border-brand/20">
                   <option value="">All Categories</option>
-                  {categories.map(([cat]: [string, any]) => (
+                  {categories.map(([cat]) => (
                     <option key={cat} value={cat}>{cat}</option>
                   ))}
                 </select>

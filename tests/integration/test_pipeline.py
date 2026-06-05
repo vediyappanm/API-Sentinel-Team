@@ -1,9 +1,30 @@
 import pytest
 from httpx import AsyncClient
-from server.api.main import app
+from server.models import core as models
+
+
+async def _auth_ready_pentest_profile(db_session, *, account_id: int) -> models.PentestProfile:
+    auth_profile = models.AuthProfile(
+        account_id=account_id,
+        name=f"Pipeline bearer profile {account_id}",
+        auth_mode="bearer",
+        token="Bearer pipeline-token",
+        scope_domains=["localhost"],
+        is_active=True,
+    )
+    db_session.add(auth_profile)
+    await db_session.flush()
+    pentest_profile = models.PentestProfile(
+        account_id=account_id,
+        name=f"Pipeline authenticated scan profile {account_id}",
+        auth_profile_id=auth_profile.id,
+    )
+    db_session.add(pentest_profile)
+    await db_session.flush()
+    return pentest_profile
 
 @pytest.mark.asyncio
-async def test_full_test_run_pipeline(client: AsyncClient):
+async def test_full_test_run_pipeline(client: AsyncClient, db_session):
     # 1. Signup / Auth
     signup_resp = await client.post("/api/auth/signup", json={
         "email": "admin@test.com",
@@ -11,6 +32,10 @@ async def test_full_test_run_pipeline(client: AsyncClient):
         "account_name": "TestCorp"
     })
     assert signup_resp.status_code == 200
+    pentest_profile = await _auth_ready_pentest_profile(
+        db_session,
+        account_id=signup_resp.json()["account_id"],
+    )
 
     # 2. Create endpoint
     ep_resp = await client.post("/api/endpoints/", json={
@@ -30,7 +55,8 @@ async def test_full_test_run_pipeline(client: AsyncClient):
     # 4. Trigger test run
     run_resp = await client.post("/api/tests/run", json={
         "endpoint_ids": [endpoint_id],
-        "template_ids": template_ids
+        "template_ids": template_ids,
+        "pentest_profile_id": pentest_profile.id,
     })
     assert run_resp.status_code == 200
     run_id = run_resp.json()["run_id"]

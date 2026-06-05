@@ -16,6 +16,24 @@ router = APIRouter()
 _lineage = EndpointLineageService()
 
 
+def _endpoint_metadata(endpoint: APIEndpoint) -> dict:
+    tags = endpoint.tags or {}
+    return {
+        "status": endpoint.status,
+        "is_sensitive": bool(endpoint.is_sensitive),
+        "access_type": endpoint.access_type,
+        "auth_types_found": endpoint.auth_types_found or [],
+        "owner": tags.get("owner"),
+        "auth_required": tags.get("auth_required"),
+        "sensitivity": tags.get("sensitivity"),
+        "version": tags.get("version"),
+        "deprecated": bool(tags.get("deprecated", False)),
+        "shadow": bool(tags.get("shadow", False)),
+        "sources": tags.get("sources") or ([tags["source"]] if tags.get("source") else []),
+        "tags": tags,
+    }
+
+
 @router.get("/")
 @limiter.limit("60/minute")
 async def get_endpoints(
@@ -91,6 +109,7 @@ async def get_endpoints(
                 "api_type": e.api_type,
                 "last_seen": e.last_seen.isoformat() if e.last_seen else None,
                 "created_at": str(e.created_at),
+                **_endpoint_metadata(e),
             }
             for e in endpoints
         ],
@@ -137,8 +156,8 @@ async def get_endpoint(
         "private_variable_count": ep.private_variable_count,
         "risk_score": ep.risk_score,
         "api_type": ep.api_type,
-        "tags": ep.tags,
         "last_seen": str(ep.last_seen) if ep.last_seen else None,
+        **_endpoint_metadata(ep),
     }
 
 

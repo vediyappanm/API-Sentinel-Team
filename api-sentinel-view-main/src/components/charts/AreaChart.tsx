@@ -10,19 +10,31 @@ import {
 } from 'recharts';
 
 interface AreaChartProps {
-  data: any[];
+  data: Array<Record<string, string | number | null | undefined>>;
   areas: { key: string; color: string; label: string; stacked?: boolean }[];
   xKey: string;
   height?: number;
   showGrid?: boolean;
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+interface ChartTooltipPayload {
+  color?: string;
+  name?: string;
+  value?: number | string;
+}
+
+interface ChartTooltipProps {
+  active?: boolean;
+  payload?: ChartTooltipPayload[];
+  label?: string | number;
+}
+
+const CustomTooltip = ({ active, payload, label }: ChartTooltipProps) => {
   if (active && payload && payload.length) {
     return (
       <div className="glass-card-premium p-3 rounded-lg shadow-xl min-w-[140px]">
         <p className="text-text-primary text-xs mb-2 font-medium">{label}</p>
-        {payload.map((entry: any, index: number) => (
+        {payload.map((entry, index) => (
           <div key={index} className="flex gap-2 items-center text-[11px] mb-1">
             <span className="w-2 h-2 rounded-full shrink-0" style={{ background: entry.color }} />
             <span className="text-text-secondary">{entry.name}:</span>

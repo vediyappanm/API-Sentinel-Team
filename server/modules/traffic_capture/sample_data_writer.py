@@ -9,6 +9,10 @@ from sqlalchemy import select
 from server.models.core import SampleData
 
 
+def _utc_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
 class SampleDataWriter:
     """Write and retrieve sample request/response pairs per endpoint."""
 
@@ -28,7 +32,7 @@ class SampleDataWriter:
             endpoint_id=endpoint_id,
             request=request,
             response=response,
-            created_at=datetime.datetime.utcnow(),
+            created_at=_utc_now(),
         )
         db.add(record)
         await db.commit()

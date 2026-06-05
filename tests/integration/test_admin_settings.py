@@ -1,12 +1,20 @@
 import pytest
 
 from server.models.core import APICollection, APIEndpoint
+from server.modules.auth.jwt_issuer import JWTIssuer
 
 
 @pytest.mark.asyncio
-async def test_account_settings_persist_and_compute_license_usage(client, auth_headers, db_session):
+async def test_account_settings_persist_and_compute_license_usage(client, db_session):
+    account_id = 2200001
+    token = JWTIssuer.create_access_token(
+        {"user_id": "admin-settings-user", "account_id": account_id, "role": "ADMIN"}
+    )
+    auth_headers = {
+        "Authorization": f"Bearer {token}"
+    }
     collection = APICollection(
-        account_id=1000000,
+        account_id=account_id,
         name="Customer API",
         host="api.example.com",
         type="MIRRORING",
@@ -15,7 +23,7 @@ async def test_account_settings_persist_and_compute_license_usage(client, auth_h
     await db_session.flush()
 
     endpoint = APIEndpoint(
-        account_id=1000000,
+        account_id=account_id,
         collection_id=collection.id,
         method="GET",
         path="/users",
@@ -68,7 +76,13 @@ async def test_account_settings_persist_and_compute_license_usage(client, auth_h
 
 
 @pytest.mark.asyncio
-async def test_api_keys_lifecycle(client, auth_headers):
+async def test_api_keys_lifecycle(client):
+    token = JWTIssuer.create_access_token(
+        {"user_id": "api-key-user", "account_id": 2200002, "role": "ADMIN"}
+    )
+    auth_headers = {
+        "Authorization": f"Bearer {token}"
+    }
     created = await client.post(
         "/api/createApiKey",
         headers=auth_headers,

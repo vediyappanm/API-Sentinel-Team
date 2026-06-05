@@ -1,168 +1,47 @@
-# API Sentinel Agent Guide
+# Repository Guidelines
 
-## Mission
-Own this repository end to end.
+## Project Structure & Module Organization
 
-That means the default expectation is:
-- inspect the codebase before making changes
-- implement the requested feature or fix
-- run the right tests
-- fix failures you introduced
-- build the backend and frontend
-- prepare deployment artifacts
-- deploy to staging when credentials and approval are available
+This repository contains an API security platform with a Python backend and a Vite React frontend.
 
-Do not stop at analysis unless the user explicitly asks for analysis only.
+- `server/` holds the FastAPI application. API routes live in `server/api/routers/`, shared domain logic in `server/modules/`, ORM models in `server/models/`, and startup configuration in `server/config.py`.
+- `migrations/` contains Alembic database migrations.
+- `tests/` contains pytest suites: `unit/`, `integration/`, `security/`, and `load/`.
+- `tests-library/` stores YAML security test templates used by the backend.
+- `api-sentinel-view-main/` contains the React/TypeScript UI, with source in `src/`, Playwright tests in `tests/e2e/`, and static assets in `public/`.
+- `infra/` contains deployment and sensor examples for Terraform, Kubernetes, nginx, and scripts.
 
-## Ownership Model
-- Prefer one owner agent for the whole task.
-- Do not spawn sub-agents unless the user explicitly asks for delegation or parallel agents.
-- Keep progress moving locally: code, test, verify, document.
+## Build, Test, and Development Commands
 
-## Repo Map
-- Backend API: `server/`
-- Frontend app: `api-sentinel-view-main/`
-- Tests: `tests/`
-- Security templates: `tests-library/`
-- Alembic migrations: `migrations/`
-- Helm chart: `infra/helm/api-sentinel/`
-- GitHub workflows: `.github/workflows/`
+Backend:
 
-## Local Development
+- `pip install -r requirements.txt` installs Python dependencies.
+- `uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000` runs the API locally.
+- `alembic upgrade head` applies database migrations.
+- `make test-unit`, `make test-integration`, `make test-security`, and `make test-all` run the main pytest layers.
+- `docker compose up --build` starts FastAPI, Postgres, Redis, and Kafka.
 
-### Backend
-Windows:
-```powershell
-cd c:\Users\ELCOT\OneDrive\Desktop\soc
-.\venv311\Scripts\uvicorn.exe server.api.main:app --host 127.0.0.1 --port 8000 --reload
-```
+Frontend, from `api-sentinel-view-main/`:
 
-Fallback with explicit debug:
-```powershell
-cd c:\Users\ELCOT\OneDrive\Desktop\soc
-$env:DEBUG='true'
-.\venv311\Scripts\uvicorn.exe server.api.main:app --host 127.0.0.1 --port 8000 --reload
-```
+- `npm install` installs UI dependencies.
+- `npm run dev` starts Vite.
+- `npm run build` creates a production build.
+- `npm run lint`, `npm test`, and `npm run test:e2e` run ESLint, Vitest, and Playwright.
 
-### Frontend
-```powershell
-cd c:\Users\ELCOT\OneDrive\Desktop\soc\api-sentinel-view-main
-npm run dev
-```
+## Coding Style & Naming Conventions
 
-### Local URLs
-- Backend: `http://127.0.0.1:8000`
-- Frontend: `http://127.0.0.1:5173`
+Use 4-space indentation for Python, type hints for new public functions, `snake_case` for modules/functions, and `PascalCase` for classes. Keep FastAPI routers thin and place reusable behavior under `server/modules/`.
 
-## Database and Migrations
+For React, use TypeScript, functional components, `PascalCase` component files, and `camelCase` helpers. Follow the existing Tailwind/shadcn patterns and run `npm run lint` before UI PRs.
 
-### Apply migrations
-```powershell
-cd c:\Users\ELCOT\OneDrive\Desktop\soc
-.\venv311\Scripts\alembic.exe upgrade heads
-```
+## Testing Guidelines
 
-### If local SQLite dev is out of sync
-- Back up the local DB before repair.
-- Prefer Alembic over ad hoc schema creation.
-- If a local-only developer machine is blocked by migration drift, make the smallest safe repair and document it.
+Add or update tests near the touched behavior. Backend tests should be named `test_*.py` and placed in the appropriate `tests/` subfolder. Prefer unit coverage for module logic and integration/security tests for API, auth, tenancy, ingestion, and migration behavior. UI unit tests live under `src/test/`; browser flows belong in `tests/e2e/`.
 
-### Environment
-Use `.env.example` as the baseline contract for required settings.
+## Commit & Pull Request Guidelines
 
-Production-safe defaults already expected by this repo:
-- `STARTUP_BOOTSTRAP_SCHEMA=false`
-- `STARTUP_ENABLE_DEMO_BOOTSTRAP=false`
-- `UNIFIED_PIPELINE_MODE=shadow` before full cutover
+Recent history uses short, direct commit subjects such as `sensor fixed` and `engine enhanced`. Prefer clearer imperative subjects, for example `Fix sensor ingestion auth`. PRs should describe the change, list verification commands, link related issues, and include screenshots for visible UI changes.
 
-## Quality Gates
+## Security & Configuration Tips
 
-### Backend tests
-```powershell
-cd c:\Users\ELCOT\OneDrive\Desktop\soc
-.\venv311\Scripts\python.exe -m pytest tests\unit -q
-.\venv311\Scripts\python.exe -m pytest tests\integration -q
-.\venv311\Scripts\python.exe -m pytest tests\security -q
-```
-
-### Frontend tests
-```powershell
-cd c:\Users\ELCOT\OneDrive\Desktop\soc\api-sentinel-view-main
-npm run test
-npm run build
-npm run test:e2e
-```
-
-### Repo shortcuts
-```powershell
-cd c:\Users\ELCOT\OneDrive\Desktop\soc
-make test-unit
-make test-integration
-make test-security
-```
-
-Run the narrowest relevant checks while iterating, then run the broader validating checks before closing the task.
-
-## Deployment Paths
-
-### Docker Compose
-```powershell
-cd c:\Users\ELCOT\OneDrive\Desktop\soc
-docker compose up --build
-```
-
-Notes:
-- Compose expects Postgres, Redis, and Kafka services.
-- Compose backend runs `alembic upgrade head` before starting the API.
-
-### Helm / Kubernetes
-Chart:
-- `infra/helm/api-sentinel/`
-
-Primary deployment workflows already exist in:
-- `.github/workflows/deploy.yml`
-- `.github/workflows/deploy-env.yml`
-
-Helm release name:
-- `api-sentinel`
-
-When preparing deploys:
-- build image
-- push image
-- run migrations
-- deploy to staging first
-- validate readiness and smoke tests
-- only then propose production rollout
-
-## Required Agent Behavior
-- Inspect existing code before changing architecture.
-- Preserve backward compatibility on public API routes unless the task explicitly allows breaking changes.
-- Prefer safe, incremental edits over large rewrites.
-- Never expose secrets in code, docs, commits, or logs.
-- Never commit real credentials, tokens, cookies, or private URLs.
-- Never assume production deploy is safe without staging validation.
-- If you change backend behavior, verify at least one API path.
-- If you change frontend behavior, verify build and at least one realistic user flow.
-- If you change auth, tenanting, enforcement, detection, or pentest flows, prioritize integration coverage.
-
-## Safety Rules
-- Do not revert unrelated user changes.
-- Do not use destructive git commands like `git reset --hard` or `git checkout --` unless the user explicitly asks.
-- Do not remove databases, migrations, or generated artifacts unless you are certain they are disposable and the user asked for cleanup.
-- Treat deployment, auth, and data-isolation changes as high risk.
-
-## Task Completion Checklist
-Before closing a substantial task, try to complete all of these:
-1. Code change implemented
-2. Relevant tests run
-3. Build verified if UI changed
-4. Migration impact checked if models changed
-5. Deploy impact checked if runtime/config changed
-6. User-facing summary written with honest remaining risks
-
-## Default Delivery Style
-- Be proactive.
-- Explain what changed in simple language.
-- Call out blockers clearly.
-- If something is not fully production-ready, say so directly and name the exact remaining gap.
-
+Copy `.env.example` for local settings and do not commit secrets, local cookies, or generated database files. Keep production-like credentials out of `docker-compose.yml` changes unless they are placeholders.

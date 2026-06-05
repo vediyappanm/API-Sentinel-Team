@@ -1,10 +1,9 @@
 """Sensor management - register log-shipper agents, heartbeat, status monitoring."""
 
 import datetime
-import secrets
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.models.core import Sensor
 from server.modules.auth.rbac import require_admin
 from server.modules.persistence.database import AsyncSessionLocal, get_db
+from server.modules.sensors.keys import generate_sensor_key, hash_sensor_key, resolve_sensor_by_key
 
 router = APIRouter()
 OFFLINE_SECS = 120
@@ -27,6 +27,36 @@ class SensorRegister(BaseModel):
 class HeartbeatBody(BaseModel):
     lines_shipped: int | None = None
     events_detected: int | None = None
+
+
+def _sensor_key_from_request(request: Request) -> str | None:
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1].strip() or None
+    return (
+        request.headers.get("x-sensor-key", "").strip()
+        or request.headers.get("x-api-key", "").strip()
+        or None
+    )
+
+
+async def _resolve_sensor_from_request(request: Request, db: AsyncSession) -> Sensor:
+    sensor_key = _sensor_key_from_request(request)
+    if not sensor_key:
+        raise HTTPException(status_code=401, detail="Sensor key required")
+    sensor = await resolve_sensor_by_key(db, sensor_key)
+    if not sensor:
+        raise HTTPException(status_code=401, detail="Invalid sensor key")
+    return sensor
+
+
+def _apply_heartbeat(sensor: Sensor, body: HeartbeatBody) -> None:
+    sensor.status = "ONLINE"
+    sensor.last_heartbeat = datetime.datetime.now(datetime.timezone.utc)
+    if body.lines_shipped is not None:
+        sensor.lines_shipped = body.lines_shipped
+    if body.events_detected is not None:
+        sensor.events_detected = body.events_detected
 
 
 async def _mark_stale_offline(db: AsyncSession, account_id: int) -> None:
@@ -91,7 +121,7 @@ async def register_sensor(
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload["account_id"]
-    sensor_key = secrets.token_hex(32)
+    sensor_key = generate_sensor_key()
     sensor = Sensor(
         id=str(uuid.uuid4()),
         account_id=account_id,
@@ -99,7 +129,7 @@ async def register_sensor(
         host=body.host,
         log_path=body.log_path,
         version=body.version,
-        sensor_key=sensor_key,
+        sensor_key=hash_sensor_key(sensor_key),
         status="OFFLINE",
     )
     db.add(sensor)
@@ -109,12 +139,28 @@ async def register_sensor(
         "sensor_id": sensor.id,
         "sensor_key": sensor_key,
         "ingest_url": "/api/stream/ingest",
-        "heartbeat_url": f"/api/sensors/{sensor_key}/heartbeat",
+        "heartbeat_url": "/api/sensors/heartbeat",
+        "status_url": "/api/sensors/status",
         "usage": (
             f"python log_shipper.py --key {sensor_key} "
             f"--log {body.log_path} --endpoint http://YOUR_SOC_HOST/api/stream/ingest"
         ),
     }
+
+
+@router.post("/heartbeat")
+async def heartbeat_with_header(
+    body: HeartbeatBody,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    sensor = await _resolve_sensor_from_request(request, db)
+    _apply_heartbeat(sensor, body)
+
+    await db.commit()
+    background_tasks.add_task(_mark_stale_offline_for_account, sensor.account_id)
+    return {"status": "ok", "sensor_id": sensor.id}
 
 
 @router.post("/{sensor_key}/heartbeat")
@@ -124,27 +170,26 @@ async def heartbeat(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Sensor).where(Sensor.sensor_key == sensor_key))
-    sensor = result.scalar_one_or_none()
+    sensor = await resolve_sensor_by_key(db, sensor_key)
     if not sensor:
         raise HTTPException(status_code=404, detail="Sensor not found")
 
-    sensor.status = "ONLINE"
-    sensor.last_heartbeat = datetime.datetime.now(datetime.timezone.utc)
-    if body.lines_shipped is not None:
-        sensor.lines_shipped = body.lines_shipped
-    if body.events_detected is not None:
-        sensor.events_detected = body.events_detected
+    _apply_heartbeat(sensor, body)
 
     await db.commit()
     background_tasks.add_task(_mark_stale_offline_for_account, sensor.account_id)
     return {"status": "ok", "sensor_id": sensor.id}
 
 
+@router.get("/status")
+async def sensor_status_with_header(request: Request, db: AsyncSession = Depends(get_db)):
+    sensor = await _resolve_sensor_from_request(request, db)
+    return _serialize(sensor)
+
+
 @router.get("/{sensor_key}/status")
 async def sensor_status(sensor_key: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Sensor).where(Sensor.sensor_key == sensor_key))
-    sensor = result.scalar_one_or_none()
+    sensor = await resolve_sensor_by_key(db, sensor_key)
     if not sensor:
         raise HTTPException(status_code=404, detail="Sensor not found")
     return _serialize(sensor)

@@ -20,10 +20,26 @@ from server.modules.auth.audit import log_action
 from server.modules.auth.rbac import RBAC
 from server.modules.detection.pipeline import unified_detection_pipeline
 from server.modules.ingestion.queue import IngestionJobItem, ingestion_queue
+from server.modules.ingestion.redaction import redact_ingestion_path
 from server.modules.persistence.database import AsyncSessionLocal, get_db
 from server.modules.quotas.tenant_quota import check_ingest_quota
+from server.modules.sensors.keys import resolve_sensor_by_key
+from server.modules.utils.redactor import Redactor
 
 router = APIRouter()
+
+
+def _utc_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _datetime_from_sensor_ts(ts_raw: object | None) -> datetime.datetime:
+    if ts_raw is None:
+        return _utc_now()
+    ts_int = int(ts_raw)
+    seconds = ts_int / 1000 if ts_int > 9_999_999_999 else ts_int
+    return datetime.datetime.fromtimestamp(seconds, tz=datetime.timezone.utc)
+
 
 _ATTACK_SIGS = [
     (re.compile(r"union\s+select|drop\s+table|insert\s+into|or\s+'1'\s*=\s*'1|;\s*--", re.I), "SQL Injection", "HIGH"),
@@ -53,6 +69,13 @@ class IngestPayload(BaseModel):
     sensor_key: str | None = None
 
 
+def _sensor_identity(sensor: Sensor) -> dict[str, str | int | None]:
+    return {
+        "sensor_id": sensor.id,
+        "sensor_name": Redactor.redact_text(sensor.name or ""),
+    }
+
+
 @router.post("/ingest")
 async def ingest_lines(
     body: IngestPayload,
@@ -70,18 +93,18 @@ async def ingest_lines(
     if not sensor_key:
         raise HTTPException(status_code=403, detail="Sensor key required")
 
-    result = await db.execute(select(Sensor).where(Sensor.sensor_key == sensor_key))
-    sensor = result.scalar_one_or_none()
+    sensor = await resolve_sensor_by_key(db, sensor_key)
     if not sensor:
         raise HTTPException(status_code=403, detail="Invalid sensor key")
     account_id = sensor.account_id
+    sensor_identity = _sensor_identity(sensor)
 
     quota = await check_ingest_quota(account_id, cost=len(body.lines))
     if not quota.allowed:
         raise HTTPException(
             status_code=429,
             detail="Ingestion rate limit exceeded",
-            headers={"Retry-After": str(max(1, quota.reset_at - int(datetime.datetime.now().timestamp())))},
+            headers={"Retry-After": str(max(1, quota.reset_at - int(_utc_now().timestamp())))},
         )
 
     job_id = str(uuid.uuid4())
@@ -91,7 +114,7 @@ async def ingest_lines(
         job_type="stream_lines",
         status="QUEUED",
         accepted_count=len(body.lines),
-        job_metadata={"sensor_key": sensor_key},
+        job_metadata={**sensor_identity, "source": "stream_lines"},
     )
     db.add(job)
     await db.commit()
@@ -101,7 +124,7 @@ async def ingest_lines(
             job_id=job_id,
             account_id=account_id,
             job_type="stream_lines",
-            payload={"lines": body.lines, "sensor_key": sensor_key},
+            payload={"lines": body.lines, "sensor_id": sensor.id},
         )
     )
     if not queued:
@@ -116,7 +139,7 @@ async def ingest_lines(
         action="INGESTION_STREAM_ENQUEUED",
         resource_type="ingestion_job",
         resource_id=job_id,
-        details={"accepted": len(body.lines), "sensor_key": sensor_key or ""},
+        details={"accepted": len(body.lines), **sensor_identity},
     )
     await db.commit()
 
@@ -128,12 +151,13 @@ async def ingest_lines(
     }
 
 
-@router.post("/ingest/ebpf")
-async def ingest_ebpf_events(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Receive structured events from the eBPF kernel sensor."""
+async def handle_ebpf_ingest_request(request: Request, db: AsyncSession) -> dict:
+    """
+    Process JSON sensor payloads: {"version":"v1","events":[...]}.
+    Auth: Authorization: Bearer <sensor_key>.
+
+    Used by POST /api/stream/ingest/ebpf and POST /v1/events (Argus / api-sentinel-sensor).
+    """
     raw = await request.body()
     if request.headers.get("content-encoding", "").lower() == "gzip":
         try:
@@ -155,13 +179,12 @@ async def ingest_ebpf_events(
     if not sensor_key:
         raise HTTPException(status_code=403, detail="Sensor key required")
 
-    res = await db.execute(select(Sensor).where(Sensor.sensor_key == sensor_key))
-    sensor = res.scalar_one_or_none()
+    sensor = await resolve_sensor_by_key(db, sensor_key)
     if not sensor:
         raise HTTPException(status_code=403, detail="Invalid sensor key")
 
     account_id = sensor.account_id
-    sensor.last_heartbeat = datetime.datetime.utcnow()
+    sensor.last_heartbeat = _utc_now()
     sensor.lines_shipped = (sensor.lines_shipped or 0) + len(events)
     sensor.status = "ONLINE"
 
@@ -175,18 +198,14 @@ async def ingest_ebpf_events(
         resp = ev.get("response") or {}
         method = (req.get("method") or ev.get("method") or "GET").upper()
         path = req.get("path") or ev.get("path") or "/"
+        safe_path = redact_ingestion_path(path)
         host = req.get("host") or ev.get("host") or ""
         headers = req.get("headers") or ev.get("headers") or {}
         status = int(resp.get("status") or ev.get("status") or 0)
         source_ip = ev.get("source_ip") or ev.get("src_ip") or ""
         protocol = ev.get("protocol") or "HTTP/1.1"
         ts_raw = ev.get("observed_at") or ev.get("ts")
-        if ts_raw is None:
-            ts = datetime.datetime.utcnow()
-        elif int(ts_raw) > 9_999_999_999:
-            ts = datetime.datetime.utcfromtimestamp(int(ts_raw) / 1000)
-        else:
-            ts = datetime.datetime.utcfromtimestamp(int(ts_raw))
+        ts = _datetime_from_sensor_ts(ts_raw)
 
         if pipeline_mode == "active":
             result = await unified_detection_pipeline.process(
@@ -218,7 +237,7 @@ async def ingest_ebpf_events(
                 account_id=account_id,
                 source_ip=source_ip,
                 method=method,
-                path=path,
+                path=safe_path,
                 response_code=status,
                 created_at=ts,
             ))
@@ -233,7 +252,7 @@ async def ingest_ebpf_events(
                     account_id=account_id,
                     ip=source_ip,
                     actor=source_ip,
-                    url=f"{host}{path}",
+                    url=f"{host}{safe_path}",
                     method=method,
                     category=category,
                     severity=severity,
@@ -274,18 +293,18 @@ async def ingest_ebpf_events(
                     db.add(Alert(
                         account_id=account_id,
                         title=f"{category} detected from {source_ip}",
-                        message=f"{severity} {category} on {method} {path} (status {status})",
+                        message=f"{severity} {category} on {method} {safe_path} (status {status})",
                         severity=severity,
                         category=category,
                         source_ip=source_ip,
-                        endpoint=path,
+                        endpoint=safe_path,
                         status="OPEN",
                     ))
 
         ws_batch.append({
             "ip": source_ip,
             "method": method,
-            "path": path,
+            "path": safe_path,
             "host": host,
             "status": status,
             "protocol": protocol,
@@ -305,6 +324,15 @@ async def ingest_ebpf_events(
         "events_processed": len(events),
         "threats_detected": threats_detected,
     }
+
+
+@router.post("/ingest/ebpf")
+async def ingest_ebpf_events(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Receive structured events from the eBPF kernel sensor."""
+    return await handle_ebpf_ingest_request(request, db)
 
 
 @router.get("/recent")
@@ -336,7 +364,7 @@ async def recent_events(
         {
             "ip": r.source_ip,
             "method": r.method,
-            "path": r.path,
+            "path": redact_ingestion_path(r.path),
             "status": r.response_code,
             "timestamp": r.created_at.isoformat() if r.created_at else None,
             "attacks": [threat_ips[r.source_ip]] if r.source_ip in threat_ips else [],
@@ -348,13 +376,13 @@ async def recent_events(
 @router.websocket("/live")
 async def websocket_live(websocket: WebSocket):
     """WebSocket endpoint for live tenant-scoped events."""
-    token = websocket.query_params.get("token")
+    # Prefer cookie (httpOnly, not logged) then Authorization header.
+    # Query-param tokens are NOT accepted — they appear in access logs.
+    token = websocket.cookies.get("access_token")
     if not token:
         auth_header = websocket.headers.get("authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
             token = auth_header.split(" ", 1)[1].strip()
-    if not token:
-        token = websocket.cookies.get("access_token")
 
     connected = await ws_manager.connect(websocket, token=token)
     if not connected:
@@ -380,7 +408,7 @@ async def websocket_live(websocket: WebSocket):
                 "data": {
                     "ip": request_log.source_ip,
                     "method": request_log.method,
-                    "path": request_log.path,
+                    "path": redact_ingestion_path(request_log.path),
                     "status": request_log.response_code,
                     "timestamp": request_log.created_at.isoformat() if request_log.created_at else None,
                     "attacks": [threat_ips[request_log.source_ip]] if request_log.source_ip in threat_ips else [],

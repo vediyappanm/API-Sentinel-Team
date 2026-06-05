@@ -33,6 +33,10 @@ def _component_status(enabled: bool) -> str:
     return "enabled" if enabled else "disabled"
 
 
+def _utc_now_iso() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
 async def _db_ready(db: AsyncSession) -> bool:
     try:
         await db.execute(text("SELECT 1"))
@@ -68,7 +72,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
 
     return {
         "status": "healthy" if db_status == "connected" else "degraded",
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": _utc_now_iso(),
         "database": {"status": db_status, "type": _database_type()},
         "python_version": sys.version.split()[0],
         "platform": platform.system(),
@@ -108,7 +112,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
 
 @router.get("/live")
 async def liveness():
-    return {"status": "live", "timestamp": datetime.datetime.utcnow().isoformat() + "Z"}
+    return {"status": "live", "timestamp": _utc_now_iso()}
 
 
 @router.get("/ready")
@@ -169,7 +173,7 @@ async def config_check(payload: dict = Depends(require_admin)):
 
     return {
         "status": "critical" if issues else ("warning" if warnings else "ok"),
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": _utc_now_iso(),
         "environment": "production" if not settings.DEBUG else "development",
         "issues": issues,
         "warnings": warnings,

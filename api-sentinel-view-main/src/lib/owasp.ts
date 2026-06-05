@@ -91,13 +91,20 @@ export interface OWASPCoverage {
   tests: number;
 }
 
+interface OWASPSourceItem {
+  id?: string;
+  category?: string;
+  severity?: string;
+  subCategory?: string;
+}
+
 /**
  * Calculate OWASP coverage based on detected vulnerabilities and tests
  */
 export function calculateOWASPCoverage(
-  vulnerabilities: any[],
-  tests: any[],
-  securityEvents: any[]
+  vulnerabilities: OWASPSourceItem[],
+  tests: OWASPSourceItem[],
+  securityEvents: OWASPSourceItem[]
 ): OWASPCoverage[] {
   return OWASP_TOP_10.map(cat => {
     const vulnCount = vulnerabilities.filter(

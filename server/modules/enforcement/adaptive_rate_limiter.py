@@ -157,7 +157,8 @@ class AdaptiveRequestGuard:
                     and_(
                         BlockedIP.account_id == account_id,
                         BlockedIP.ip == source_ip,
-                        (BlockedIP.expires_at.is_(None)) | (BlockedIP.expires_at > datetime.datetime.utcnow()),
+                        (BlockedIP.expires_at.is_(None))
+                        | (BlockedIP.expires_at > datetime.datetime.now(datetime.timezone.utc)),
                     )
                 )
             )
@@ -179,7 +180,8 @@ class AdaptiveRequestGuard:
                     and_(
                         EndpointBlock.account_id == account_id,
                         EndpointBlock.endpoint_id == endpoint_id,
-                        (EndpointBlock.expires_at.is_(None)) | (EndpointBlock.expires_at > datetime.datetime.utcnow()),
+                        (EndpointBlock.expires_at.is_(None))
+                        | (EndpointBlock.expires_at > datetime.datetime.now(datetime.timezone.utc)),
                     )
                 )
             )
@@ -196,7 +198,8 @@ class AdaptiveRequestGuard:
                     and_(
                         RateLimitOverride.account_id == account_id,
                         RateLimitOverride.endpoint_id == endpoint_id,
-                        (RateLimitOverride.expires_at.is_(None)) | (RateLimitOverride.expires_at > datetime.datetime.utcnow()),
+                        (RateLimitOverride.expires_at.is_(None))
+                        | (RateLimitOverride.expires_at > datetime.datetime.now(datetime.timezone.utc)),
                     )
                 )
             )
@@ -205,7 +208,7 @@ class AdaptiveRequestGuard:
         if override is None:
             return None
 
-        current_minute = int(datetime.datetime.utcnow().timestamp() / 60)
+        current_minute = int(datetime.datetime.now(datetime.timezone.utc).timestamp() / 60)
         counter_key = f"rate:{account_id}:{endpoint_id}:{source_ip}:{current_minute}"
         current_count = await redis_cache.incr(counter_key, ttl_seconds=RATE_LIMIT_CACHE_TTL)
         remaining = override.limit_rpm - current_count

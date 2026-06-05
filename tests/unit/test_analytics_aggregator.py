@@ -35,11 +35,19 @@ async def test_aggregate_hourly_creates_metrics(db_session):
     await aggregate_hourly(db_session, 1000000, hour_start, hour_end)
     await db_session.commit()
 
-    result = await db_session.execute(select(EndpointMetricHourly))
-    rows = result.scalars().all()
-    assert rows
-    assert rows[0].request_count == 2
+    result = await db_session.execute(
+        select(EndpointMetricHourly).where(
+            EndpointMetricHourly.endpoint_id == "ep1",
+            EndpointMetricHourly.hour_ts == int(hour_start.timestamp()),
+        )
+    )
+    metric = result.scalar_one()
+    assert metric.request_count == 2
 
-    result = await db_session.execute(select(ActorMetricHourly))
-    rows = result.scalars().all()
-    assert rows
+    result = await db_session.execute(
+        select(ActorMetricHourly).where(
+            ActorMetricHourly.actor_id == "1.1.1.1",
+            ActorMetricHourly.hour_ts == int(hour_start.timestamp()),
+        )
+    )
+    assert result.scalar_one()

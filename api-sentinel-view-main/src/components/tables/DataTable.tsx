@@ -21,9 +21,9 @@ function DataTable<T extends { id: string }>({ data, columns, selectable = true,
 
   const sorted = sortKey
     ? [...data].sort((a, b) => {
-        const av = (a as any)[sortKey];
-        const bv = (b as any)[sortKey];
-        const cmp = String(av).localeCompare(String(bv));
+        const av = (a as Record<string, unknown>)[sortKey];
+        const bv = (b as Record<string, unknown>)[sortKey];
+        const cmp = String(av ?? '').localeCompare(String(bv ?? ''));
         return sortDir === 'asc' ? cmp : -cmp;
       })
     : data;
@@ -80,7 +80,11 @@ function DataTable<T extends { id: string }>({ data, columns, selectable = true,
                       checked={selected.has(item.id)}
                       onChange={() => {
                         const next = new Set(selected);
-                        next.has(item.id) ? next.delete(item.id) : next.add(item.id);
+                        if (next.has(item.id)) {
+                          next.delete(item.id);
+                        } else {
+                          next.add(item.id);
+                        }
                         setSelected(next);
                       }}
                       className="rounded border-border"
@@ -89,7 +93,7 @@ function DataTable<T extends { id: string }>({ data, columns, selectable = true,
                 )}
                 {columns.map((col) => (
                   <td key={col.key} className="px-3 py-2.5 text-foreground whitespace-nowrap">
-                    {col.render ? col.render(item) : String((item as any)[col.key] ?? '')}
+                    {col.render ? col.render(item) : String((item as Record<string, unknown>)[col.key] ?? '')}
                   </td>
                 ))}
               </tr>

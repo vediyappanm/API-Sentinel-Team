@@ -20,7 +20,7 @@ services:
       TESTS_LIBRARY_PATH: /app/tests-library
       JWT_SECRET: change-this-compose-jwt-secret-to-32-plus-chars
       API_KEY: change-this-compose-api-key
-      ENCRYPTION_KEY: change-this-compose-encryption-key-32-plus
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY to a Fernet key, for example python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"}
       CORS_ORIGINS_OVERRIDE: https://app.example.com
       STARTUP_BOOTSTRAP_SCHEMA: "false"
       STARTUP_ENABLE_DEMO_BOOTSTRAP: "false"

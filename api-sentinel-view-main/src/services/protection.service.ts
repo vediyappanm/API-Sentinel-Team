@@ -3,6 +3,7 @@ import type { ApiCollectionId } from '@/services/discovery.service';
 
 export interface AktoMaliciousEvent {
   id: string;
+  eventId?: string;
   actor: string;
   filterId: string;
   ip: string;
@@ -11,6 +12,9 @@ export interface AktoMaliciousEvent {
   method: string;
   timestamp: number;
   severity: string;
+  action?: string;
+  status?: string;
+  description?: string;
   country?: string;
   category?: string;
   subCategory?: string;
@@ -31,6 +35,58 @@ export interface AktoThreatActor {
 
 const DEFAULT_COLLECTION_ID: ApiCollectionId = 'default-inventory';
 
+interface RawSecurityEvent {
+  id?: string;
+  event_id?: string;
+  actor_id?: string;
+  ip?: string;
+  api_collection_id?: ApiCollectionId;
+  collection_id?: ApiCollectionId;
+  url?: string;
+  path?: string;
+  method?: string;
+  timestamp?: number;
+  created_at?: string;
+  severity?: string;
+  action?: string;
+  status?: string;
+  category?: string;
+  event_type?: string;
+  subCategory?: string;
+  sub_category?: string;
+  description?: string;
+  message?: string;
+}
+
+interface SecurityEventsResponse {
+  events?: RawSecurityEvent[];
+  total?: number;
+}
+
+interface RawThreatActor {
+  source_ip?: string;
+  first_seen?: string;
+  last_seen?: string;
+  status?: string;
+  risk_score?: number;
+  event_count?: number;
+}
+
+interface ThreatActorsResponse {
+  actors?: RawThreatActor[];
+  total?: number;
+}
+
+interface ThreatFiltersResponse {
+  ips?: string[];
+  types?: string[];
+}
+
+interface ThreatTopNResponse {
+  top_apis?: { name: string; count: number }[];
+  top_hosts?: { name: string; count: number }[];
+}
+
 export async function fetchSecurityEvents(
   skip: number = 0,
   limit: number = 50,
@@ -45,24 +101,29 @@ export async function fetchSecurityEvents(
   if (startTs) url += `&start_ts=${startTs}`;
   if (endTs) url += `&end_ts=${endTs}`;
 
-  const data = await get<any>(url, signal);
+  const data = await get<SecurityEventsResponse>(url, signal);
 
-  const allEvents: AktoMaliciousEvent[] = (data.events || []).map((event: any) => ({
-    id: event.id,
+  const allEvents: AktoMaliciousEvent[] = (data.events || []).map((event) => ({
+    id: event.id ?? event.event_id ?? `${event.ip ?? event.actor_id ?? 'event'}-${event.timestamp ?? Date.now()}`,
+    eventId: event.event_id ?? event.id,
     actor: event.ip || event.actor_id || 'unknown',
     filterId: event.category || event.event_type || '-',
     ip: event.ip || event.actor_id || 'unknown',
     apiCollectionId: event.api_collection_id ?? event.collection_id ?? DEFAULT_COLLECTION_ID,
     url: event.url || event.path || '/',
     method: event.method || 'GET',
-    timestamp: event.timestamp || Date.now(),
+    timestamp: event.timestamp || (event.created_at ? new Date(event.created_at).getTime() : Date.now()),
     severity: event.severity || 'MEDIUM',
+    action: event.action,
+    status: event.status,
+    description: event.description ?? event.message,
     category: event.category || event.event_type,
-    subCategory: event.subCategory,
+    subCategory: event.subCategory ?? event.sub_category,
   }));
 
   return {
     maliciousEvents: allEvents,
+    securityEvents: allEvents,
     total: data.total || allEvents.length,
   };
 }
@@ -85,13 +146,13 @@ export async function fetchThreatActors(
   endTs?: number,
   signal?: AbortSignal,
 ) {
-  const raw = await get<any>(`/threat-actors/?limit=${limit}`, signal);
-  const data = Array.isArray(raw) ? raw : (raw?.actors ?? []);
-  const totalCount = raw?.total ?? data.length;
+  const raw = await get<ThreatActorsResponse | RawThreatActor[]>(`/threat-actors/?limit=${limit}`, signal);
+  const data = Array.isArray(raw) ? raw : (raw.actors ?? []);
+  const totalCount = Array.isArray(raw) ? data.length : (raw.total ?? data.length);
 
-  const actors: AktoThreatActor[] = (data || []).map((actor: any) => ({
-    id: actor.source_ip,
-    latestApiIp: actor.source_ip,
+  const actors: AktoThreatActor[] = (data || []).map((actor) => ({
+    id: actor.source_ip ?? 'unknown',
+    latestApiIp: actor.source_ip ?? 'unknown',
     latestApiAttackType: ['Suspicious Behavior'],
     discoveredAt: new Date(actor.first_seen).getTime(),
     lastSeenAt: new Date(actor.last_seen || actor.first_seen).getTime(),
@@ -138,7 +199,7 @@ export async function getActorsGeoCount(signal?: AbortSignal) {
 }
 
 export async function fetchSecurityEventFilters(signal?: AbortSignal) {
-  const data = await get<any>('/threat-actors/filters', signal);
+  const data = await get<ThreatFiltersResponse>('/threat-actors/filters', signal);
   return {
     actors: data.ips || [],
     types: data.types || [],
@@ -154,7 +215,7 @@ export async function fetchThreatTopN(startTs?: number, endTs?: number, signal?:
   if (startTs) url += `&start_ts=${startTs}`;
   if (endTs) url += `&end_ts=${endTs}`;
 
-  const data = await get<any>(url, signal);
+  const data = await get<ThreatTopNResponse>(url, signal);
   return {
     topApis: data.top_apis || [],
     topHosts: data.top_hosts || [],

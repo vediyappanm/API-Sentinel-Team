@@ -4,9 +4,10 @@ from sqlalchemy.future import select
 from sqlalchemy import update, delete, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from server.modules.persistence.database import get_db
-from server.modules.auth.rbac import RBAC
+from server.modules.auth.rbac import Permission, RBAC
 from server.models.core import GovernanceRule, APIEndpoint, PolicyViolation
 from server.modules.auth.audit import log_action
+from server.modules.utils.redactor import Redactor
 
 router = APIRouter()
 
@@ -37,7 +38,7 @@ _BUILTIN_CHECKS = [
 
 @router.get("/rules")
 async def list_rules(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.COMPLIANCE_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload.get("account_id")
@@ -47,20 +48,7 @@ async def list_rules(
     rules = result.scalars().all()
     return {
         "total": len(rules),
-        "rules": [
-            {
-                "id": r.id,
-                "name": r.name,
-                "description": r.description,
-                "rule_type": r.rule_type,
-                "condition": r.condition,
-                "action": r.action,
-                "enabled": r.enabled,
-                "violation_count": r.violation_count,
-                "created_at": str(r.created_at),
-            }
-            for r in rules
-        ],
+        "rules": [_serialize_rule(r) for r in rules],
     }
 
 
@@ -71,7 +59,7 @@ async def create_rule(
     condition: dict = Body(..., description='{"field": "method", "op": "eq", "value": "DELETE"}'),
     action: str = Body("WARN", description="WARN | BLOCK | ALERT"),
     description: str = Body(None),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload.get("account_id")
@@ -97,7 +85,11 @@ async def create_rule(
         user_id=payload.get("user_id"),
         resource_type="governance_rule",
         resource_id=rule.id,
-        details={"name": name, "rule_type": rule_type.upper(), "action": action.upper()},
+        details={
+            "name": Redactor.redact_text(name),
+            "rule_type": rule_type.upper(),
+            "action": action.upper(),
+        },
     )
     await db.commit()
     return {"status": "created", "id": rule.id}
@@ -107,7 +99,7 @@ async def create_rule(
 async def toggle_rule(
     rule_id: str,
     enabled: bool = True,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload.get("account_id")
@@ -133,7 +125,7 @@ async def toggle_rule(
 @router.delete("/rules/{rule_id}")
 async def delete_rule(
     rule_id: str,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload.get("account_id")
@@ -157,7 +149,7 @@ async def delete_rule(
 
 @router.post("/scan")
 async def scan_endpoints(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     """Run all enabled governance rules against discovered endpoints and return violations."""
@@ -197,30 +189,33 @@ async def scan_endpoints(
                 violated = True
 
             if violated:
+                actual_value = Redactor.redact_text(str(ep_val))
+                expected = Redactor.redact_text(f"{op} {value}")
+                message = Redactor.redact_text(f"Rule '{rule.name}' violated for {ep.method} {ep.path}")
                 violation = PolicyViolation(
                     account_id=account_id,
                     rule_id=rule.id,
                     endpoint_id=ep.id,
                     rule_type=rule.rule_type,
                     severity="MEDIUM",
-                    message=f"Rule '{rule.name}' violated for {ep.method} {ep.path}",
-                    metadata={
+                    message=message,
+                    violation_metadata={
                         "field": field,
-                        "actual_value": str(ep_val),
-                        "expected": f"{op} {value}",
+                        "actual_value": actual_value,
+                        "expected": expected,
                     },
                 )
                 db.add(violation)
                 violations.append({
                     "rule_id": rule.id,
-                    "rule_name": rule.name,
+                    "rule_name": Redactor.redact_text(rule.name),
                     "rule_type": rule.rule_type,
                     "action": rule.action,
                     "endpoint_id": ep.id,
-                    "endpoint": f"{ep.method} {ep.host}{ep.path}",
+                    "endpoint": Redactor.redact_text(f"{ep.method} {ep.host}{ep.path}"),
                     "field": field,
-                    "actual_value": str(ep_val),
-                    "expected": f"{op} {value}",
+                    "actual_value": actual_value,
+                    "expected": expected,
                 })
                 rule.violation_count = (rule.violation_count or 0) + 1
 
@@ -244,7 +239,7 @@ async def scan_endpoints(
 
 @router.get("/violations")
 async def list_policy_violations(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.COMPLIANCE_READ)),
     db: AsyncSession = Depends(get_db),
     limit: int = Query(100, le=500),
 ):
@@ -258,24 +253,13 @@ async def list_policy_violations(
     violations = result.scalars().all()
     return {
         "total": len(violations),
-        "violations": [
-            {
-                "id": v.id,
-                "rule_id": v.rule_id,
-                "endpoint_id": v.endpoint_id,
-                "rule_type": v.rule_type,
-                "severity": v.severity,
-                "message": v.message,
-                "created_at": str(v.created_at),
-            }
-            for v in violations
-        ],
+        "violations": [_serialize_violation(v) for v in violations],
     }
 
 
 @router.get("/scan/builtin")
 async def scan_builtin(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.COMPLIANCE_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Run built-in governance checks (no configuration needed)."""
@@ -306,8 +290,34 @@ async def scan_builtin(
                 violations.append({
                     "check": check["name"],
                     "rule_type": check["rule_type"],
-                    "endpoint": f"{ep.method} {ep.host}{ep.path}",
+                    "endpoint": Redactor.redact_text(f"{ep.method} {ep.host}{ep.path}"),
                     "endpoint_id": ep.id,
                 })
 
     return {"violations": violations, "total": len(violations)}
+
+
+def _serialize_rule(rule: GovernanceRule) -> dict:
+    return {
+        "id": rule.id,
+        "name": Redactor.redact_text(rule.name or ""),
+        "description": Redactor.redact_text(rule.description or "") if rule.description else None,
+        "rule_type": rule.rule_type,
+        "condition": Redactor.redact_json(rule.condition or {}),
+        "action": rule.action,
+        "enabled": rule.enabled,
+        "violation_count": rule.violation_count,
+        "created_at": str(rule.created_at),
+    }
+
+
+def _serialize_violation(violation: PolicyViolation) -> dict:
+    return {
+        "id": violation.id,
+        "rule_id": violation.rule_id,
+        "endpoint_id": violation.endpoint_id,
+        "rule_type": violation.rule_type,
+        "severity": violation.severity,
+        "message": Redactor.redact_text(violation.message or "") if violation.message else None,
+        "created_at": str(violation.created_at),
+    }
