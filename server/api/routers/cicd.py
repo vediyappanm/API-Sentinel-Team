@@ -733,6 +733,11 @@ def _apply_engine_artifact_accountability_gate(
             artifact.get("present") is True and artifact.get("verified") is not True
         )
     ]
+    duplicate_artifacts = [
+        artifact
+        for artifact in required_artifacts
+        if artifact.get("status") == "duplicate_artifact"
+    ]
     continuous_artifacts = _engine_accountability_continuous_artifacts(report_artifacts)
     missing_continuous_artifacts = [
         artifact
@@ -746,18 +751,27 @@ def _apply_engine_artifact_accountability_gate(
             artifact.get("present") is True and artifact.get("verified") is not True
         )
     ]
+    duplicate_continuous_artifacts = [
+        artifact
+        for artifact in continuous_artifacts
+        if artifact.get("status") == "duplicate_artifact"
+    ]
 
     counts = decision.get("counts")
     if isinstance(counts, dict):
         counts["missing_engine_execution_artifacts"] = len(missing_artifacts)
         counts["unverified_engine_execution_artifacts"] = len(unverified_artifacts)
+        counts["duplicate_engine_execution_artifacts"] = len(duplicate_artifacts)
         counts["missing_continuous_engine_artifacts"] = len(missing_continuous_artifacts)
         counts["unverified_continuous_engine_artifacts"] = len(unverified_continuous_artifacts)
+        counts["duplicate_continuous_engine_artifacts"] = len(duplicate_continuous_artifacts)
 
     decision["missing_engine_execution_artifacts"] = missing_artifacts[:25]
     decision["unverified_engine_execution_artifacts"] = unverified_artifacts[:25]
+    decision["duplicate_engine_execution_artifacts"] = duplicate_artifacts[:25]
     decision["missing_continuous_engine_artifacts"] = missing_continuous_artifacts[:25]
     decision["unverified_continuous_engine_artifacts"] = unverified_continuous_artifacts[:25]
+    decision["duplicate_continuous_engine_artifacts"] = duplicate_continuous_artifacts[:25]
 
     selection_accountability = _engine_accountability_selection_accountability(report_artifacts)
     selection_details = selection_accountability.get("engine_details")
@@ -790,6 +804,14 @@ def _apply_engine_artifact_accountability_gate(
     accountability = report_artifacts.get("engine_accountability")
     if not isinstance(accountability, dict) or accountability.get("required") is not True:
         return decision
+    if (
+        decision.get("status") == "PASSED"
+        and (duplicate_artifacts or duplicate_continuous_artifacts)
+    ):
+        decision["status"] = "FAILED"
+        decision["passed"] = False
+        decision["reason"] = "duplicate_engine_execution_artifacts"
+        decision["exit_code"] = 1
     if accountability.get("complete") is not True and decision.get("status") == "PASSED":
         decision["status"] = "FAILED"
         decision["passed"] = False
@@ -1676,6 +1698,10 @@ async def legacy_ci_gate_decision(
         if artifact.get("status") == "missing" or artifact.get("present") is False:
             blocked_reasons.append(
                 f"missing_engine_execution_artifact: engine={engine} artifact_type={artifact_type}"
+            )
+        elif artifact.get("status") == "duplicate_artifact":
+            blocked_reasons.append(
+                f"duplicate_engine_execution_artifact: engine={engine} artifact_type={artifact_type}"
             )
         elif artifact.get("status") == "unverified" or (
             artifact.get("present") is True and artifact.get("verified") is not True

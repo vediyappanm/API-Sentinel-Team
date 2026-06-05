@@ -362,6 +362,7 @@ def _selection_accountability_detail(
     artifact_type: str,
     content: dict[str, object] | None,
     verification: dict[str, object],
+    duplicate_count: int = 0,
 ) -> dict[str, object]:
     present = isinstance(content, dict)
     verified = verification.get("verified") is True
@@ -374,6 +375,14 @@ def _selection_accountability_detail(
         "artifact_verified": verified,
         "selection_accountability_present": selection_present,
     }
+    if duplicate_count > 1:
+        detail.update(
+            {
+                "status": "duplicate_artifact",
+                "duplicate_count": duplicate_count,
+            }
+        )
+        return detail
     if not present:
         detail["status"] = "missing_artifact"
         return detail
@@ -458,12 +467,13 @@ def _selection_accountability_manifest(
             artifact_type=artifact_type,
             content=content,
             verification=verification,
+            duplicate_count=_safe_int(artifact.get("artifact_count")) if isinstance(artifact, dict) else 0,
         )
         details.append(detail)
         status = detail.get("status")
         if status == "trusted":
             trusted_count += 1
-        elif status == "unverified_artifact":
+        elif status in {"duplicate_artifact", "unverified_artifact"}:
             unverified_count += 1
         else:
             missing_count += 1
@@ -656,6 +666,17 @@ def _engine_artifact_accountability_detail(
                     "mismatch_fields": verification.get("mismatch_fields"),
                 }
             )
+        duplicate_count = _safe_int(artifact.get("artifact_count")) if isinstance(artifact, dict) else 0
+        if duplicate_count > 1:
+            artifact_hashes = artifact.get("artifact_hashes") if isinstance(artifact, dict) else []
+            detail.update(
+                {
+                    "verified": False,
+                    "status": "duplicate_artifact",
+                    "duplicate_count": duplicate_count,
+                    "duplicate_artifact_hashes": _safe_signal_list(artifact_hashes, limit=128),
+                }
+            )
     return detail
 
 
@@ -696,6 +717,7 @@ def _engine_accountability_manifest(
     required_artifacts: list[dict[str, object]] = []
     missing_count = 0
     unverified_count = 0
+    duplicate_count = 0
     for engine in ready_active_engines:
         artifact_type = _ENGINE_EXECUTION_ARTIFACT_TYPES[engine]
         detail = _engine_artifact_accountability_detail(
@@ -708,11 +730,14 @@ def _engine_accountability_manifest(
             missing_count += 1
         elif detail["verified"] is not True:
             unverified_count += 1
+        if detail.get("status") == "duplicate_artifact":
+            duplicate_count += 1
         required_artifacts.append(detail)
 
     continuous_artifacts: list[dict[str, object]] = []
     missing_continuous_count = 0
     unverified_continuous_count = 0
+    duplicate_continuous_count = 0
     for engine in continuous_engines:
         artifact_type = _ENGINE_EXECUTION_ARTIFACT_TYPES[engine]
         detail = _engine_artifact_accountability_detail(
@@ -725,11 +750,18 @@ def _engine_accountability_manifest(
             missing_continuous_count += 1
         elif detail["verified"] is not True:
             unverified_continuous_count += 1
+        if detail.get("status") == "duplicate_artifact":
+            duplicate_continuous_count += 1
         continuous_artifacts.append(detail)
 
     return {
         "required": engine_plan_present,
-        "complete": engine_plan_present and missing_count == 0 and unverified_count == 0,
+        "complete": (
+            engine_plan_present
+            and missing_count == 0
+            and unverified_count == 0
+            and duplicate_count == 0
+        ),
         "scan_plan_engine_plan_present": engine_plan_present,
         "execution_order": list(ENGINE_EXECUTION_ORDER),
         "ready_active_engines": ready_active_engines,
@@ -742,13 +774,19 @@ def _engine_accountability_manifest(
         "required_artifacts": required_artifacts,
         "missing_artifact_count": missing_count,
         "unverified_artifact_count": unverified_count,
+        "duplicate_artifact_count": duplicate_count,
         "continuous_artifacts": continuous_artifacts,
         "continuous_artifact_count": len(continuous_artifacts),
         "missing_continuous_artifact_count": missing_continuous_count,
         "unverified_continuous_artifact_count": unverified_continuous_count,
+        "duplicate_continuous_artifact_count": duplicate_continuous_count,
         "continuous_artifact_accountability_complete": (
             not continuous_engines
-            or (missing_continuous_count == 0 and unverified_continuous_count == 0)
+            or (
+                missing_continuous_count == 0
+                and unverified_continuous_count == 0
+                and duplicate_continuous_count == 0
+            )
         ),
         "engine_outcomes": engine_outcome_summaries(engine_plan),
         "selection_accountability": _selection_accountability_manifest(
