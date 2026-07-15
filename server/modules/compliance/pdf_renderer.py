@@ -1,7 +1,14 @@
 import logging
+from html import escape
 from typing import Dict, Any, Optional
+from server.modules.compliance.report_generator import sanitize_compliance_report_value
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_html(value: Any) -> str:
+    redacted = sanitize_compliance_report_value("" if value is None else value)
+    return escape(str(redacted), quote=True)
 
 class PDFRenderer:
     """
@@ -11,25 +18,26 @@ class PDFRenderer:
         """
         Takes the compliance report JSON and builds a CSS-styled HTML page.
         """
-        framework = report.get('framework', 'Security Report')
-        summary = f"Total Open Vulnerabilities: {report.get('total_open', 0)}"
+        framework = _safe_html(report.get('framework', 'Security Report'))
+        summary = _safe_html(f"Total Open Vulnerabilities: {report.get('total_open', 0)}")
         
         sections_html = ""
         for section, vulns in report.get('sections', {}).items():
             vuln_rows = "".join([
                 f"""<tr>
-                    <td>{v['severity']}</td>
-                    <td>{v['title']}</td>
-                    <td>{v['endpoint']}</td>
+                    <td>{_safe_html(v.get('severity'))}</td>
+                    <td>{_safe_html(v.get('title'))}</td>
+                    <td>{_safe_html(v.get('endpoint'))}</td>
+                    <td>{_safe_html(v.get('evidence'))}</td>
                 </tr>""" for v in vulns
             ])
             
             sections_html += f"""
                 <div class="section">
-                    <h3>{section}</h3>
+                    <h3>{_safe_html(section)}</h3>
                     <table>
                         <thead>
-                            <tr><th>Severity</th><th>Problem</th><th>Endpoint</th></tr>
+                            <tr><th>Severity</th><th>Problem</th><th>Endpoint</th><th>Evidence</th></tr>
                         </thead>
                         <tbody>{vuln_rows}</tbody>
                     </table>

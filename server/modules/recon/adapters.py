@@ -7,12 +7,13 @@ from urllib.parse import quote
 import httpx
 
 from server.models.core import ReconSourceConfig
+from server.modules.recon.secrets import ReconSourceSecretCodec
 
 
 class ReconAdapterRegistry:
     async def fetch_items(self, source: ReconSourceConfig) -> Tuple[List[Dict[str, Any]], str | None]:
         provider = (source.provider or "").upper()
-        cfg = source.config or {}
+        cfg = ReconSourceSecretCodec.runtime_config(source)
 
         if provider in ("STATIC", "MANUAL"):
             items = cfg.get("items") or []

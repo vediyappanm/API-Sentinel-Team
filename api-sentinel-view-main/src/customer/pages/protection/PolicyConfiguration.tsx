@@ -14,7 +14,7 @@ function getIcon(key: string) {
   return FileText;
 }
 
-function getColor(key: string, value: any) {
+function getColor(key: string, value: unknown) {
   if (typeof value === 'boolean') return value ? '#22C55E' : '#6B7280';
   const l = key.toLowerCase();
   if (l.includes('block') || l.includes('critical')) return '#EF4444';

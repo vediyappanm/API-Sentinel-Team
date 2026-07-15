@@ -7,9 +7,10 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.modules.auth.rbac import RBAC
+from server.modules.auth.rbac import Permission, RBAC
 from server.modules.persistence.database import get_db
 from server.modules.recon.scheduler import ReconSourceRunner
+from server.modules.recon.secrets import ReconSourceSecretCodec
 from server.models.core import ReconSourceConfig
 from server.config import settings
 
@@ -19,7 +20,7 @@ _runner = ReconSourceRunner()
 
 @router.get("/sources")
 async def list_recon_sources(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.INTEGRATIONS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload.get("account_id")
@@ -36,7 +37,7 @@ async def list_recon_sources(
                 "provider": s.provider,
                 "enabled": s.enabled,
                 "interval_seconds": s.interval_seconds,
-                "config": s.config or {},
+                "config": ReconSourceSecretCodec.redacted_config(s),
                 "last_run_at": s.last_run_at,
                 "next_run_at": s.next_run_at,
                 "last_status": s.last_status,
@@ -49,7 +50,7 @@ async def list_recon_sources(
 
 @router.post("/sources")
 async def create_recon_source(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.INTEGRATIONS_WRITE)),
     name: str = Body(...),
     provider: str = Body(...),
     enabled: bool = Body(default=True),
@@ -64,7 +65,7 @@ async def create_recon_source(
         provider=provider,
         enabled=enabled,
         interval_seconds=interval_seconds,
-        config=config or {},
+        config=ReconSourceSecretCodec.encrypt_config(config),
     )
     db.add(source)
     await db.commit()
@@ -74,7 +75,7 @@ async def create_recon_source(
 @router.patch("/sources/{source_id}")
 async def update_recon_source(
     source_id: str,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.INTEGRATIONS_WRITE)),
     name: Optional[str] = Body(default=None),
     provider: Optional[str] = Body(default=None),
     enabled: Optional[bool] = Body(default=None),
@@ -100,7 +101,7 @@ async def update_recon_source(
     if interval_seconds is not None:
         source.interval_seconds = interval_seconds
     if config is not None:
-        source.config = config
+        source.config = ReconSourceSecretCodec.encrypt_config(config)
     await db.commit()
     return {"success": True}
 
@@ -108,7 +109,7 @@ async def update_recon_source(
 @router.delete("/sources/{source_id}")
 async def delete_recon_source(
     source_id: str,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.INTEGRATIONS_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload.get("account_id")
@@ -128,7 +129,7 @@ async def delete_recon_source(
 @router.post("/sources/{source_id}/run")
 async def run_recon_source(
     source_id: str,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.INTEGRATIONS_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload.get("account_id")

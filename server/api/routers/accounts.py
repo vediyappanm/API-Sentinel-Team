@@ -3,15 +3,16 @@ from fastapi import APIRouter, Depends, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, and_
 from server.modules.persistence.database import get_db
-from server.modules.auth.rbac import RBAC
+from server.modules.auth.rbac import Permission, RBAC
 from server.models.core import TestAccount
+from server.modules.identity.test_account_secrets import TestAccountSecretCodec
 
 router = APIRouter()
 
 
 @router.get("/")
 async def list_accounts(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TESTS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload.get("account_id")
@@ -23,7 +24,7 @@ async def list_accounts(
         "total": len(accounts),
         "accounts": [
             {"id": a.id, "name": a.name, "role": a.role,
-             "has_token": bool(a.auth_headers or a.auth_token),
+             "has_token": TestAccountSecretCodec.has_secret(a),
              "created_at": str(a.created_at)}
             for a in accounts
         ],
@@ -36,7 +37,7 @@ async def create_account(
     role: str = Body(..., description="ADMIN | MEMBER | ATTACKER"),
     auth_headers: dict = Body(None, description='e.g. {"Authorization": "Bearer xyz"}'),
     auth_token: str = Body(None, description="Plain token (used if auth_headers not provided)"),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TESTS_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a test account for use in BOLA/BFLA auth rotation."""
@@ -49,8 +50,12 @@ async def create_account(
         account_id=account_id,
         name=name,
         role=role.upper(),
-        auth_headers=headers,
-        auth_token=auth_token,
+        **TestAccountSecretCodec.encrypt_payload(
+            {
+                "auth_headers": headers,
+                "auth_token": auth_token,
+            }
+        ),
     )
     db.add(acct)
     await db.commit()
@@ -60,7 +65,7 @@ async def create_account(
 @router.delete("/{account_id_param}")
 async def delete_account(
     account_id_param: str,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TESTS_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload.get("account_id")
@@ -74,5 +79,5 @@ async def delete_account(
 
 
 @router.get("/roles")
-async def list_roles():
+async def list_roles(payload: dict = Depends(RBAC.require_permission(Permission.TESTS_READ))):
     return {"roles": ["ADMIN", "MEMBER", "ATTACKER", "VIEWER"]}

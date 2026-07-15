@@ -20,6 +20,14 @@ from server.modules.detection.state_store import state_store
 logger = logging.getLogger(__name__)
 
 
+def _utc_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _utc_now_ms() -> int:
+    return int(_utc_now().timestamp() * 1000)
+
+
 async def handle_incident(
     db: AsyncSession,
     account_id: int,
@@ -33,7 +41,7 @@ async def handle_incident(
     details = details or {}
 
     if unified_detection_pipeline.is_enabled():
-        observed_at_ms = int(datetime.datetime.utcnow().timestamp() * 1000)
+        observed_at_ms = _utc_now_ms()
         envelope = DetectionEnvelope(
             source_type="legacy_incident",
             event_type="incident",
@@ -131,7 +139,7 @@ async def handle_incident(
     actor_id = correlation_result["actor_id"]
     risk_score = correlation_result["risk_score"]
     auto_blocked = correlation_result["auto_blocked"]
-    ten_minutes_ago = datetime.datetime.utcnow() - datetime.timedelta(minutes=10)
+    ten_minutes_ago = _utc_now() - datetime.timedelta(minutes=10)
 
     alert_result = await db.execute(
         select(Alert).where(

@@ -8,6 +8,10 @@ from sqlalchemy import select, func
 from server.models.core import RequestLog
 
 
+def _utc_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
 class RateDetector:
     """
     Detects anomalous request rates and sequential ID enumeration patterns.
@@ -22,7 +26,7 @@ class RateDetector:
         Checks if source_ip is hitting endpoint_id at an unusual rate.
         Returns {anomalous, requests_in_window, baseline_avg, score}
         """
-        now = datetime.datetime.utcnow()
+        now = _utc_now()
         window_start = now - datetime.timedelta(seconds=self.window_seconds)
         day_start = now - datetime.timedelta(hours=24)
 
@@ -71,7 +75,7 @@ class RateDetector:
         many different IDs for the same path pattern from the same IP.
         """
         try:
-            now = datetime.datetime.utcnow()
+            now = _utc_now()
             window_start = now - datetime.timedelta(minutes=10)
 
             result = await db.execute(

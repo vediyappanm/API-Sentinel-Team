@@ -17,6 +17,11 @@ from server.modules.integrations.sentinel_client import SentinelClient
 from server.modules.integrations.qradar_client import QRadarClient
 from server.modules.integrations.elastic_client import ElasticClient
 from server.modules.integrations.chronicle_client import ChronicleClient
+from server.modules.integrations.destination_guard import (
+    IntegrationDestinationError,
+    validate_integration_destination_config,
+)
+from server.modules.integrations.secrets import IntegrationSecretCodec
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +34,9 @@ async def dispatch_event(event_name: str, payload: Dict[str, Any], account_id: i
     for i in result.scalars().all():
         if event_name not in (i.events or []):
             continue
-        cfg = i.config or {}
+        cfg = IntegrationSecretCodec.runtime_config(i)
         try:
+            validate_integration_destination_config(i.type, cfg)
             if i.type == "slack":
                 await SlackClient(cfg.get("webhook_url", "")).send_alert(
                     payload.get("type", event_name), str(payload.get("description", ""))[:500],
@@ -65,5 +71,7 @@ async def dispatch_event(event_name: str, payload: Dict[str, Any], account_id: i
                 await ElasticClient(cfg.get("endpoint_url", ""), cfg.get("api_key", "")).send_event(payload)
             elif i.type == "chronicle":
                 await ChronicleClient(cfg.get("endpoint_url", ""), cfg.get("api_key", "")).send_event(payload)
+        except IntegrationDestinationError as exc:
+            logger.warning("Integration %s (%s) destination blocked: %s", i.id, i.type, exc)
         except Exception as exc:
             logger.error("Integration %s (%s) dispatch_event error: %s", i.id, i.type, exc)

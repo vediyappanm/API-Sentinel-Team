@@ -5,6 +5,8 @@ Used by ExecutionEngine to perform BOLA/BFLA cross-role replays.
 import copy
 from sqlalchemy import select
 from server.models.core import TestAccount
+from server.modules.identity.role_keys import authorization_role_key
+from server.modules.identity.test_account_secrets import TestAccountSecretCodec
 
 
 AUTH_HEADERS = ["authorization", "x-api-key", "x-auth-token", "cookie", "token", "x-access-token"]
@@ -17,15 +19,26 @@ class AuthRotator:
         if db is None or account_id is None:
             return {}
         try:
+            requested_role = authorization_role_key({"role": role})
+            if not requested_role:
+                return {}
             result = await db.execute(
                 select(TestAccount).where(
                     TestAccount.account_id == account_id,
-                    TestAccount.role == role.upper(),
                 )
             )
-            acct = result.scalar_one_or_none()
-            if acct and acct.auth_headers:
-                return acct.auth_headers
+            for acct in result.scalars().all():
+                if authorization_role_key(acct) != requested_role:
+                    continue
+                auth_headers = TestAccountSecretCodec.auth_headers(acct)
+                if auth_headers:
+                    return auth_headers
+                auth_token = TestAccountSecretCodec.auth_token(acct)
+                if auth_token:
+                    token = str(auth_token)
+                    if token.lower().startswith(("bearer ", "basic ")):
+                        return {"Authorization": token}
+                    return {"Authorization": f"Bearer {token}"}
         except Exception:
             pass
         return {}

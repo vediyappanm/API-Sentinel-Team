@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from server.modules.persistence.database import get_db
+from server.modules.utils.redactor import Redactor
 from server.models.core import (
     User, AuditLog, WAFEvent, ThreatConfig,
     ThreatActor, MaliciousEvent, APICollection, APIEndpoint,
@@ -22,6 +23,26 @@ from server.modules.auth.rbac import RBAC, Permission, require_admin
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _utc_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _as_utc(value: datetime.datetime | None) -> datetime.datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=datetime.timezone.utc)
+    return value.astimezone(datetime.timezone.utc)
+
+
+def _safe_audit_details(log: AuditLog) -> str:
+    if log.details is not None:
+        return str(Redactor.redact_json(log.details))
+    if log.details_encrypted:
+        return "[encrypted]"
+    return ""
 
 
 class CreateApiKeyRequest(BaseModel):
@@ -144,15 +165,17 @@ async def _build_account_settings(account_id: int, db: AsyncSession) -> dict:
 
 
 def _api_key_summary(token: ApiToken) -> dict:
+    created_at = _as_utc(token.created_at)
+    expires_at = _as_utc(token.expires_at)
     return {
         "id": token.id,
         "name": token.name,
         "reference": f"key_{token.id[-6:]}",
         "scopes": token.scopes or [],
-        "createdAt": token.created_at.isoformat() if token.created_at else None,
-        "expiresAt": token.expires_at.isoformat() if token.expires_at else None,
+        "createdAt": created_at.isoformat() if created_at else None,
+        "expiresAt": expires_at.isoformat() if expires_at else None,
         "createdBy": token.user_id,
-        "status": "EXPIRED" if token.expires_at and token.expires_at <= datetime.datetime.utcnow() else "ACTIVE",
+        "status": "EXPIRED" if expires_at and expires_at <= _utc_now() else "ACTIVE",
     }
 
 
@@ -298,7 +321,7 @@ async def fetch_audit_data(
                 "user": log.user_id or "",
                 "action": log.action or "",
                 "timestamp": int(log.created_at.timestamp() * 1000) if log.created_at else 0,
-                "details": str(log.details) if log.details else "",
+                "details": _safe_audit_details(log),
                 "resource": log.resource_type or "",
             }
             for log in logs
@@ -364,7 +387,7 @@ async def create_api_key(
     created_by = payload.get("sub") or payload.get("user_id") or "system"
     expires_at = None
     if req.expiresInDays:
-        expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=req.expiresInDays)
+        expires_at = _utc_now() + datetime.timedelta(days=req.expiresInDays)
 
     token = ApiToken(
         user_id=created_by,
@@ -474,7 +497,7 @@ async def seed_demo_data(
 ):
     """Populate the database with realistic mock data for UI demonstration."""
     account_id = payload["account_id"]
-    now = datetime.datetime.utcnow()
+    now = _utc_now()
 
     _ATTACK_TYPES = [
         "SQL Injection", "XSS", "BOLA", "Broken Auth",

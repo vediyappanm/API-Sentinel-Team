@@ -3,9 +3,10 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from server.modules.auth.rbac import RBAC, require_security_engineer
+from server.modules.auth.rbac import Permission, RBAC
 from server.modules.persistence.database import get_db, get_read_db
 from server.modules.business_logic.graph_builder import build_graph, get_latest_graph
+from server.modules.utils.redactor import Redactor
 from server.models.core import BusinessLogicViolation
 
 router = APIRouter(tags=["Business Logic"])
@@ -17,7 +18,7 @@ async def rebuild_graph(
     window_days: int = Query(14, ge=1, le=90),
     min_transitions: int = Query(3, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    payload: dict = Depends(require_security_engineer),
+    payload: dict = Depends(RBAC.require_permission(Permission.TESTS_MANAGE)),
 ):
     account_id = payload.get("account_id")
     graph = await build_graph(db, account_id, window_days=window_days, min_transitions=min_transitions)
@@ -29,7 +30,7 @@ async def rebuild_graph(
 async def latest_graph(
     request: Request,
     db: AsyncSession = Depends(get_read_db),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.COMPLIANCE_READ)),
 ):
     account_id = payload.get("account_id")
     graph = await get_latest_graph(db, account_id)
@@ -39,8 +40,8 @@ async def latest_graph(
         "id": graph.id,
         "version": graph.version,
         "built_at": str(graph.built_at),
-        "nodes": graph.nodes_json,
-        "edges": graph.edges_json,
+        "nodes": Redactor.redact_json(graph.nodes_json or []),
+        "edges": Redactor.redact_json(graph.edges_json or []),
     }
 
 
@@ -49,7 +50,7 @@ async def list_violations(
     request: Request,
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_read_db),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.COMPLIANCE_READ)),
 ):
     account_id = payload.get("account_id")
     result = await db.execute(
@@ -61,16 +62,17 @@ async def list_violations(
     rows = result.scalars().all()
     return {
         "total": len(rows),
-        "violations": [
-            {
-                "id": v.id,
-                "actor_id": v.actor_id,
-                "from_path": v.from_path,
-                "to_path": v.to_path,
-                "type": v.violation_type,
-                "confidence": v.confidence,
-                "created_at": str(v.created_at),
-            }
-            for v in rows
-        ],
+        "violations": [_serialize_violation(v) for v in rows],
+    }
+
+
+def _serialize_violation(violation: BusinessLogicViolation) -> dict:
+    return {
+        "id": violation.id,
+        "actor_id": Redactor.redact_text(violation.actor_id or "") if violation.actor_id else None,
+        "from_path": Redactor.redact_text(violation.from_path or "") if violation.from_path else None,
+        "to_path": Redactor.redact_text(violation.to_path or "") if violation.to_path else None,
+        "type": violation.violation_type,
+        "confidence": violation.confidence,
+        "created_at": str(violation.created_at),
     }

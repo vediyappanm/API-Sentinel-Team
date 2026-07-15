@@ -14,6 +14,7 @@ from server.modules.integrations.dispatcher import dispatch_event
 from server.modules.response.playbook_executor import execute_playbooks
 from server.modules.response.incident_orchestrator import handle_incident
 from server.modules.detection.pipeline import unified_detection_pipeline
+from server.modules.ingestion.redaction import redact_ingestion_path
 
 
 def _now() -> datetime.datetime:
@@ -140,14 +141,17 @@ async def detect_api_behavior(
     if not reason:
         return
 
+    safe_path = redact_ingestion_path(path)
+    safe_reason = reason.replace(path, safe_path)
+
     alert = Alert(
         account_id=account_id,
         title="Behavioral anomaly detected",
-        message=reason,
+        message=safe_reason,
         severity=severity,
         category="BEHAVIOR",
         source_ip=actor_id,
-        endpoint=path,
+        endpoint=safe_path,
     )
     db.add(alert)
     await db.flush()

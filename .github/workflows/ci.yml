@@ -2,48 +2,69 @@ name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONPATH: ${{ github.workspace }}
 
 jobs:
-  test-unit:
+  backend-unit:
+    name: Backend unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - name: Install dependencies
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install backend dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Unit tests
+      - name: Run backend unit tests
         env:
           DEBUG: "true"
         run: |
-          pytest tests/unit/ -v --cov=server --cov-report=term-missing
-
-  test-security:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+          mkdir -p artifacts/backend/unit
+          pytest tests/unit/ -v \
+            --cov=server \
+            --cov-report=term-missing \
+            --cov-report=xml:artifacts/backend/unit/coverage.xml \
+            --junitxml=artifacts/backend/unit/junit.xml
+      - name: Verify backend unit evidence
+        if: always()
+        run: |
+          test -s artifacts/backend/unit/junit.xml
+          test -s artifacts/backend/unit/coverage.xml
+      - name: Upload backend unit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          python-version: "3.11"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      - name: Security tests
-        env:
-          DEBUG: "true"
-        run: |
-          pytest tests/security/ -v
+          name: backend-unit-junit-coverage
+          path: artifacts/backend/unit
+          if-no-files-found: error
+          retention-days: 14
 
-  test-integration:
+  backend-integration:
+    name: Backend integration tests
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' }}
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres:16-alpine
@@ -54,7 +75,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres"
+          --health-cmd "pg_isready -U postgres -d api_security"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
@@ -62,54 +83,281 @@ jobs:
         image: redis:7-alpine
         ports:
           - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - name: Install dependencies
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install backend dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Integration tests
+      - name: Run backend integration tests
         env:
           DEBUG: "true"
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/api_security
           REDIS_URL: redis://localhost:6379/0
         run: |
-          pytest tests/integration/ -v --asyncio-mode=auto
-
-  frontend-build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+          mkdir -p artifacts/backend/integration
+          pytest tests/integration/ -v \
+            --asyncio-mode=auto \
+            --junitxml=artifacts/backend/integration/junit.xml
+      - name: Verify backend integration evidence
+        if: always()
+        run: |
+          test -s artifacts/backend/integration/junit.xml
+      - name: Upload backend integration artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: api-sentinel-view-main/package-lock.json
-      - name: Install frontend dependencies
-        working-directory: api-sentinel-view-main
-        run: npm ci
-      - name: Frontend unit tests
-        working-directory: api-sentinel-view-main
-        run: npm run test
-      - name: Frontend build
-        working-directory: api-sentinel-view-main
-        run: npm run build
+          name: backend-integration-junit
+          path: artifacts/backend/integration
+          if-no-files-found: error
+          retention-days: 14
 
-  frontend-e2e:
+  backend-security:
+    name: Backend security tests
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run backend security tests
+        env:
+          DEBUG: "true"
+        run: |
+          mkdir -p artifacts/backend/security
+          pytest tests/security/ -v \
+            --junitxml=artifacts/backend/security/junit.xml
+      - name: Collect generated SARIF
+        if: always()
+        run: |
+          mkdir -p artifacts/backend/security/sarif
+          find . -type f \( -name "*.sarif" -o -name "*.sarif.json" \) \
+            -not -path "./.git/*" \
+            -not -path "./artifacts/*" \
+            -not -path "./api-sentinel-view-main/node_modules/*" \
+            -print -exec cp --parents {} artifacts/backend/security/sarif/ \;
+      - name: Verify backend security evidence
+        if: always()
+        run: |
+          test -s artifacts/backend/security/junit.xml
+      - name: Upload backend security artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-security-junit-sarif
+          path: artifacts/backend/security
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload SARIF to code scanning
+        if: ${{ always() && hashFiles('artifacts/backend/security/sarif/**/*.sarif', 'artifacts/backend/security/sarif/**/*.sarif.json') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: artifacts/backend/security/sarif
+
+  backend-ci-gates:
+    name: Backend CI/CD gate accountability
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: api_security
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d api_security"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run strict CI/CD gate tests
+        env:
+          DEBUG: "true"
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/api_security
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          mkdir -p artifacts/backend/ci-gates
+          pytest \
+            tests/unit/test_cicd_quality_gate.py \
+            tests/unit/test_external_engine_runtime_readiness.py \
+            tests/unit/test_pentest_execution_artifacts.py \
+            tests/integration/test_cicd_gate.py \
+            -v \
+            --asyncio-mode=auto \
+            --junitxml=artifacts/backend/ci-gates/junit.xml
+      - name: Verify CI/CD gate evidence and policy packs
+        if: always()
+        run: |
+          test -s artifacts/backend/ci-gates/junit.xml
+          python - <<'PY'
+          from server.modules.cicd.policy_packs import resolve_policy_pack
+
+          required_controls = (
+              "require_evidence_integrity",
+              "require_evidence_completeness",
+              "require_safety_policies",
+              "require_retest_support",
+              "require_engine_artifact_accountability",
+          )
+          for pack_name in ("strict", "llm-strict"):
+              pack = resolve_policy_pack(pack_name)
+              missing = [name for name in required_controls if pack.get(name) is not True]
+              if missing:
+                  raise SystemExit(f"{pack_name} policy pack missing controls: {missing}")
+          if resolve_policy_pack("strict").get("fail_on") != "CRITICAL,HIGH":
+              raise SystemExit("strict policy pack must fail on CRITICAL,HIGH")
+          if resolve_policy_pack("llm-strict").get("require_llm_judge_validation") is not True:
+              raise SystemExit("llm-strict policy pack must require deterministic LLM judge validation")
+          PY
+      - name: Upload CI/CD gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-cicd-gate-junit
+          path: artifacts/backend/ci-gates
+          if-no-files-found: error
+          retention-days: 14
+
+  backend-e2e-api:
+    name: Backend E2E/API tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run backend E2E/API tests
+        env:
+          DEBUG: "true"
+          PENTEST_ALLOW_PRIVATE_TARGETS: "true"
+          PENTEST_TARGET_ALLOWLIST: "127.0.0.1,localhost"
+        run: |
+          mkdir -p artifacts/backend/e2e-api
+          pytest tests/e2e/ -v \
+            --junitxml=artifacts/backend/e2e-api/junit.xml
+      - name: Verify backend E2E/API evidence
+        if: always()
+        run: |
+          test -s artifacts/backend/e2e-api/junit.xml
+      - name: Upload backend E2E/API artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-e2e-api-junit
+          path: artifacts/backend/e2e-api
+          if-no-files-found: error
+          retention-days: 14
+
+  frontend-lint-test-build:
+    name: Frontend lint, test, and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: api-sentinel-view-main/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: api-sentinel-view-main
+        run: npm ci
+      - name: Run frontend lint
+        working-directory: api-sentinel-view-main
+        run: npm run lint
+      - name: Run frontend unit tests
+        working-directory: api-sentinel-view-main
+        run: |
+          mkdir -p ../artifacts/frontend/unit
+          npm run test -- \
+            --reporter=default \
+            --reporter=junit \
+            --outputFile=../artifacts/frontend/unit/vitest-junit.xml
+      - name: Build frontend
+        working-directory: api-sentinel-view-main
+        run: npm run build
+      - name: Verify frontend unit and build artifacts
+        if: always()
+        run: |
+          test -s artifacts/frontend/unit/vitest-junit.xml
+          test -s api-sentinel-view-main/dist/index.html
+      - name: Upload frontend unit test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-vitest-junit
+          path: artifacts/frontend/unit
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload frontend build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: api-sentinel-view-main/dist
+          if-no-files-found: error
+          retention-days: 14
+
+  frontend-playwright-e2e:
+    name: Frontend Playwright E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
           cache-dependency-path: api-sentinel-view-main/package-lock.json
       - name: Install backend dependencies
         run: |
@@ -121,6 +369,62 @@ jobs:
       - name: Install Playwright browser
         working-directory: api-sentinel-view-main
         run: npx playwright install --with-deps chromium
-      - name: Frontend E2E
+      - name: Run Playwright E2E tests
         working-directory: api-sentinel-view-main
-        run: npm run test:e2e
+        env:
+          E2E_BACKEND_PORT: "18080"
+          E2E_FRONTEND_PORT: "5174"
+          PLAYWRIGHT_JUNIT_OUTPUT_NAME: ../artifacts/frontend/playwright/junit.xml
+        run: |
+          mkdir -p ../artifacts/frontend/playwright
+          npm run test:e2e -- --reporter=list,html,junit
+      - name: Verify Playwright evidence
+        if: always()
+        run: |
+          test -s artifacts/frontend/playwright/junit.xml
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-playwright-report
+          path: |
+            artifacts/frontend/playwright
+            api-sentinel-view-main/playwright-report
+            api-sentinel-view-main/test-results
+          if-no-files-found: error
+          retention-days: 14
+
+  ci-required:
+    name: CI required checks
+    runs-on: ubuntu-latest
+    needs:
+      - backend-unit
+      - backend-integration
+      - backend-security
+      - backend-ci-gates
+      - backend-e2e-api
+      - frontend-lint-test-build
+      - frontend-playwright-e2e
+    if: always()
+    steps:
+      - name: Fail if any required job failed
+        run: |
+          cat > ci-results.txt <<'EOF'
+          backend-unit ${{ needs.backend-unit.result }}
+          backend-integration ${{ needs.backend-integration.result }}
+          backend-security ${{ needs.backend-security.result }}
+          backend-ci-gates ${{ needs.backend-ci-gates.result }}
+          backend-e2e-api ${{ needs.backend-e2e-api.result }}
+          frontend-lint-test-build ${{ needs.frontend-lint-test-build.result }}
+          frontend-playwright-e2e ${{ needs.frontend-playwright-e2e.result }}
+          EOF
+
+          failed=0
+          while read -r job result; do
+            echo "$job: $result"
+            if [ "$result" != "success" ]; then
+              failed=1
+            fi
+          done < ci-results.txt
+
+          exit "$failed"

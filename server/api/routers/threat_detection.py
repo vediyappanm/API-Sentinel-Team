@@ -17,9 +17,10 @@ from sqlalchemy import func, update, delete, and_, or_, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.modules.persistence.database import get_db
-from server.modules.auth.rbac import RBAC
+from server.modules.auth.rbac import Permission, RBAC
 from server.modules.ingestion.queue import ingestion_queue, IngestionJobItem
 from server.modules.quotas.tenant_quota import check_ingest_quota
+from server.modules.utils.redactor import Redactor
 from server.models.core import (
     IngestionJob, MaliciousEventRecord, AgenticSession, ThreatConfig,
     ThreatActor, MaliciousEvent, RequestLog,
@@ -65,6 +66,22 @@ from server.modules.threat_detection.schemas import (
 router = APIRouter()
 
 
+def _redact_payload(value) -> str:
+    if value is None:
+        return ""
+    return Redactor.redact_text(str(value))
+
+
+def _redact_metadata(value) -> str:
+    if not value:
+        return ""
+    return json.dumps(Redactor.redact_json(value))
+
+
+def _redact_config(value):
+    return Redactor.redact_json(value) if value is not None else None
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _now_ms() -> int:
@@ -78,10 +95,10 @@ def _rec_to_entry(r: MaliciousEventRecord) -> MaliciousEventEntry:
         filter_id=r.filter_id or "",
         detected_at=r.detected_at,
         ip=r.ip or "",
-        endpoint=r.url or "",
+        endpoint=Redactor.redact_text(r.url or ""),
         method=r.method or "",
         api_collection_id=r.api_collection_id,
-        payload=r.payload or "",
+        payload=_redact_payload(r.payload),
         country=r.country_code or "",
         event_type=EventType(r.event_type) if r.event_type else EventType.UNSPECIFIED,
         category=r.category or "",
@@ -92,10 +109,10 @@ def _rec_to_entry(r: MaliciousEventRecord) -> MaliciousEventEntry:
         host=r.host or "",
         status=r.status or "OPEN",
         successful_exploit=r.successful_exploit,
-        jira_ticket_url=r.jira_ticket_url or "",
+        jira_ticket_url=Redactor.redact_text(r.jira_ticket_url or ""),
         dest_country=r.dest_country_code or "",
         session_id=r.session_id or "",
-        metadata=json.dumps(r.event_metadata) if r.event_metadata else "",
+        metadata=_redact_metadata(r.event_metadata),
     )
 
 
@@ -137,7 +154,7 @@ def _apply_event_filter(stmt, f):
 @router.post("/record", response_model=RecordMaliciousEventResponse)
 async def record_malicious_event(
     req: RecordMaliciousEventRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -177,11 +194,11 @@ async def record_malicious_event(
         filter_id=ev.filter_id,
         detected_at=detected_at,
         ip=ev.latest_api_ip,
-        url=ev.latest_api_endpoint,
+        url=Redactor.redact_text(ev.latest_api_endpoint),
         method=ev.latest_api_method,
         host=ev.host,
         api_collection_id=ev.latest_api_collection_id,
-        payload=ev.latest_api_payload,
+        payload=_redact_payload(ev.latest_api_payload),
         event_type=ev.event_type.value if hasattr(ev.event_type, 'value') else str(ev.event_type),
         category=ev.category,
         sub_category=ev.sub_category,
@@ -192,7 +209,7 @@ async def record_malicious_event(
         session_id=ev.session_id,
         successful_exploit=ev.successful_exploit,
         status=ev.status or "OPEN",
-        event_metadata=ev.metadata.model_dump() if ev.metadata else None,
+        event_metadata=Redactor.redact_json(ev.metadata.model_dump()) if ev.metadata else None,
     )
     db.add(rec)
 
@@ -204,14 +221,14 @@ async def record_malicious_event(
             filter_id=sr.filter_id,
             detected_at=sr.timestamp or detected_at,
             ip=sr.ip,
-            url=sr.url,
+            url=Redactor.redact_text(sr.url),
             method=sr.method,
             api_collection_id=sr.api_collection_id,
-            payload=sr.payload,
+            payload=_redact_payload(sr.payload),
             event_type="EVENT_TYPE_SINGLE",
             status=sr.status or "OPEN",
             successful_exploit=sr.successful_exploit,
-            event_metadata=sr.metadata.model_dump() if sr.metadata else None,
+            event_metadata=Redactor.redact_json(sr.metadata.model_dump()) if sr.metadata else None,
         )
         db.add(sr_rec)
 
@@ -226,7 +243,7 @@ async def record_malicious_event(
 @router.post("/events", response_model=ListMaliciousRequestsResponse)
 async def list_malicious_events(
     req: ListMaliciousRequestsRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """List malicious events with rich filtering (proto: ListMaliciousRequestsRequest)."""
@@ -250,7 +267,7 @@ async def list_malicious_events(
 @router.post("/events/filters", response_model=FetchAlertFiltersResponse)
 async def fetch_alert_filters(
     req: FetchAlertFiltersRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Return distinct filter values for the events UI (proto: FetchAlertFiltersRequest)."""
@@ -270,7 +287,7 @@ async def fetch_alert_filters(
 
     return FetchAlertFiltersResponse(
         actors=[r[0] for r in actors.all() if r[0]],
-        urls=[r[0] for r in urls.all() if r[0]],
+        urls=[Redactor.redact_text(r[0]) for r in urls.all() if r[0]],
         sub_category=[r[0] for r in subcats.all() if r[0]],
         hosts=[r[0] for r in hosts.all() if r[0]],
     )
@@ -279,7 +296,7 @@ async def fetch_alert_filters(
 @router.post("/events/fetch", response_model=FetchMaliciousEventsResponse)
 async def fetch_malicious_event_payloads(
     req: FetchMaliciousEventsRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch malicious request payloads for a specific actor+filter (proto: FetchMaliciousEventsRequest)."""
@@ -295,9 +312,9 @@ async def fetch_malicious_event_payloads(
     return FetchMaliciousEventsResponse(
         malicious_payloads_response=[
             MaliciousPayloadsResponse(
-                orig=r.payload or "",
+                orig=_redact_payload(r.payload),
                 ts=r.detected_at,
-                metadata=json.dumps(r.event_metadata) if r.event_metadata else "",
+                metadata=_redact_metadata(r.event_metadata),
             )
             for r in records
         ]
@@ -307,7 +324,7 @@ async def fetch_malicious_event_payloads(
 @router.post("/events/status", response_model=UpdateMaliciousEventStatusResponse)
 async def update_event_status(
     req: UpdateMaliciousEventStatusRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     """Update status / Jira ticket for events (proto: UpdateMaliciousEventStatusRequest)."""
@@ -320,7 +337,7 @@ async def update_event_status(
     if req.status:
         updates["status"] = req.status
     if req.jira_ticket_url:
-        updates["jira_ticket_url"] = req.jira_ticket_url
+        updates["jira_ticket_url"] = Redactor.redact_text(req.jira_ticket_url)
 
     if not updates:
         return UpdateMaliciousEventStatusResponse(success=True, message="Nothing to update", updated_count=0)
@@ -351,7 +368,7 @@ async def update_event_status(
 @router.post("/events/delete", response_model=DeleteMaliciousEventsResponse)
 async def delete_malicious_events(
     req: DeleteMaliciousEventsRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete malicious events by ID or filter (proto: DeleteMaliciousEventsRequest)."""
@@ -382,7 +399,7 @@ async def delete_malicious_events(
 @router.post("/actors", response_model=ListThreatActorResponse)
 async def list_threat_actors_proto(
     req: ListThreatActorsRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """List threat actors with rich filtering (proto: ListThreatActorsRequest)."""
@@ -432,7 +449,7 @@ async def list_threat_actors_proto(
         ThreatActorEntry(
             id=row.actor or "",
             latest_api_ip=row.ip or "",
-            latest_api_endpoint=row.url or "",
+            latest_api_endpoint=Redactor.redact_text(row.url or ""),
             latest_api_method=row.method or "",
             discovered_at=row.discovered_at or 0,
             country=row.country_code or "",
@@ -447,7 +464,7 @@ async def list_threat_actors_proto(
 @router.post("/actors/status", response_model=ModifyThreatActorStatusResponse)
 async def modify_actor_status(
     req: ModifyThreatActorStatusRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a single actor's status (proto: ModifyThreatActorStatusRequest)."""
@@ -469,7 +486,7 @@ async def modify_actor_status(
 @router.post("/actors/bulk-status", response_model=BulkModifyThreatActorStatusResponse)
 async def bulk_modify_actor_status(
     req: BulkModifyThreatActorStatusRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     """Bulk-update actor statuses (proto: BulkModifyThreatActorStatusRequest)."""
@@ -489,7 +506,7 @@ async def bulk_modify_actor_status(
 @router.post("/actors/filter", response_model=ThreatActorFilterResponse)
 async def get_actor_filter_options(
     req: ThreatActorFilterRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Return distinct filter values for the actors UI (proto: ThreatActorFilterRequest)."""
@@ -521,7 +538,7 @@ async def get_actor_filter_options(
 @router.post("/actors/threats", response_model=FetchThreatsForActorResponse)
 async def fetch_threats_for_actor(
     req: FetchThreatsForActorRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch all threat activities for a specific actor (proto: FetchThreatsForActorRequest)."""
@@ -538,13 +555,13 @@ async def fetch_threats_for_actor(
     return FetchThreatsForActorResponse(
         activities=[
             ThreatActorActivityData(
-                url=r.url or "",
+                url=Redactor.redact_text(r.url or ""),
                 sub_category=r.sub_category or "",
                 detected_at=r.detected_at,
                 severity=r.severity or "",
                 method=r.method or "",
                 host=r.host or "",
-                metadata=json.dumps(r.event_metadata) if r.event_metadata else "",
+                metadata=_redact_metadata(r.event_metadata),
             )
             for r in records
         ]
@@ -554,7 +571,7 @@ async def fetch_threats_for_actor(
 @router.post("/actors/counts", response_model=ActorCountsFromActorInfoResponse)
 async def actor_counts(
     req: ActorCountsFromActorInfoRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Critical vs active actor counts (proto: ActorCountsFromActorInfoRequest)."""
@@ -583,7 +600,7 @@ async def actor_counts(
 @router.post("/apis", response_model=ListThreatApiResponse)
 async def list_threat_apis(
     req: ListThreatApiRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """List APIs that have been attacked (proto: ListThreatApiRequest)."""
@@ -620,7 +637,7 @@ async def list_threat_apis(
     return ListThreatApiResponse(
         apis=[
             ThreatApiEntry(
-                endpoint=row.url or "",
+                endpoint=Redactor.redact_text(row.url or ""),
                 method=row.method or "",
                 discovered_at=row.discovered_at or 0,
                 actors_count=row.actors_count,
@@ -640,7 +657,7 @@ async def list_threat_apis(
 @router.post("/analytics/country", response_model=ThreatActorByCountryResponse)
 async def actors_by_country(
     req: ThreatActorByCountryRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Threat actor count by country (proto: ThreatActorByCountryRequest)."""
@@ -663,7 +680,7 @@ async def actors_by_country(
 @router.post("/analytics/category", response_model=ThreatCategoryWiseCountResponse)
 async def category_wise_count(
     req: ThreatCategoryWiseCountRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Threat count by category+subcategory (proto: ThreatCategoryWiseCountRequest)."""
@@ -693,7 +710,7 @@ async def category_wise_count(
 @router.post("/analytics/severity", response_model=ThreatSeverityWiseCountResponse)
 async def severity_wise_count(
     req: ThreatSeverityWiseCountRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Threat count by severity (proto: ThreatSeverityWiseCountRequest)."""
@@ -716,7 +733,7 @@ async def severity_wise_count(
 @router.post("/analytics/daily", response_model=DailyActorsCountResponse)
 async def daily_actors_count(
     req: DailyActorsCountRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Daily actor activity summary (proto: DailyActorsCountRequest)."""
@@ -754,7 +771,7 @@ async def daily_actors_count(
 @router.post("/analytics/timeline", response_model=ThreatActivityTimelineResponse)
 async def activity_timeline(
     req: ThreatActivityTimelineRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Sub-category activity timeline (proto: ThreatActivityTimelineRequest)."""
@@ -794,7 +811,7 @@ async def activity_timeline(
 @router.post("/analytics/top-n", response_model=FetchTopNDataResponse)
 async def fetch_top_n(
     req: FetchTopNDataRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Top-N attacked APIs and hosts (proto: FetchTopNDataRequest)."""
@@ -828,7 +845,7 @@ async def fetch_top_n(
 
     return FetchTopNDataResponse(
         top_apis=[
-            TopApiData(endpoint=r.url or "", method=r.method or "", attacks=r.attacks, severity=r.severity or "")
+            TopApiData(endpoint=Redactor.redact_text(r.url or ""), method=r.method or "", attacks=r.attacks, severity=r.severity or "")
             for r in api_rows.all()
         ],
         top_hosts=[TopHostData(host=r.host or "", attacks=r.attacks) for r in host_rows.all()],
@@ -842,7 +859,7 @@ async def fetch_top_n(
 @router.post("/config", response_model=ThreatConfiguration)
 async def get_threat_config(
     req: GetThreatConfigurationRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Retrieve threat configuration (proto: GetThreatConfigurationRequest)."""
@@ -852,9 +869,9 @@ async def get_threat_config(
     if not cfg:
         return ThreatConfiguration()
     return ThreatConfiguration(
-        actor=cfg.actor_config,
-        ratelimit_config=cfg.ratelimit_config,
-        param_enumeration_config=cfg.param_enumeration_config,
+        actor=_redact_config(cfg.actor_config),
+        ratelimit_config=_redact_config(cfg.ratelimit_config),
+        param_enumeration_config=_redact_config(cfg.param_enumeration_config),
         archival_days=cfg.archival_days,
         archival_enabled=cfg.archival_enabled,
     )
@@ -863,7 +880,7 @@ async def get_threat_config(
 @router.put("/config")
 async def save_threat_config(
     config: ThreatConfiguration,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     """Save full threat configuration."""
@@ -885,7 +902,7 @@ async def save_threat_config(
 @router.post("/config/archival", response_model=ToggleArchivalEnabledResponse)
 async def toggle_archival(
     req: ToggleArchivalEnabledRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     """Toggle archival setting (proto: ToggleArchivalEnabledRequest)."""
@@ -908,7 +925,7 @@ async def toggle_archival(
 @router.post("/sessions/bulk-update", response_model=BulkUpdateAgenticSessionContextResponse)
 async def bulk_update_sessions(
     req: BulkUpdateAgenticSessionContextRequest,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.AGENT_GUARD_INSPECT)),
     db: AsyncSession = Depends(get_db),
 ):
     """Upsert agentic session documents (proto: BulkUpdateAgenticSessionContextRequest)."""
@@ -928,10 +945,10 @@ async def bulk_update_sessions(
                 session_identifier=doc.session_identifier,
             )
             db.add(session)
-        session.session_summary = doc.session_summary
-        session.conversation_info = [c.model_dump() for c in doc.conversation_info]
+        session.session_summary = Redactor.redact_text(doc.session_summary)
+        session.conversation_info = Redactor.redact_json([c.model_dump() for c in doc.conversation_info])
         session.is_malicious = doc.is_malicious
-        session.blocked_reason = doc.blocked_reason
+        session.blocked_reason = Redactor.redact_text(doc.blocked_reason)
         session.created_at_ts = doc.created_at
         session.updated_at_ts = doc.updated_at
         updated += 1
@@ -943,7 +960,7 @@ async def bulk_update_sessions(
 async def list_sessions(
     malicious_only: bool = False,
     limit: int = 50,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.AGENT_GUARD_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """List agentic sessions."""
@@ -959,9 +976,9 @@ async def list_sessions(
             {
                 "id": s.id,
                 "session_identifier": s.session_identifier,
-                "session_summary": s.session_summary,
+                "session_summary": Redactor.redact_text(s.session_summary or ""),
                 "is_malicious": s.is_malicious,
-                "blocked_reason": s.blocked_reason,
+                "blocked_reason": Redactor.redact_text(s.blocked_reason or ""),
                 "conversation_count": len(s.conversation_info or []),
                 "created_at": str(s.created_at),
             }
@@ -977,7 +994,7 @@ async def list_sessions(
 @router.post("/http-traffic")
 async def ingest_http_traffic(
     body: dict = Body(...),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -1017,7 +1034,7 @@ async def ingest_http_traffic(
             job_id=job_id,
             account_id=account_id,
             job_type="http_traffic",
-            payload=body,
+            payload=Redactor.redact_json(body),
         )
     )
     if not queued:

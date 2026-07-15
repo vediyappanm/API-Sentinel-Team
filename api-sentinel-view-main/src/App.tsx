@@ -37,6 +37,7 @@ const Vulnerabilities = lazy(() => import("./customer/pages/testing/Vulnerabilit
 const TestDashboard = lazy(() => import("./customer/pages/testing/TestDashboard"));
 const TestConfiguration = lazy(() => import("./customer/pages/testing/TestConfiguration"));
 const TestInspector = lazy(() => import("./customer/pages/testing/TestInspector"));
+const ReleaseGovernance = lazy(() => import("./customer/pages/testing/ReleaseGovernance"));
 const ProtectionLayout = lazy(() => import("./customer/pages/protection/ProtectionLayout"));
 const SecurityEvents = lazy(() => import("./customer/pages/protection/SecurityEvents"));
 const ThreatActors = lazy(() => import("./customer/pages/protection/ThreatActors"));
@@ -70,9 +71,11 @@ const queryClient = new QueryClient({
       retry: 1,
       refetchOnWindowFocus: true,
       refetchOnReconnect: true,
-      refetchInterval: 5_000,
-      refetchIntervalInBackground: true,
-      staleTime: 5_000,
+      // Per-route hooks set refetchInterval where live data is needed; avoid global polling.
+      refetchInterval: false,
+      refetchIntervalInBackground: false,
+      staleTime: 30_000,
+      gcTime: 5 * 60_000,
     },
   },
 });
@@ -113,6 +116,7 @@ const App = () => (
                       <Route path="dashboard" element={<TestDashboard />} />
                       <Route path="configuration" element={<TestConfiguration />} />
                       <Route path="inspector" element={<TestInspector />} />
+                      <Route path="governance" element={<ReleaseGovernance />} />
                     </Route>
 
                     <Route path="/app/protection" element={<ProtectionLayout />}>

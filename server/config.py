@@ -3,13 +3,14 @@ Configuration — reads from environment variables or .env file.
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator, model_validator
+from cryptography.fernet import Fernet
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(BASE_DIR / ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
@@ -24,6 +25,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60 * 24 * 7 # 1 week
     ENCRYPTION_KEY: str = "" # Set via .env for production
+    SENSOR_KEY_HASH_PEPPER: str = "" # HMAC pepper for sensor API keys; required in production
     STARTUP_BOOTSTRAP_SCHEMA: bool = False
     STARTUP_ENABLE_DEMO_BOOTSTRAP: bool = False
     STARTUP_DEMO_ACCOUNT_ID: int = 1000000
@@ -111,6 +113,7 @@ class Settings(BaseSettings):
     TEST_REQUEST_TIMEOUT: int = 15   # seconds
     PENTEST_DEFAULT_PROFILE_NAME: str = "Production Safe"
     PENTEST_DEFAULT_MODE: str = "SAFE"
+    PENTEST_REQUIRE_AUTH_PROFILE_FOR_ACTIVE_SCANS: bool = True
     PENTEST_SAFE_MAX_CONCURRENCY: int = 5
     PENTEST_BALANCED_MAX_CONCURRENCY: int = 10
     PENTEST_AGGRESSIVE_MAX_CONCURRENCY: int = 20
@@ -118,6 +121,37 @@ class Settings(BaseSettings):
     PENTEST_ALLOW_STATE_CHANGE_DEFAULT: bool = False
     PENTEST_ENABLE_SCHEMATHESIS: bool = True
     PENTEST_ENABLE_NUCLEI_SECRET_FILES: bool = True
+    PENTEST_ENFORCE_TARGET_GUARD: bool = True
+    PENTEST_TARGET_ALLOWLIST: str = ""  # comma-separated hosts, host:port, URLs, or *.example.com
+    PENTEST_ALLOW_PRIVATE_TARGETS: bool = False
+    PENTEST_RESOLVE_TARGET_HOSTS: bool = False
+    PENTEST_FAIL_CLOSED_ON_TARGET_DNS_ERROR: bool = True
+    PENTEST_MAX_TESTS_PER_RUN: int = 5000
+    PENTEST_MAX_ACTIVE_REQUESTS_PER_TEST: int = 50
+    PENTEST_RESPONSE_BACKOFF_ENABLED: bool = True
+    PENTEST_DEFAULT_RESPONSE_BACKOFF_SECONDS: float = 1.0
+    PENTEST_MAX_RESPONSE_BACKOFF_SECONDS: float = 5.0
+    PENTEST_SCHEMATHESIS_TIMEOUT_SECONDS: int = 300
+    PENTEST_SCHEMATHESIS_REPORT_MAX_BYTES: int = 2 * 1024 * 1024
+    PENTEST_ZAP_TIMEOUT_SECONDS: int = 900
+    PENTEST_ZAP_REPORT_MAX_BYTES: int = 5 * 1024 * 1024
+    PENTEST_SCAN_WORK_DIR: str = str(BASE_DIR / "data" / "pentest-runs")
+    PENTEST_SCAN_EXECUTION_MODE: str = "background"  # background | queued
+    PENTEST_SCAN_WORKER_ISOLATION_MODE: str = "background"  # background | kubernetes_job
+    PENTEST_SCAN_WORKER_KUBERNETES_NAMESPACE: str = "api-sentinel"
+    PENTEST_SCAN_WORKER_KUBERNETES_SERVICE_ACCOUNT: str = "api-sentinel-scan-worker"
+    PENTEST_SCAN_WORKER_IMAGE: str = "api-sentinel-scan-worker:latest"
+    PENTEST_SCAN_WORKER_JOB_TTL_SECONDS: int = 3600
+    PENTEST_SCAN_WORKER_RESOURCE_CPU: str = "1000m"
+    PENTEST_SCAN_WORKER_RESOURCE_MEMORY: str = "1Gi"
+    PENTEST_SCAN_WORKER_RESOURCE_EPHEMERAL_STORAGE: str = "2Gi"
+    PENTEST_SCAN_DISPATCH_LEASE_SECONDS: int = 900
+    PENTEST_SCAN_MAX_CLAIMS: int = 3
+    PENTEST_KILL_SWITCH_ENABLED: bool = False
+    INTEGRATIONS_ENFORCE_DESTINATION_GUARD: bool = True
+    INTEGRATIONS_ALLOW_PRIVATE_DESTINATIONS: bool = False
+    INTEGRATIONS_RESOLVE_DESTINATION_HOSTS: bool = False
+    INTEGRATIONS_FAIL_CLOSED_ON_DESTINATION_DNS_ERROR: bool = True
 
     # -- Ingestion / Backpressure --------------------------------------------------------------
     INGESTION_QUEUE_MAX_SIZE: int = 5000
@@ -203,8 +237,12 @@ class Settings(BaseSettings):
     TENANT_RLS_ENABLED: bool = False
     TENANT_RLS_SETTING_NAME: str = "app.current_account_id"
 
-    # ── GitLab ───────────────────────────────────────────────────────────
+    # ── CI/CD Webhooks ───────────────────────────────────────────────────
+    GITHUB_WEBHOOK_SECRET: str = ""
     GITLAB_WEBHOOK_SECRET: str = ""
+    CICD_GATE_SIGNING_SECRET: str = ""
+    CICD_GATE_RATE_LIMIT_RPM: int = 6000
+    VULNERABILITY_SLA_POLICY: str = ""
 
     # ── Splunk ───────────────────────────────────────────────────────────
     SPLUNK_HEC_URL: str = ""
@@ -228,9 +266,18 @@ class Settings(BaseSettings):
     BIGQUERY_PROJECT_ID: str = ""
     BIGQUERY_DATASET_ID: str = ""
 
+    # ── Source Code Scanning ─────────────────────────────────────────────
+    SOURCE_CODE_ENFORCE_REPO_GUARD: bool = True
+    SOURCE_CODE_ALLOW_PRIVATE_REPOS: bool = False
+    SOURCE_CODE_RESOLVE_REPO_HOSTS: bool = False
+    SOURCE_CODE_FAIL_CLOSED_ON_REPO_DNS_ERROR: bool = True
+    SOURCE_CODE_ALLOW_LOCAL_PATHS: bool = False
+    SOURCE_CODE_LOCAL_SCAN_ROOT: str = str(BASE_DIR / "source-repos")
+
     # ── Nuclei ───────────────────────────────────────────────────────────
     NUCLEI_TIMEOUT: int = 120
     NUCLEI_RATE_LIMIT: int = 150
+    PENTEST_ALLOW_NUCLEI_SIMULATION: bool = False
 
     # ── Billing / Stripe ─────────────────────────────────────────────────
     STRIPE_SECRET_KEY: str = ""
@@ -253,6 +300,17 @@ class Settings(BaseSettings):
                 return False
             if normalized in {"dev", "debug", "development"}:
                 return True
+        return value
+
+    @field_validator("ENCRYPTION_KEY")
+    @classmethod
+    def _validate_encryption_key_format(cls, value):
+        if not value:
+            return value
+        try:
+            Fernet(value.encode())
+        except Exception as exc:
+            raise ValueError("ENCRYPTION_KEY must be a valid Fernet key generated by Fernet.generate_key()") from exc
         return value
 
     @model_validator(mode="after")
@@ -280,6 +338,29 @@ class Settings(BaseSettings):
                 raise ValueError("API_KEY must be changed from the default when DEBUG=False")
             if not self.ENCRYPTION_KEY:
                 raise ValueError("ENCRYPTION_KEY must be set in production for PAT rotation and data encryption")
+            if not self.SENSOR_KEY_HASH_PEPPER:
+                raise ValueError("SENSOR_KEY_HASH_PEPPER must be set in production for sensor key hashing")
+            if not self.CICD_GATE_SIGNING_SECRET:
+                raise ValueError("CICD_GATE_SIGNING_SECRET must be set in production for signed CI/CD gate decisions")
+            if not self.PENTEST_REQUIRE_AUTH_PROFILE_FOR_ACTIVE_SCANS:
+                raise ValueError("PENTEST_REQUIRE_AUTH_PROFILE_FOR_ACTIVE_SCANS must remain enabled when DEBUG=False")
+            if not self.PENTEST_ENFORCE_TARGET_GUARD:
+                raise ValueError("PENTEST_ENFORCE_TARGET_GUARD must remain enabled when DEBUG=False")
+            if self.PENTEST_ALLOW_PRIVATE_TARGETS:
+                raise ValueError("PENTEST_ALLOW_PRIVATE_TARGETS must remain disabled when DEBUG=False")
+            if not self.PENTEST_RESOLVE_TARGET_HOSTS:
+                raise ValueError("PENTEST_RESOLVE_TARGET_HOSTS must be enabled when DEBUG=False for SSRF/DNS-rebinding protection")
+            if not self.PENTEST_FAIL_CLOSED_ON_TARGET_DNS_ERROR:
+                raise ValueError("PENTEST_FAIL_CLOSED_ON_TARGET_DNS_ERROR must remain enabled when DEBUG=False")
+            target_allowlist = [
+                item.strip()
+                for item in (self.PENTEST_TARGET_ALLOWLIST or "").split(",")
+                if item.strip()
+            ]
+            if not target_allowlist:
+                raise ValueError("PENTEST_TARGET_ALLOWLIST must list owned API hosts when DEBUG=False")
+            if any(item == "*" or item.endswith("://*") for item in target_allowlist):
+                raise ValueError("PENTEST_TARGET_ALLOWLIST must not use a wildcard '*' when DEBUG=False")
 
             # CORS validation
             cors_origins = self.CORS_ORIGINS

@@ -18,13 +18,59 @@ export interface AktoApiInfo {
   discoveredAt?: number;
   riskScore?: number;
   apiAccessTypes?: string[];
+  deprecated?: boolean;
 }
 
 const DEFAULT_COLLECTION_ID: ApiCollectionId = 'default-inventory';
 
+interface RawCollection {
+  id: ApiCollectionId;
+  name?: string;
+  displayName?: string;
+  host_name?: string;
+  hostName?: string;
+  urls_count?: number;
+  urlsCount?: number;
+  created_at?: string;
+  type?: string;
+}
+
+interface CollectionsResponse {
+  collections?: RawCollection[];
+}
+
+interface RawEndpoint {
+  id?: string;
+  collection_id?: ApiCollectionId;
+  api_collection_id?: ApiCollectionId;
+  path?: string;
+  url?: string;
+  method?: string;
+  auth_types?: string[];
+  last_seen?: string;
+  created_at?: string;
+  risk_score?: number;
+  access_types?: string[];
+  deprecated?: boolean;
+}
+
+interface RawPiiFinding {
+  api_collection_id?: ApiCollectionId;
+  collection_id?: ApiCollectionId;
+  url?: string;
+  method?: string;
+  entity_type?: string;
+  matched_text?: string;
+  sample_value?: string;
+}
+
+export interface SeverityCountResponse {
+  severityCount?: Record<string, number>;
+}
+
 export async function fetchApiCollections(signal?: AbortSignal) {
-  const raw = await get<any>('/collections/', signal);
-  const data: any[] = Array.isArray(raw) ? raw : (raw?.collections ?? []);
+  const raw = await get<CollectionsResponse | RawCollection[]>('/collections/', signal);
+  const data = Array.isArray(raw) ? raw : (raw.collections ?? []);
 
   if (!data.length) {
     return {
@@ -43,7 +89,7 @@ export async function fetchApiCollections(signal?: AbortSignal) {
 
   const apiCollections: AktoApiCollection[] = data.map((collection) => ({
     id: collection.id,
-    displayName: collection.name,
+    displayName: collection.name ?? collection.displayName ?? String(collection.id),
     hostName: collection.host_name ?? collection.hostName ?? 'internal',
     urlsCount: collection.urls_count ?? collection.urlsCount ?? 0,
     startTs: collection.created_at ? new Date(collection.created_at).getTime() : Date.now(),
@@ -62,13 +108,13 @@ export async function fetchApiInfosForCollection(
   filters?: Record<string, unknown>,
   signal?: AbortSignal,
 ) {
-  const data = await get<{ total: number; endpoints: any[] }>('/endpoints/', signal);
+  const data = await get<{ total: number; endpoints: RawEndpoint[] }>('/endpoints/', signal);
 
   const apiInfoList: AktoApiInfo[] = (data.endpoints || []).map((endpoint) => ({
     id: {
       apiCollectionId: endpoint.collection_id ?? endpoint.api_collection_id ?? apiCollectionId,
-      url: endpoint.path,
-      method: endpoint.method,
+      url: endpoint.path ?? endpoint.url ?? '/',
+      method: endpoint.method ?? 'GET',
     },
     allAuthTypesFound: endpoint.auth_types ?? [],
     lastSeen: endpoint.last_seen ? new Date(endpoint.last_seen).getTime() : Date.now(),
@@ -79,6 +125,7 @@ export async function fetchApiInfosForCollection(
         : Date.now(),
     riskScore: endpoint.risk_score ?? 0,
     apiAccessTypes: endpoint.access_types ?? [],
+    deprecated: endpoint.deprecated ?? false,
   }));
 
   return {
@@ -93,7 +140,7 @@ export async function fetchEndpointsCount(signal?: AbortSignal) {
 }
 
 export async function fetchSeverityCounts(apiCollectionIds: ApiCollectionId[], signal?: AbortSignal) {
-  return { severitiesCountResponse: [] };
+  return { severitiesCountResponse: [] as SeverityCountResponse[] };
 }
 
 export async function fetchRecentEndpoints(startTs: number, endTs: number, signal?: AbortSignal) {
@@ -146,7 +193,7 @@ export async function fetchSensitiveParameters(
   limit: number = 50,
   signal?: AbortSignal,
 ) {
-  const data = await get<{ findings: any[] }>('/pii/', signal);
+  const data = await get<{ findings: RawPiiFinding[] }>('/pii/', signal);
 
   const endpoints: AktoSensitiveParam[] = (data.findings || []).map((finding) => ({
     apiCollectionId: finding.api_collection_id ?? finding.collection_id ?? DEFAULT_COLLECTION_ID,

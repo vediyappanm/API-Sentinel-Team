@@ -1,7 +1,10 @@
 from server.modules.persistence.database import AsyncSessionLocal
 from server.api.websocket.manager import ws_manager
 from server.api.websocket.event_types import WSEventType
+from server.modules.test_executor.evidence import build_active_scan_evidence
+from server.modules.vulnerability_detector.lifecycle import vulnerability_confidence_from_evidence
 from server.modules.vulnerability_detector.store import create_or_merge_vulnerability
+
 
 class ResultAggregator:
     """
@@ -25,6 +28,7 @@ class ResultAggregator:
             return
 
         account_id = self._account_id_for(endpoint, test_result)
+        evidence = build_active_scan_evidence(test_result, endpoint)
 
         if self.db is not None:
             db = self.db
@@ -39,10 +43,9 @@ class ResultAggregator:
                     "severity": test_result.get("severity", "MEDIUM"),
                     "type": test_result.get("type") or test_result["template_id"],
                     "status": "OPEN",
-                    "evidence": {
-                        "results": test_result["results"],
-                        "context": test_result.get("context_variables", []),
-                    },
+                    "confidence": vulnerability_confidence_from_evidence(evidence),
+                    "remediation": evidence.get("remediation"),
+                    "evidence": evidence,
                 },
             )
         else:
@@ -58,10 +61,9 @@ class ResultAggregator:
                         "severity": test_result.get("severity", "MEDIUM"),
                         "type": test_result.get("type") or test_result["template_id"],
                         "status": "OPEN",
-                        "evidence": {
-                            "results": test_result["results"],
-                            "context": test_result.get("context_variables", []),
-                        },
+                        "confidence": vulnerability_confidence_from_evidence(evidence),
+                        "remediation": evidence.get("remediation"),
+                        "evidence": evidence,
                     },
                 )
                 await db.commit()

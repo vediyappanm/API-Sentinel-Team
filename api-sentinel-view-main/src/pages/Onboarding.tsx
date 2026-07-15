@@ -1,17 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ArrowRight,
   CheckCircle2,
   ChevronRight,
-  Copy,
-  Globe,
-  KeyRound,
   Layers3,
   Network,
-  Rocket,
   ServerCog,
   ShieldCheck,
-  Sparkles,
   Workflow,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -67,23 +62,13 @@ function stepNumber(stepId: OnboardingStepId) {
   return ONBOARDING_STEPS.findIndex((step) => step.id === stepId) + 1;
 }
 
-function generatedCommands(state: ReturnType<typeof useOnboarding>['data']) {
-  const controllerHost = state.deploymentModel === 'self-hosted'
-    ? 'https://controller.internal'
-    : 'https://control.appsentinel.local';
-  const installPrefix = state.runtimeProfile === 'kubernetes'
-    ? 'helm upgrade --install api-sentinel-controller appsentinel/controller'
-    : 'docker compose up -d controller collector';
-  const trafficTarget = state.trafficSource === 'manual'
-    ? 'Upload a Postman collection or HAR file to bootstrap discovery.'
-    : `export APPSENTINEL_TRAFFIC_SOURCE=${state.trafficSource}`;
-  const protectionMode = state.inlineProtection ? 'inline' : 'out_of_band';
-
-  return {
-    install: `${installPrefix} \\\n  --set deployment.mode=${state.deploymentModel} \\\n  --set runtime.profile=${state.runtimeProfile} \\\n  --set controller.url=${controllerHost}`,
-    telemetry: `export APPSENTINEL_CONTROLLER_URL=${controllerHost}\nexport APPSENTINEL_SENSOR_KEY=<sensor-key>\nexport APPSENTINEL_PROTECTION_MODE=${protectionMode}\n${trafficTarget}`,
-  };
-}
+const STEP_DESCRIPTIONS: Record<OnboardingStepId, string> = {
+  deployment: 'Choose the deployment model and runtime target for this organization.',
+  traffic: 'Select the primary source for API traffic and discovery data.',
+  application: 'Register the application surface that should be monitored.',
+  identity: 'Map the identity and tenant attributes used by your APIs.',
+  validation: 'Confirm the required checks before finishing setup.',
+};
 
 type OnboardingSnapshot = ReturnType<typeof useOnboarding>['data'];
 
@@ -101,14 +86,12 @@ const Onboarding: React.FC = () => {
   const [creatingApp, setCreatingApp] = useState(false);
   const [hasPrefilledFromSettings, setHasPrefilledFromSettings] = useState(false);
 
-  const commands = generatedCommands(data);
   const applicationCount = collections.data?.apiCollections?.length ?? 0;
   const endpointsSeen = endpointCount.data?.endpointsCount ?? 0;
   const connectedModules = (modules.data?.moduleInfos ?? []).filter((module) => module.isConnected).length;
   const owners = team.data?.users ?? [];
-  const planTier = accountSettings.data?.accountSettings.license?.planTier ?? 'FREE';
 
-  const persistSettings = async (override: Partial<OnboardingSnapshot> = {}) => {
+  const persistSettings = useCallback(async (override: Partial<OnboardingSnapshot> = {}) => {
     const snapshot: OnboardingSnapshot = {
       ...data,
       ...override,
@@ -152,13 +135,13 @@ const Onboarding: React.FC = () => {
         validation: snapshot.validation,
       },
     });
-  };
+  }, [data, updateAccountSettings]);
 
-  const persistValidationState = (nextValidation: typeof data.validation) => {
+  const persistValidationState = useCallback((nextValidation: OnboardingSnapshot['validation']) => {
     void persistSettings({ validation: nextValidation }).catch(() => {
       console.warn('Failed to persist validation state');
     });
-  };
+  }, [persistSettings]);
 
   const handleValidationToggle = (key: keyof typeof data.validation) => {
     const nextValidation = { ...data.validation, [key]: !data.validation[key] };
@@ -233,26 +216,32 @@ const Onboarding: React.FC = () => {
       completedSteps: (settings.onboarding?.completedSteps as OnboardingStepId[]) ?? data.completedSteps,
     });
     setHasPrefilledFromSettings(true);
-  }, [accountSettings.data, data.applicationName, data.collectionId, data.completed, data.completedSteps, data.deploymentModel, data.features, data.inlineProtection, data.runtimeProfile, data.trafficSource, onboarding, hasPrefilledFromSettings]);
+  }, [
+    accountSettings.data,
+    data.applicationName,
+    data.assignedUsers,
+    data.authHeader,
+    data.businessUnit,
+    data.collectionId,
+    data.completed,
+    data.completedSteps,
+    data.currentStep,
+    data.deploymentModel,
+    data.environment,
+    data.features,
+    data.inlineProtection,
+    data.runtimeProfile,
+    data.sessionKey,
+    data.tenantKey,
+    data.trafficSource,
+    data.userIdKey,
+    data.userRoleKey,
+    onboarding,
+    hasPrefilledFromSettings,
+  ]);
 
   const activeStep = data.currentStep;
   const currentStepIcon = STEP_ICONS[activeStep];
-
-    const copy = async (text: string, label: string) => {
-      try {
-        await navigator.clipboard.writeText(text);
-        toast({
-          title: `${label} copied`,
-          description: 'Paste it into your deployment runbook or CI secrets manager.',
-        });
-      } catch {
-        toast({
-          title: 'Copy failed',
-          description: 'Clipboard access was denied by the browser.',
-          variant: 'destructive',
-        });
-      }
-    };
 
   const completeAndAdvance = () => {
     const completedSteps = Array.from(new Set([...data.completedSteps, activeStep])) as OnboardingStepId[];
@@ -367,389 +356,256 @@ const Onboarding: React.FC = () => {
   ] as const;
 
   return (
-    <div className="space-y-5 pb-10 animate-fade-in">
-      <div
-        className="rounded-2xl border border-border-default p-6 md:p-8 overflow-hidden relative"
-        style={{
-          background:
-            'radial-gradient(circle at top left, rgba(99,44,175,0.16), transparent 32%), radial-gradient(circle at bottom right, rgba(59,130,246,0.14), transparent 34%), linear-gradient(135deg, #ffffff, #f6f4fb)',
-        }}
-      >
-        <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl">
-            <div className="inline-flex items-center gap-2 rounded-full border border-brand/20 bg-brand/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-brand">
-              <Rocket size={12} />
-              AppSentinels-inspired onboarding
-            </div>
-            <h1 className="mt-4 text-3xl font-extrabold tracking-tight text-text-primary md:text-4xl">
-              Stand up the organization like a production API security program.
-            </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
-              This flow is modeled on the public AppSentinels setup pattern: deploy the control plane, connect traffic,
-              map applications to domains and owners, enrich identity signals, then verify discovery and protection before go-live.
+    <div className="mx-auto max-w-6xl space-y-4 pb-8 animate-fade-in">
+      <GlassCard variant="elevated" className="p-5 md:p-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-text-muted">Setup</div>
+            <h1 className="mt-1 text-2xl font-bold text-text-primary md:text-3xl">Organization onboarding</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-text-secondary">
+              Configure the minimum required settings to start monitoring APIs.
             </p>
           </div>
 
-          <GlassCard variant="elevated" className="min-w-[280px] p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">Setup Progress</div>
-                <div className="mt-1 text-2xl font-extrabold text-text-primary">{progress}%</div>
-              </div>
-              <div className="text-right">
-                <div className="text-[11px] font-semibold text-text-primary">{nextStep ? `Next: ${ONBOARDING_STEPS.find((step) => step.id === nextStep)?.label}` : 'Ready to operate'}</div>
-                <div className="text-[11px] text-text-muted">{data.completed ? 'All onboarding stages are complete.' : 'Persisted locally so the team can resume.'}</div>
-              </div>
+          <div className="w-full md:w-72">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-text-primary">{progress}% complete</span>
+              <span className="text-text-muted">
+                {nextStep ? `Next: ${ONBOARDING_STEPS.find((step) => step.id === nextStep)?.label}` : 'Complete'}
+              </span>
             </div>
-            <div className="mt-4 h-2 rounded-full bg-black/[0.06] overflow-hidden">
-              <div className="h-full rounded-full bg-gradient-to-r from-brand to-blue-500 transition-all duration-500" style={{ width: `${progress}%` }} />
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-bg-base">
+              <div className="h-full rounded-full bg-brand transition-all duration-500" style={{ width: `${progress}%` }} />
             </div>
-          </GlassCard>
+          </div>
         </div>
-      </div>
+      </GlassCard>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
-        <div className="space-y-4">
-          <GlassCard variant="elevated" className="p-3">
-            {ONBOARDING_STEPS.map((step) => {
-              const Icon = STEP_ICONS[step.id];
-              const isActive = step.id === activeStep;
-              const isComplete = data.completedSteps.includes(step.id) || data.completed;
+      <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+        <GlassCard variant="elevated" className="p-2 lg:sticky lg:top-4 lg:self-start">
+          {ONBOARDING_STEPS.map((step) => {
+            const Icon = STEP_ICONS[step.id];
+            const isActive = step.id === activeStep;
+            const isComplete = data.completedSteps.includes(step.id) || data.completed;
 
-              return (
-                <button
-                  key={step.id}
-                  onClick={() => onboarding.setCurrentStep(step.id)}
-                  className={`flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition-all ${isActive ? 'bg-brand/10 ring-1 ring-brand/20' : 'hover:bg-black/[0.03]'}`}
+            return (
+              <button
+                key={step.id}
+                type="button"
+                onClick={() => onboarding.setCurrentStep(step.id)}
+                className={`flex w-full items-center gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${
+                  isActive
+                    ? 'border-brand/25 bg-brand/10'
+                    : 'border-transparent hover:bg-bg-base'
+                }`}
+              >
+                <div
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                    isComplete
+                      ? 'bg-emerald-500/10 text-emerald-600'
+                      : isActive
+                        ? 'bg-brand/15 text-brand'
+                        : 'bg-bg-base text-text-muted'
+                  }`}
                 >
-                  <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${isComplete ? 'bg-emerald-500/10 text-emerald-600' : isActive ? 'bg-brand/15 text-brand' : 'bg-bg-base text-text-muted'}`}>
-                    {isComplete ? <CheckCircle2 size={18} /> : <Icon size={18} />}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-text-primary">{step.label}</span>
-                      <span className="rounded-full border border-border-subtle px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-text-muted">
-                        0{stepNumber(step.id)}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-[11px] leading-5 text-text-secondary">{step.kicker}</p>
-                  </div>
-                </button>
-              );
-            })}
-          </GlassCard>
-
-          <GlassCard variant="default" className="p-4">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">License envelope</div>
-            <div className="mt-2 inline-flex rounded-full border border-border-subtle px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-secondary">
-              {planTier} plan
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              <div>
-                <div className="text-[11px] text-text-muted">Applications</div>
-                <div className="text-lg font-bold text-text-primary">{Math.max(applicationCount, data.applicationName ? 1 : 0)}</div>
-              </div>
-              <div>
-                <div className="text-[11px] text-text-muted">Endpoints</div>
-                <div className="text-lg font-bold text-text-primary">{endpointsSeen}</div>
-              </div>
-              <div>
-                <div className="text-[11px] text-text-muted">Owners</div>
-                <div className="text-lg font-bold text-text-primary">{Math.max(data.assignedUsers.length, owners.length ? 1 : 0)}</div>
-              </div>
-              <div>
-                <div className="text-[11px] text-text-muted">Modules</div>
-                <div className="text-lg font-bold text-text-primary">{connectedModules}</div>
-              </div>
-            </div>
-            <p className="mt-3 text-[11px] leading-5 text-text-muted">
-              AppSentinels emphasizes license and deployment planning during onboarding, so this panel keeps the initial rollout bounded.
-            </p>
-            <button
-              onClick={() => navigate('/admin/settings/license')}
-              className="mt-3 inline-flex items-center gap-2 rounded-lg border border-border-subtle px-3 py-2 text-[11px] font-semibold text-text-secondary transition-colors hover:border-brand/20 hover:text-text-primary"
-            >
-              Open license usage
-              <ChevronRight size={12} />
-            </button>
-          </GlassCard>
-        </div>
-
-        <div className="space-y-4">
-          <GlassCard variant="elevated" className="p-6 md:p-7">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">
-                  {React.createElement(currentStepIcon, { size: 13 })}
-                  Step {stepNumber(activeStep)}
+                  {isComplete ? <CheckCircle2 size={18} /> : <Icon size={18} />}
                 </div>
-                <h2 className="mt-2 text-2xl font-bold text-text-primary">
-                  {ONBOARDING_STEPS.find((step) => step.id === activeStep)?.label}
-                </h2>
-                <p className="mt-2 max-w-3xl text-sm leading-6 text-text-secondary">
-                  {activeStep === 'deployment' && 'Choose how the organization will operate the controller, sensors, and enforcement path. This mirrors the control-plane-first onboarding pattern used by AppSentinels.'}
-                  {activeStep === 'traffic' && 'Decide where traffic will be captured, how the organization will authenticate sensors, and which bootstrap path gets discovery started fastest.'}
-                  {activeStep === 'application' && 'Map each production surface to an application, domain, environment, and owner list so inventory, policies, and reports all resolve to the right team.'}
-                  {activeStep === 'identity' && 'Teach the platform how your APIs express identity and tenancy. This is where behavioral testing and business-logic analysis become much more useful.'}
-                  {activeStep === 'validation' && 'Confirm that the control plane is healthy, traffic is visible, discovery is populated, and protection is staged safely before broader rollout.'}
-                </p>
-              </div>
-              <div className="hidden rounded-2xl border border-border-subtle bg-bg-base px-4 py-3 lg:block">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">Inspired by</div>
-                <div className="mt-1 text-sm font-semibold text-text-primary">AppSentinels docs</div>
-                <div className="text-[11px] text-text-muted">Deployment, Applications, API Keys, Discovery</div>
-              </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-text-primary">{step.label}</div>
+                  <div className="mt-0.5 text-xs text-text-muted">Step {stepNumber(step.id)} of {ONBOARDING_STEPS.length}</div>
+                </div>
+              </button>
+            );
+          })}
+        </GlassCard>
+
+        <GlassCard variant="elevated" className="p-5 md:p-6">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
+              {React.createElement(currentStepIcon, { size: 20 })}
             </div>
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-text-muted">
+                Step {stepNumber(activeStep)}
+              </div>
+              <h2 className="mt-1 text-xl font-bold text-text-primary">
+                {ONBOARDING_STEPS.find((step) => step.id === activeStep)?.label}
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-text-secondary">{STEP_DESCRIPTIONS[activeStep]}</p>
+            </div>
+          </div>
 
             {activeStep === 'deployment' && (
-              <div className="mt-6 space-y-6">
-                <div className="grid gap-3 lg:grid-cols-3">
+              <div className="mt-6 space-y-5">
+                <section>
+                  <h3 className="text-sm font-semibold text-text-primary">Deployment model</h3>
+                  <div className="mt-3 grid gap-3 md:grid-cols-3">
                   {DEPLOYMENT_OPTIONS.map((option) => (
-                    <GlassCard
+                    <button
                       key={option.id}
-                      variant={data.deploymentModel === option.id ? 'accent' : 'default'}
-                      className="p-4"
-                      hoverLift
+                      type="button"
                       onClick={() => onboarding.update({ deploymentModel: option.id })}
+                      className={`rounded-lg border p-4 text-left transition-colors ${
+                        data.deploymentModel === option.id
+                          ? 'border-brand/30 bg-brand/10'
+                          : 'border-border-subtle bg-bg-surface hover:border-brand/20'
+                      }`}
                     >
                       <div className="text-sm font-bold text-text-primary">{option.label}</div>
-                      <p className="mt-1 text-[11px] leading-5 text-text-secondary">{option.description}</p>
-                    </GlassCard>
+                      <p className="mt-1 text-xs leading-5 text-text-secondary">{option.description}</p>
+                    </button>
                   ))}
-                </div>
+                  </div>
+                </section>
 
-                <div className="grid gap-3 lg:grid-cols-3">
-                  {RUNTIME_OPTIONS.map((option) => (
-                    <GlassCard
-                      key={option.id}
-                      variant={data.runtimeProfile === option.id ? 'accent' : 'default'}
-                      className="p-4"
-                      hoverLift
-                      onClick={() => onboarding.update({ runtimeProfile: option.id })}
-                    >
-                      <div className="text-sm font-bold text-text-primary">{option.label}</div>
-                      <p className="mt-1 text-[11px] leading-5 text-text-secondary">{option.description}</p>
-                    </GlassCard>
-                  ))}
-                </div>
+                <section>
+                  <h3 className="text-sm font-semibold text-text-primary">Runtime target</h3>
+                  <div className="mt-3 grid gap-3 md:grid-cols-3">
+                    {RUNTIME_OPTIONS.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => onboarding.update({ runtimeProfile: option.id })}
+                        className={`rounded-lg border p-4 text-left transition-colors ${
+                          data.runtimeProfile === option.id
+                            ? 'border-brand/30 bg-brand/10'
+                            : 'border-border-subtle bg-bg-surface hover:border-brand/20'
+                        }`}
+                      >
+                        <div className="text-sm font-bold text-text-primary">{option.label}</div>
+                        <p className="mt-1 text-xs leading-5 text-text-secondary">{option.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                </section>
 
-                <label className="flex items-center gap-3 rounded-xl border border-border-subtle bg-bg-base px-4 py-3">
+                <label className="flex items-start gap-3 rounded-lg border border-border-subtle bg-bg-base px-4 py-3">
                   <input
                     type="checkbox"
                     checked={data.inlineProtection}
                     onChange={(event) => onboarding.update({ inlineProtection: event.target.checked })}
-                    className="h-4 w-4 rounded"
+                    className="mt-0.5 h-4 w-4 rounded"
                     style={{ accentColor: 'var(--brand)' }}
                   />
                   <div>
-                    <div className="text-sm font-semibold text-text-primary">Prepare inline protection path</div>
-                    <div className="text-[11px] text-text-muted">Leave this off if you want discovery and alerting first, then move to blocking later.</div>
+                    <div className="text-sm font-semibold text-text-primary">Prepare inline protection</div>
+                    <div className="mt-0.5 text-xs text-text-muted">Enable this when blocking will be part of the first rollout.</div>
                   </div>
                 </label>
-
-                <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-                  <div className="rounded-2xl border border-border-subtle bg-[#111827] p-4 text-slate-100">
-                    <div className="flex items-center justify-between">
-                      <div className="text-xs font-semibold">Controller rollout command</div>
-                      <button onClick={() => copy(commands.install, 'Install command')} className="rounded-lg border border-white/10 px-2 py-1 text-[11px] text-slate-200 transition-colors hover:bg-white/10">
-                        <Copy size={12} />
-                      </button>
-                    </div>
-                    <pre className="mt-3 overflow-x-auto text-[11px] leading-6 text-slate-200"><code>{commands.install}</code></pre>
-                  </div>
-
-                  <GlassCard variant="default" className="p-4">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">Recommended next move</div>
-                    <div className="mt-2 text-sm font-bold text-text-primary">Stand up the control plane before importing APIs.</div>
-                    <p className="mt-2 text-[11px] leading-5 text-text-secondary">
-                      AppSentinels positions deployment before application onboarding so health, keys, and telemetry are already available when teams register their domains.
-                    </p>
-                    <button
-                      onClick={() => navigate('/admin/settings/license')}
-                      className="mt-3 inline-flex items-center gap-2 rounded-lg border border-border-subtle px-3 py-2 text-[11px] font-semibold text-text-secondary transition-colors hover:border-brand/20 hover:text-text-primary"
-                    >
-                      Review license envelope
-                      <ChevronRight size={12} />
-                    </button>
-                  </GlassCard>
-                </div>
               </div>
             )}
 
             {activeStep === 'traffic' && (
-              <div className="mt-6 space-y-6">
-                <div className="grid gap-3 lg:grid-cols-2">
+              <div className="mt-6">
+                <div className="grid gap-3 md:grid-cols-2">
                   {TRAFFIC_OPTIONS.map((option) => (
-                    <GlassCard
+                    <button
                       key={option.id}
-                      variant={data.trafficSource === option.id ? 'accent' : 'default'}
-                      className="p-4"
-                      hoverLift
+                      type="button"
                       onClick={() => onboarding.update({ trafficSource: option.id })}
+                      className={`rounded-lg border p-4 text-left transition-colors ${
+                        data.trafficSource === option.id
+                          ? 'border-brand/30 bg-brand/10'
+                          : 'border-border-subtle bg-bg-surface hover:border-brand/20'
+                      }`}
                     >
                       <div className="flex items-start gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand/10 text-brand">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
                           <Network size={18} />
                         </div>
                         <div>
                           <div className="text-sm font-bold text-text-primary">{option.label}</div>
-                          <p className="mt-1 text-[11px] leading-5 text-text-secondary">{option.description}</p>
+                          <p className="mt-1 text-xs leading-5 text-text-secondary">{option.description}</p>
                         </div>
                       </div>
-                    </GlassCard>
-                  ))}
-                </div>
-
-                <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-                  <div className="rounded-2xl border border-border-subtle bg-[#0f172a] p-4 text-slate-100">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-xs font-semibold">
-                        <KeyRound size={13} />
-                        Sensor and traffic bootstrap
-                      </div>
-                      <button onClick={() => copy(commands.telemetry, 'Telemetry variables')} className="rounded-lg border border-white/10 px-2 py-1 text-[11px] text-slate-200 transition-colors hover:bg-white/10">
-                        <Copy size={12} />
-                      </button>
-                    </div>
-                    <pre className="mt-3 overflow-x-auto text-[11px] leading-6 text-slate-200"><code>{commands.telemetry}</code></pre>
-                  </div>
-
-                  <GlassCard variant="default" className="p-4">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">Bootstrap pattern</div>
-                    <div className="mt-3 space-y-2 text-[11px] text-text-secondary">
-                      <div className="rounded-xl border border-border-subtle bg-bg-base px-3 py-2">
-                        <div className="font-semibold text-text-primary">Controller key</div>
-                        <div className="mt-1 font-mono text-text-muted">APPSENTINEL_CONTROLLER_KEY=&lt;secure-key&gt;</div>
-                      </div>
-                      <div className="rounded-xl border border-border-subtle bg-bg-base px-3 py-2">
-                        <div className="font-semibold text-text-primary">Sensor key</div>
-                        <div className="mt-1 font-mono text-text-muted">APPSENTINEL_SENSOR_KEY=&lt;secure-key&gt;</div>
-                      </div>
-                      <div className="rounded-xl border border-border-subtle bg-bg-base px-3 py-2">
-                        <div className="font-semibold text-text-primary">Collector URL</div>
-                        <div className="mt-1 font-mono text-text-muted">https://collector.company.internal</div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => navigate('/admin/settings/api-keys')}
-                      className="mt-3 inline-flex items-center gap-2 rounded-lg border border-border-subtle px-3 py-2 text-[11px] font-semibold text-text-secondary transition-colors hover:border-brand/20 hover:text-text-primary"
-                    >
-                      Manage org API keys
-                      <ChevronRight size={12} />
                     </button>
-                  </GlassCard>
+                  ))}
                 </div>
               </div>
             )}
 
             {activeStep === 'application' && (
-              <div className="mt-6 grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-                <div className="space-y-4">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">Application name</label>
-                      <input
-                        value={data.applicationName}
-                        onChange={(event) => onboarding.update({ applicationName: event.target.value })}
-                        placeholder="customer-api-prod"
-                        className="w-full rounded-xl border border-border-subtle bg-bg-base px-4 py-3 text-sm text-text-primary outline-none transition-all focus:border-brand/30 focus:ring-1 focus:ring-brand/20"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">Application domain</label>
-                      <input
-                        value={data.applicationDomain}
-                        onChange={(event) => onboarding.update({ applicationDomain: event.target.value })}
-                        placeholder="api.company.com"
-                        className="w-full rounded-xl border border-border-subtle bg-bg-base px-4 py-3 text-sm text-text-primary outline-none transition-all focus:border-brand/30 focus:ring-1 focus:ring-brand/20"
-                      />
-                    </div>
+              <div className="mt-6 space-y-5">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold uppercase tracking-[0.12em] text-text-muted">Application name</label>
+                    <input
+                      value={data.applicationName}
+                      onChange={(event) => onboarding.update({ applicationName: event.target.value })}
+                      placeholder="customer-api-prod"
+                      className="w-full rounded-lg border border-border-subtle bg-bg-base px-4 py-3 text-sm text-text-primary outline-none transition-all focus:border-brand/30 focus:ring-1 focus:ring-brand/20"
+                    />
                   </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">Environment</label>
-                      <select
-                        value={data.environment}
-                        onChange={(event) => onboarding.update({ environment: event.target.value as typeof data.environment })}
-                        className="w-full rounded-xl border border-border-subtle bg-bg-base px-4 py-3 text-sm text-text-primary outline-none transition-all focus:border-brand/30 focus:ring-1 focus:ring-brand/20"
-                      >
-                        <option value="production">Production</option>
-                        <option value="staging">Staging</option>
-                        <option value="development">Development</option>
-                      </select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">Business unit</label>
-                      <input
-                        value={data.businessUnit}
-                        onChange={(event) => onboarding.update({ businessUnit: event.target.value })}
-                        placeholder="Core Platform"
-                        className="w-full rounded-xl border border-border-subtle bg-bg-base px-4 py-3 text-sm text-text-primary outline-none transition-all focus:border-brand/30 focus:ring-1 focus:ring-brand/20"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">Assigned users</div>
-                    <div className="grid gap-2 md:grid-cols-2">
-                      {(owners.length > 0 ? owners : [{ login: 'owner@company.com', role: 'ADMIN' }]).map((owner) => (
-                        <label key={owner.login} className="flex items-center gap-3 rounded-xl border border-border-subtle bg-bg-base px-3 py-2.5">
-                          <input
-                            type="checkbox"
-                            checked={data.assignedUsers.includes(owner.login)}
-                            onChange={() => onboarding.toggleAssignedUser(owner.login)}
-                            className="h-4 w-4 rounded"
-                            style={{ accentColor: 'var(--brand)' }}
-                          />
-                          <div>
-                            <div className="text-sm font-medium text-text-primary">{owner.login}</div>
-                            <div className="text-[11px] text-text-muted">{owner.role}</div>
-                          </div>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-3">
-                    <button
-                      onClick={handleApplicationCreate}
-                      disabled={creatingApp}
-                      className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
-                    >
-                      {creatingApp ? 'Registering...' : 'Register application'}
-                      <ArrowRight size={15} />
-                    </button>
-                    <button
-                      onClick={() => navigate('/admin/applications/add')}
-                      className="rounded-xl border border-border-subtle px-4 py-3 text-sm font-semibold text-text-secondary transition-colors hover:border-brand/20 hover:text-text-primary"
-                    >
-                      Open dedicated Add Application page
-                    </button>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold uppercase tracking-[0.12em] text-text-muted">Application domain</label>
+                    <input
+                      value={data.applicationDomain}
+                      onChange={(event) => onboarding.update({ applicationDomain: event.target.value })}
+                      placeholder="api.company.com"
+                      className="w-full rounded-lg border border-border-subtle bg-bg-base px-4 py-3 text-sm text-text-primary outline-none transition-all focus:border-brand/30 focus:ring-1 focus:ring-brand/20"
+                    />
                   </div>
                 </div>
 
-                <GlassCard variant="default" className="p-4">
-                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">
-                    <Globe size={12} />
-                    Why this matters
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold uppercase tracking-[0.12em] text-text-muted">Environment</label>
+                    <select
+                      value={data.environment}
+                      onChange={(event) => onboarding.update({ environment: event.target.value as typeof data.environment })}
+                      className="w-full rounded-lg border border-border-subtle bg-bg-base px-4 py-3 text-sm text-text-primary outline-none transition-all focus:border-brand/30 focus:ring-1 focus:ring-brand/20"
+                    >
+                      <option value="production">Production</option>
+                      <option value="staging">Staging</option>
+                      <option value="development">Development</option>
+                    </select>
                   </div>
-                  <div className="mt-3 space-y-3 text-[11px] leading-5 text-text-secondary">
-                    <p>AppSentinels separates application onboarding from raw traffic capture so ownership, reporting, and policy scopes stay clear.</p>
-                    <p>Use production domains for high-fidelity discovery and add staging domains later as separate collections if teams need cleaner blast-radius control.</p>
-                    <div className="rounded-xl border border-border-subtle bg-bg-base px-3 py-2.5">
-                      <div className="font-semibold text-text-primary">Current state</div>
-                      <div className="mt-1 text-text-muted">
-                        {data.collectionId ? `Collection ${data.collectionId} mapped` : 'No collection registered yet'}
-                      </div>
-                    </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold uppercase tracking-[0.12em] text-text-muted">Business unit</label>
+                    <input
+                      value={data.businessUnit}
+                      onChange={(event) => onboarding.update({ businessUnit: event.target.value })}
+                      placeholder="Core Platform"
+                      className="w-full rounded-lg border border-border-subtle bg-bg-base px-4 py-3 text-sm text-text-primary outline-none transition-all focus:border-brand/30 focus:ring-1 focus:ring-brand/20"
+                    />
                   </div>
-                </GlassCard>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-[0.12em] text-text-muted">Owners</div>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {(owners.length > 0 ? owners : [{ login: 'owner@company.com', role: 'ADMIN' }]).map((owner) => (
+                      <label key={owner.login} className="flex items-center gap-3 rounded-lg border border-border-subtle bg-bg-base px-3 py-2.5">
+                        <input
+                          type="checkbox"
+                          checked={data.assignedUsers.includes(owner.login)}
+                          onChange={() => onboarding.toggleAssignedUser(owner.login)}
+                          className="h-4 w-4 rounded"
+                          style={{ accentColor: 'var(--brand)' }}
+                        />
+                        <div>
+                          <div className="text-sm font-medium text-text-primary">{owner.login}</div>
+                          <div className="text-xs text-text-muted">{owner.role}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleApplicationCreate}
+                  disabled={creatingApp}
+                  className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
+                >
+                  {creatingApp ? 'Registering...' : 'Register application'}
+                  <ArrowRight size={15} />
+                </button>
               </div>
             )}
 
             {activeStep === 'identity' && (
-              <div className="mt-6 grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="mt-6 grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
                 <div className="grid gap-4 md:grid-cols-2">
                   {[
                     ['Authorization header', 'authHeader', 'authorization'],
@@ -759,19 +615,19 @@ const Onboarding: React.FC = () => {
                     ['Tenant key', 'tenantKey', 'x-tenant-id'],
                   ].map(([label, key, placeholder]) => (
                     <div key={key} className="space-y-1.5">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">{label}</label>
+                      <label className="text-xs font-semibold uppercase tracking-[0.12em] text-text-muted">{label}</label>
                       <input
                         value={data[key as keyof typeof data] as string}
                         onChange={(event) => onboarding.update({ [key]: event.target.value } as Partial<typeof data>)}
                         placeholder={placeholder}
-                        className="w-full rounded-xl border border-border-subtle bg-bg-base px-4 py-3 text-sm text-text-primary outline-none transition-all focus:border-brand/30 focus:ring-1 focus:ring-brand/20"
+                        className="w-full rounded-lg border border-border-subtle bg-bg-base px-4 py-3 text-sm text-text-primary outline-none transition-all focus:border-brand/30 focus:ring-1 focus:ring-brand/20"
                       />
                     </div>
                   ))}
                 </div>
 
                 <GlassCard variant="default" className="p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">Feature envelope</div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.12em] text-text-muted">Enabled modules</div>
                   <div className="mt-3 space-y-2">
                     {[
                       ['discovery', 'Passive discovery'],
@@ -779,7 +635,7 @@ const Onboarding: React.FC = () => {
                       ['realtimeProtection', 'Realtime protection'],
                       ['reporting', 'Executive reporting'],
                     ].map(([feature, label]) => (
-                      <label key={feature} className="flex items-center justify-between rounded-xl border border-border-subtle bg-bg-base px-3 py-2.5">
+                      <label key={feature} className="flex items-center justify-between rounded-lg border border-border-subtle bg-bg-base px-3 py-2.5">
                         <span className="text-sm font-medium text-text-primary">{label}</span>
                         <input
                           type="checkbox"
@@ -791,111 +647,75 @@ const Onboarding: React.FC = () => {
                       </label>
                     ))}
                   </div>
-                  <p className="mt-3 text-[11px] leading-5 text-text-secondary">
-                    Identity-aware attributes are what make business-logic analysis, user-centric traces, and tenant-level policy decisions feel trustworthy.
-                  </p>
-                  <button
-                    onClick={() => navigate('/admin/settings/attribute-mapping')}
-                    className="mt-3 inline-flex items-center gap-2 rounded-lg border border-border-subtle px-3 py-2 text-[11px] font-semibold text-text-secondary transition-colors hover:border-brand/20 hover:text-text-primary"
-                  >
-                    Open attribute mapping
-                    <ChevronRight size={12} />
-                  </button>
                 </GlassCard>
               </div>
             )}
 
             {activeStep === 'validation' && (
-              <div className="mt-6 space-y-6">
+              <div className="mt-6 space-y-5">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-lg border border-border-subtle bg-bg-base px-4 py-3">
+                    <div className="text-xs uppercase tracking-[0.12em] text-text-muted">Applications</div>
+                    <div className="mt-1 text-2xl font-bold text-text-primary">{applicationCount}</div>
+                  </div>
+                  <div className="rounded-lg border border-border-subtle bg-bg-base px-4 py-3">
+                    <div className="text-xs uppercase tracking-[0.12em] text-text-muted">Endpoints</div>
+                    <div className="mt-1 text-2xl font-bold text-text-primary">{endpointsSeen}</div>
+                  </div>
+                  <div className="rounded-lg border border-border-subtle bg-bg-base px-4 py-3">
+                    <div className="text-xs uppercase tracking-[0.12em] text-text-muted">Modules</div>
+                    <div className="mt-1 text-2xl font-bold text-text-primary">{connectedModules}</div>
+                  </div>
+                </div>
+
                 <div className="grid gap-3 md:grid-cols-2">
                   {validationCards.map((card) => (
-                    <label key={card.key} className="flex items-start gap-3 rounded-2xl border border-border-subtle bg-bg-base px-4 py-4">
-                        <input
-                          type="checkbox"
-                          checked={data.validation[card.key]}
-                          onChange={() => handleValidationToggle(card.key)}
-                          className="mt-1 h-4 w-4 rounded"
-                          style={{ accentColor: 'var(--brand)' }}
-                        />
+                    <label key={card.key} className="flex items-start gap-3 rounded-lg border border-border-subtle bg-bg-base px-4 py-4">
+                      <input
+                        type="checkbox"
+                        checked={data.validation[card.key]}
+                        onChange={() => handleValidationToggle(card.key)}
+                        className="mt-1 h-4 w-4 rounded"
+                        style={{ accentColor: 'var(--brand)' }}
+                      />
                       <div>
                         <div className="text-sm font-semibold text-text-primary">{card.label}</div>
-                        <p className="mt-1 text-[11px] leading-5 text-text-secondary">{card.description}</p>
+                        <p className="mt-1 text-xs leading-5 text-text-secondary">{card.description}</p>
                       </div>
                     </label>
                   ))}
-                </div>
-
-                <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-                  <GlassCard variant="accent" className="p-5">
-                    <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-brand">
-                      <Sparkles size={12} />
-                      Live rollout summary
-                    </div>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                      <div className="rounded-xl border border-brand/10 bg-brand/5 px-4 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.12em] text-text-muted">Collections</div>
-                        <div className="mt-1 text-2xl font-bold text-text-primary">{applicationCount}</div>
-                      </div>
-                      <div className="rounded-xl border border-brand/10 bg-brand/5 px-4 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.12em] text-text-muted">Endpoints</div>
-                        <div className="mt-1 text-2xl font-bold text-text-primary">{endpointsSeen}</div>
-                      </div>
-                      <div className="rounded-xl border border-brand/10 bg-brand/5 px-4 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.12em] text-text-muted">Connected modules</div>
-                        <div className="mt-1 text-2xl font-bold text-text-primary">{connectedModules}</div>
-                      </div>
-                    </div>
-                    <div className="mt-4 flex flex-wrap gap-3">
-                      <button onClick={() => navigate('/admin/system-health')} className="rounded-xl border border-border-subtle px-4 py-2.5 text-sm font-semibold text-text-secondary transition-colors hover:border-brand/20 hover:text-text-primary">
-                        Review health
-                      </button>
-                      <button onClick={() => navigate('/app/discovery')} className="rounded-xl border border-border-subtle px-4 py-2.5 text-sm font-semibold text-text-secondary transition-colors hover:border-brand/20 hover:text-text-primary">
-                        Open discovery
-                      </button>
-                      <button onClick={() => navigate('/app/protection')} className="rounded-xl border border-border-subtle px-4 py-2.5 text-sm font-semibold text-text-secondary transition-colors hover:border-brand/20 hover:text-text-primary">
-                        Stage protection
-                      </button>
-                    </div>
-                  </GlassCard>
-
-                  <GlassCard variant="default" className="p-4">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">Go-live guidance</div>
-                    <ul className="mt-3 space-y-2 text-[11px] leading-5 text-text-secondary">
-                      <li>Start with passive discovery and alerting before enforcing blocking.</li>
-                      <li>Validate one production application thoroughly, then templatize the rollout.</li>
-                      <li>Move teams from collection-level ownership to policy-level accountability as inventory stabilizes.</li>
-                    </ul>
-                  </GlassCard>
                 </div>
               </div>
             )}
 
             <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-5">
               <button
+                type="button"
                 onClick={() => onboarding.reset()}
-                className="rounded-xl border border-border-subtle px-4 py-2.5 text-sm font-semibold text-text-secondary transition-colors hover:border-brand/20 hover:text-text-primary"
+                className="rounded-lg border border-border-subtle px-4 py-2.5 text-sm font-semibold text-text-secondary transition-colors hover:border-brand/20 hover:text-text-primary"
               >
-                Reset flow
+                Reset
               </button>
 
               <div className="flex flex-wrap items-center gap-3">
                 <button
+                  type="button"
                   onClick={() => navigate('/app/organization')}
-                  className="rounded-xl border border-border-subtle px-4 py-2.5 text-sm font-semibold text-text-secondary transition-colors hover:border-brand/20 hover:text-text-primary"
+                  className="rounded-lg border border-border-subtle px-4 py-2.5 text-sm font-semibold text-text-secondary transition-colors hover:border-brand/20 hover:text-text-primary"
                 >
-                  Exit to organization
+                  Exit
                 </button>
                 <button
+                  type="button"
                   onClick={completeAndAdvance}
-                  className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-brand-dark"
+                  className="inline-flex items-center gap-2 rounded-lg bg-brand px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-brand-dark"
                 >
                   {activeStep === 'validation' ? 'Finish onboarding' : 'Save and continue'}
                   <ChevronRight size={15} />
                 </button>
               </div>
             </div>
-          </GlassCard>
-        </div>
+        </GlassCard>
       </div>
     </div>
   );

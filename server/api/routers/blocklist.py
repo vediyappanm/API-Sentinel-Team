@@ -149,7 +149,7 @@ async def export_nginx_deny(
     rows = result.scalars().all()
     lines = [
         "# AppSentinel Block List - auto-generated",
-        f"# Generated: {datetime.datetime.utcnow().isoformat()}Z",
+        f"# Generated: {datetime.datetime.now(datetime.timezone.utc).isoformat()}",
         f"# Total: {len(rows)} blocked IPs",
         "",
     ]

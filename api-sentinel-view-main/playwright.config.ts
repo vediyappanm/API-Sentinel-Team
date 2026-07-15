@@ -1,11 +1,22 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import { defineConfig, devices } from '@playwright/test';
 
 const frontendRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(frontendRoot, '..');
 const isWindows = process.platform === 'win32';
-const pythonExecutable = isWindows ? '.\\venv311\\Scripts\\python.exe' : (process.env.PYTHON ?? 'python');
+const backendPort = process.env.E2E_BACKEND_PORT ?? '18000';
+const frontendPort = process.env.E2E_FRONTEND_PORT ?? '5173';
+const backendBaseUrl = `http://127.0.0.1:${backendPort}`;
+const frontendBaseUrl = `http://127.0.0.1:${frontendPort}`;
+const reuseExistingServers = process.env.E2E_REUSE_EXISTING_SERVER === 'true' && !process.env.CI;
+const pythonExecutable = isWindows
+  ? (process.env.PYTHON ??
+    (existsSync(path.join(repoRoot, '.venv', 'Scripts', 'python.exe'))
+      ? '.\\.venv\\Scripts\\python.exe'
+      : '.\\venv311\\Scripts\\python.exe'))
+  : (process.env.PYTHON ?? 'python');
 const backendEnv = {
   DEBUG: 'true',
   PYTHONPATH: repoRoot,
@@ -35,12 +46,12 @@ function formatEnvForShell(env: Record<string, string>) {
 }
 
 const backendCommand = isWindows
-  ? `powershell -NoProfile -Command "${formatEnvForShell(backendEnv)}; ${pythonExecutable} -m uvicorn server.api.main:app --host 127.0.0.1 --port 8000"`
-  : `${formatEnvForShell(backendEnv)} ${pythonExecutable} -m uvicorn server.api.main:app --host 127.0.0.1 --port 8000`;
+  ? `powershell -NoProfile -Command "${formatEnvForShell(backendEnv)}; ${pythonExecutable} -m uvicorn server.api.main:app --host 127.0.0.1 --port ${backendPort}"`
+  : `${formatEnvForShell(backendEnv)} ${pythonExecutable} -m uvicorn server.api.main:app --host 127.0.0.1 --port ${backendPort}`;
 
 const frontendCommand = isWindows
-  ? 'cmd /c set VITE_API_BASE_URL=http://127.0.0.1:8000&& npm run dev -- --host 127.0.0.1 --port 5173'
-  : "VITE_API_BASE_URL='http://127.0.0.1:8000' npm run dev -- --host 127.0.0.1 --port 5173";
+  ? `powershell -NoProfile -Command "${formatEnvForShell({ VITE_API_BASE_URL: backendBaseUrl })}; npm run dev -- --host 127.0.0.1 --port ${frontendPort}"`
+  : `VITE_API_BASE_URL='${backendBaseUrl}' npm run dev -- --host 127.0.0.1 --port ${frontendPort}`;
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -53,7 +64,7 @@ export default defineConfig({
   workers: 1,
   reporter: [['list'], ['html', { outputFolder: 'playwright-report', open: 'never' }]],
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL: frontendBaseUrl,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -68,16 +79,16 @@ export default defineConfig({
     {
       command: backendCommand,
       cwd: repoRoot,
-      url: 'http://127.0.0.1:8000/api/health/ready',
+      url: `${backendBaseUrl}/api/health/ready`,
       timeout: 120_000,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: reuseExistingServers,
     },
     {
       command: frontendCommand,
       cwd: frontendRoot,
-      url: 'http://127.0.0.1:5173',
+      url: frontendBaseUrl,
       timeout: 120_000,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: reuseExistingServers,
     },
   ],
 });

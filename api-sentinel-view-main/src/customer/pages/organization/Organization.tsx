@@ -14,6 +14,7 @@ import { useIssueSummary } from '@/hooks/use-testing';
 import { useDashboardKPIs } from '@/hooks/use-dashboard';
 import { useQueryClient } from '@tanstack/react-query';
 import { useOnboarding } from '@/lib/onboarding-context';
+import type { AktoApiCollection } from '@/services/discovery.service';
 
 const Organization: React.FC = () => {
   const [timeRange, setTimeRange] = useState<'24h' | '7d'>('24h');
@@ -30,12 +31,12 @@ const Organization: React.FC = () => {
   const totalApis = epCount.data?.endpointsCount ?? 0;
 
   const sev = issueSummary.data?.severityBreakdown ?? {};
-  const criticalCount = (sev as any).CRITICAL ?? 0;
-  const highCount = (sev as any).HIGH ?? 0;
-  const mediumCount = (sev as any).MEDIUM ?? 0;
-  const lowCount = (sev as any).LOW ?? 0;
+  const criticalCount = sev.CRITICAL ?? 0;
+  const highCount = sev.HIGH ?? 0;
+  const mediumCount = sev.MEDIUM ?? 0;
+  const lowCount = sev.LOW ?? 0;
   const totalVulns = issueSummary.data?.totalIssues ?? 0;
-  const blockedActors = (threats.data as any)?.threatData?.blockedActors ?? 0;
+  const blockedActors = threats.data?.threatData?.blockedActors ?? 0;
 
   const riskData = [
     { name: 'Critical', value: criticalCount, color: '#EF4444' },
@@ -177,7 +178,7 @@ const Organization: React.FC = () => {
                 <p className="text-xs text-text-muted">No applications found. Connect a traffic source to start discovering APIs.</p>
               </GlassCard>
             )}
-            {collections.map((app: any, idx: number) => {
+            {collections.map((app: AktoApiCollection, idx: number) => {
               const isDefault = collections.length === 1 || idx === 0;
               const epValue = isDefault ? totalApis : (app.urlsCount ?? 0);
               const critVal = isDefault ? criticalCount : 0;

@@ -5,6 +5,7 @@ import TableSkeleton from '@/components/shared/TableSkeleton';
 import GlassCard from '@/components/ui/GlassCard';
 import MetricWidget from '@/components/ui/MetricWidget';
 import ProgressRing from '@/components/ui/ProgressRing';
+import type { ComplianceFinding } from '@/services/testing.service';
 
 function todayStr() {
   return new Date().toISOString().split('T')[0];
@@ -44,8 +45,8 @@ const Reports: React.FC = () => {
     const sections = report?.sections ?? {};
     const postureColor = totalFindings === 0 ? '#22C55E' : totalFindings < 5 ? '#EAB308' : '#EF4444';
 
-    const rows = Object.entries(sections).flatMap(([section, vulns]: [string, any]) =>
-      vulns.map((v: any) => `
+    const rows = Object.entries(sections).flatMap(([section, vulns]) =>
+      vulns.map((v: ComplianceFinding) => `
         <tr>
           <td style="padding:10px 12px;border-bottom:1px solid #1e2530;font-size:12px;color:#e8edf3">${section}</td>
           <td style="padding:10px 12px;border-bottom:1px solid #1e2530;font-size:12px;color:#e8edf3">${v.title ?? v.type ?? '-'}</td>
@@ -217,7 +218,7 @@ const Reports: React.FC = () => {
           </div>
         ) : (
           <div className="p-5 space-y-6">
-            {Object.entries(report?.sections || {}).map(([section, vulns]: [string, any]) => (
+            {Object.entries(report?.sections || {}).map(([section, vulns]) => (
               <div key={section} className="space-y-3">
                 <div className="flex items-center gap-3 border-b border-border-subtle pb-2">
                   <div className="w-6 h-6 rounded-lg bg-sev-critical/10 flex items-center justify-center">
@@ -227,7 +228,7 @@ const Reports: React.FC = () => {
                   <span className="ml-auto text-[11px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted">{vulns.length} Findings</span>
                 </div>
                 <div className="space-y-2">
-                  {vulns.map((v: any) => {
+                  {vulns.map((v) => {
                     const sevColor = v.severity === 'HIGH' || v.severity === 'CRITICAL' ? '#EF4444' : v.severity === 'MEDIUM' ? '#F97316' : '#EAB308';
                     return (
                       <div key={v.id} className="data-row-interactive p-4 rounded-lg flex items-center justify-between" style={{ borderLeftColor: sevColor }}>

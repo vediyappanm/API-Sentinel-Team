@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from server.config import settings
+from server.modules.ingestion.dead_letter import redact_dead_letter_error, redact_dead_letter_payload
 from server.modules.ingestion.processors import process_stream_lines, process_http_traffic, process_event_batch
 from server.modules.persistence.database import AsyncSessionLocal
 from server.models.core import IngestionJob, IngestionDeadLetter
@@ -78,22 +79,28 @@ class IngestionQueue:
                         extra={"job_type": item.job_type, "job_id": item.job_id},
                     )
             except Exception as exc:
-                logger.exception(
+                safe_error = redact_dead_letter_error(str(exc))
+                logger.error(
                     "ingest_worker_failed",
-                    extra={"job_type": item.job_type, "job_id": item.job_id, "error": str(exc)},
+                    extra={
+                        "job_type": item.job_type,
+                        "job_id": item.job_id,
+                        "error": safe_error,
+                        "error_type": type(exc).__name__,
+                    },
                 )
                 try:
                     async with AsyncSessionLocal() as db:
                         await db.execute(
                             update(IngestionJob)
                             .where(IngestionJob.id == item.job_id)
-                            .values(status="FAILED", error_count=1, error_message=str(exc))
+                            .values(status="FAILED", error_count=1, error_message=safe_error)
                         )
                         db.add(IngestionDeadLetter(
                             job_id=item.job_id,
                             account_id=item.account_id,
-                            payload=item.payload,
-                            error_message=str(exc),
+                            payload=redact_dead_letter_payload(item.payload),
+                            error_message=safe_error,
                         ))
                         await db.commit()
                 except Exception:

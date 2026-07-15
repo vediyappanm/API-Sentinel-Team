@@ -63,7 +63,7 @@ function useForceLayout(nodes: GraphNode[], edges: GraphEdge[]) {
 
     // Simple iterative force simulation
     const REPEL = 3000, ATTRACT = 0.05, DAMPING = 0.85;
-    let vx: Record<string, number> = {}, vy: Record<string, number> = {};
+    const vx: Record<string, number> = {}, vy: Record<string, number> = {};
     nodes.forEach(n => { vx[n.id] = 0; vy[n.id] = 0; });
 
     for (let iter = 0; iter < 80; iter++) {
@@ -166,13 +166,13 @@ export default function BusinessLogicGraph() {
 
   const { data: graphData, isLoading, isError } = useQuery<GraphData>({
     queryKey: ['business-logic-graph'],
-    queryFn: () => get('/business-logic/graph/latest').catch(() => null),
+    queryFn: () => get<GraphData>('/business-logic/graph/latest').catch(() => null),
     retry: false,
   });
 
   const { data: violationsData } = useQuery({
     queryKey: ['business-logic-violations'],
-    queryFn: () => get('/business-logic/violations'),
+    queryFn: () => get<{ violations?: Violation[] }>('/business-logic/violations'),
     retry: false,
   });
 

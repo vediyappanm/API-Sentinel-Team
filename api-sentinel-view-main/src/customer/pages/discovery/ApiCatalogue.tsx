@@ -14,6 +14,7 @@ import { useApiCollections, useApiInfos, useSeverityCounts } from '@/hooks/use-d
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
 import { fetchWithSession } from '@/lib/api-client';
+import type { AktoApiCollection, AktoApiInfo } from '@/services/discovery.service';
 
 function formatTs(epoch: number) {
   if (!epoch) return '-';
@@ -62,13 +63,13 @@ function inferApiType(url: string): keyof typeof typeColors {
 }
 
 // Determine if API is Shadow (in traffic, not in spec) or Zombie (in spec, not in traffic)
-function getApiLifecycleStatus(row: AktoApiInfo, hostCollection?: any): { isShadow: boolean; isZombie: boolean; isDeprecated: boolean } {
+function getApiLifecycleStatus(row: AktoApiInfo, hostCollection?: AktoApiCollection): { isShadow: boolean; isZombie: boolean; isDeprecated: boolean } {
   // Shadow API: Has traffic (lastSeen) but not documented in spec
   const isInSpec = hostCollection?.type === 'OPEN_API' || hostCollection?.type === 'MIRRORING';
   const hasTraffic = row.lastSeen && row.lastSeen > 0;
   const isShadow = hasTraffic && !isInSpec;
   const isZombie = isInSpec && (!hasTraffic || (row.discoveredAt && row.discoveredAt > Date.now() - 30 * 24 * 60 * 60 * 1000));
-  const isDeprecated = (row as any).deprecated || false;
+  const isDeprecated = row.deprecated || false;
   
   return { isShadow, isZombie, isDeprecated };
 }

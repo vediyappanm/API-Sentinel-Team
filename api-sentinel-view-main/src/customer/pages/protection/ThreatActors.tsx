@@ -48,8 +48,8 @@ const ThreatActors: React.FC = () => {
   const sev = sevCount.data?.severityCount ?? {};
   const geoThreats = useMemo(() => Object.entries(geoCount.data?.countPerCountry ?? {}).slice(0, 10).map(([, count]) => ({
     lat: Math.random() * 120 - 60, lng: Math.random() * 240 - 120,
-    severity: ((count as number) > 100 ? 'critical' : (count as number) > 50 ? 'high' : 'medium') as any,
-    count: count as number,
+    severity: count > 100 ? 'critical' as const : count > 50 ? 'high' as const : 'medium' as const,
+    count,
   })), [geoCount.data]);
 
   return (

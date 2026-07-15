@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.core import APICollection, APIEndpoint, RequestLog
 from server.modules.api_inventory.path_normalizer import PathNormalizer
+from server.modules.ingestion.redaction import redact_ingestion_path
 
 from .models import DetectionEnvelope, NormalizationResult
 from .state_store import state_store
@@ -43,6 +44,14 @@ def _query_params_from_path(path: str) -> dict[str, Any]:
         return {}
 
 
+def _utc_now_ms() -> int:
+    return int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)
+
+
+def _datetime_from_ms(timestamp_ms: int) -> datetime.datetime:
+    return datetime.datetime.fromtimestamp(timestamp_ms / 1000, tz=datetime.timezone.utc)
+
+
 class NormalizationAgent:
     async def normalize(
         self,
@@ -68,7 +77,7 @@ class NormalizationAgent:
         elif source_type == "auth_failure_aggregate":
             envelope = self._from_auth_failure_aggregate(account_id, raw_event, context_source or "STREAM_AGGREGATE")
         elif source_type == "http_traffic":
-            envelope = self._from_http_traffic(account_id, raw_event, context_source or "HTTP_TRAFFIC")
+            envelope = await self._from_http_traffic(db, account_id, raw_event, persist_request_log, context_source or "HTTP_TRAFFIC")
         else:
             raise ValueError(f"Unsupported source_type '{source_type}'")
 
@@ -91,7 +100,7 @@ class NormalizationAgent:
         path = str(request.get("path") or "/")
         host = str(request.get("host") or "unknown")
         protocol = str(raw_event.get("protocol") or request.get("scheme") or "HTTP/1.1")
-        observed_at_ms = int(raw_event.get("observed_at") or raw_event.get("timestamp_ms") or int(datetime.datetime.utcnow().timestamp() * 1000))
+        observed_at_ms = int(raw_event.get("observed_at") or raw_event.get("timestamp_ms") or _utc_now_ms())
         actor_id = existing_actor_id or self._resolve_actor_id(raw_event, headers)
         payload = raw_event.get("jwt_payload") or {}
         envelope = DetectionEnvelope(
@@ -135,7 +144,7 @@ class NormalizationAgent:
         host = str(request.get("host") or raw_event.get("host") or "unknown")
         ts_raw = raw_event.get("observed_at") or raw_event.get("ts")
         if ts_raw is None:
-            observed_at_ms = int(datetime.datetime.utcnow().timestamp() * 1000)
+            observed_at_ms = _utc_now_ms()
         else:
             observed_at_ms = int(ts_raw if int(ts_raw) > 9_999_999_999 else int(ts_raw) * 1000)
         actor_id = str(raw_event.get("source_ip") or raw_event.get("src_ip") or headers.get("x-forwarded-for") or "anonymous")
@@ -169,7 +178,7 @@ class NormalizationAgent:
 
     async def _from_log_entry(self, db: AsyncSession, account_id: int, raw_event: dict[str, Any], persist_request_log: bool, existing_endpoint_id: str | None, context_source: str) -> DetectionEnvelope:
         ts = raw_event.get("time") or raw_event.get("ts")
-        observed_at_ms = int(ts.timestamp() * 1000) if isinstance(ts, datetime.datetime) else int(datetime.datetime.utcnow().timestamp() * 1000)
+        observed_at_ms = int(ts.timestamp() * 1000) if isinstance(ts, datetime.datetime) else _utc_now_ms()
         envelope = DetectionEnvelope(
             source_type="gateway_log",
             account_id=account_id,
@@ -196,7 +205,7 @@ class NormalizationAgent:
         return DetectionEnvelope(
             source_type="stream_enriched",
             account_id=account_id,
-            observed_at_ms=int(raw_event.get("timestamp_ms") or int(datetime.datetime.utcnow().timestamp() * 1000)),
+            observed_at_ms=int(raw_event.get("timestamp_ms") or _utc_now_ms()),
             actor_id=str(raw_event.get("actor_id") or "anonymous"),
             source_ip=str(raw_event.get("actor_id") or ""),
             method=str(raw_event.get("method") or "GET").upper(),
@@ -218,7 +227,7 @@ class NormalizationAgent:
             source_type="auth_failure_aggregate",
             event_type="auth_aggregate",
             account_id=account_id,
-            observed_at_ms=int(raw_event.get("timestamp_ms") or int(datetime.datetime.utcnow().timestamp() * 1000)),
+            observed_at_ms=int(raw_event.get("timestamp_ms") or _utc_now_ms()),
             actor_id=str(raw_event.get("actor_id") or "multiple"),
             source_ip=str(raw_event.get("source_ip") or "multiple"),
             method=str(raw_event.get("method") or "POST").upper(),
@@ -232,15 +241,15 @@ class NormalizationAgent:
             metadata={"auth_failure_count": raw_event.get("count", 0), "distinct_actors": raw_event.get("distinct_actors", 0)},
         )
 
-    def _from_http_traffic(self, account_id: int, raw_event: dict[str, Any], context_source: str) -> DetectionEnvelope:
+    async def _from_http_traffic(self, db: AsyncSession, account_id: int, raw_event: dict[str, Any], persist_request_log: bool, context_source: str) -> DetectionEnvelope:
         method = str(raw_event.get("method") or "GET").upper()
         path = str(raw_event.get("path") or "/")
         request_headers = _lower_headers(raw_event.get("requestHeaders") or raw_event.get("request_headers"))
         response_headers = _lower_headers(raw_event.get("responseHeaders") or raw_event.get("response_headers"))
-        return DetectionEnvelope(
+        envelope = DetectionEnvelope(
             source_type="http_traffic",
             account_id=account_id,
-            observed_at_ms=int(datetime.datetime.utcnow().timestamp() * 1000),
+            observed_at_ms=_utc_now_ms(),
             actor_id=str(raw_event.get("sourceIp") or raw_event.get("source_ip") or "anonymous"),
             source_ip=str(raw_event.get("sourceIp") or raw_event.get("source_ip") or ""),
             method=method,
@@ -256,6 +265,9 @@ class NormalizationAgent:
             context_source=context_source,
             raw_ref=raw_event,
         )
+        if persist_request_log:
+            await self._persist_request_log(db, envelope)
+        return envelope
 
     async def _persist_request_log(self, db: AsyncSession, envelope: DetectionEnvelope) -> None:
         log = RequestLog(
@@ -264,10 +276,10 @@ class NormalizationAgent:
             endpoint_id=envelope.endpoint_id,
             source_ip=envelope.source_ip or envelope.actor_id,
             method=envelope.method,
-            path=envelope.path,
+            path=redact_ingestion_path(envelope.path),
             response_code=envelope.status_code,
             response_time_ms=envelope.latency_ms,
-            created_at=datetime.datetime.fromtimestamp(envelope.observed_at_ms / 1000),
+            created_at=_datetime_from_ms(envelope.observed_at_ms),
         )
         db.add(log)
         await db.flush()
@@ -293,7 +305,7 @@ class NormalizationAgent:
         )
         endpoint = result.scalar_one_or_none()
         if endpoint:
-            endpoint.last_seen = datetime.datetime.fromtimestamp(observed_at_ms / 1000)
+            endpoint.last_seen = _datetime_from_ms(observed_at_ms)
             endpoint.last_response_code = status_code
             return endpoint.id
 
@@ -319,7 +331,7 @@ class NormalizationAgent:
             host=host,
             protocol=protocol,
             last_response_code=status_code,
-            last_seen=datetime.datetime.fromtimestamp(observed_at_ms / 1000),
+            last_seen=_datetime_from_ms(observed_at_ms),
             status="ACTIVE",
             api_type="REST",
         )

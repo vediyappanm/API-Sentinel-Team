@@ -8,6 +8,7 @@ import GlassCard from '@/components/ui/GlassCard';
 import DonutChart from '@/components/charts/DonutChart';
 import { useSecurityEvents } from '@/hooks/use-protection';
 import { useQueryClient } from '@tanstack/react-query';
+import type { AktoMaliciousEvent } from '@/services/protection.service';
 
 function formatTs(epoch: number) {
   if (!epoch) return '-';
@@ -143,7 +144,7 @@ const EnforcementHistory: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle">
-                {rows.map((row: any) => {
+                {rows.map((row: AktoMaliciousEvent) => {
                   const sev = mapSev(row.severity);
                   return (
                     <tr key={row.id} className="data-row-interactive hover:bg-white/[0.02] transition-colors" style={{ borderLeftColor: sevBorderColors[sev] || 'transparent' }}>

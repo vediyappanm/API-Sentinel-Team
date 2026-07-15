@@ -19,8 +19,11 @@ venv311/
 # Databases / archives / logs
 *.db
 *.db.bak
+*.db.backup
+*.db.backup-*
 *.log
 *.zip
+cookies.txt
 
 # Runtime data
 data/
@@ -29,6 +32,11 @@ data/
 node_modules/
 dist/
 build/
+coverage/
+playwright-report/
+test-results/
+api-sentinel-view-main/playwright-report/
+api-sentinel-view-main/test-results/
 
 # Tooling
 .claude/

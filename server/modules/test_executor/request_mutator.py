@@ -46,7 +46,11 @@ class RequestMutator:
             elif action in ("add_header", "modify_header"):
                 mutated.setdefault("headers", {})
                 if isinstance(params, dict):
-                    mutated["headers"].update(params)
+                    mutated["headers"] = self._apply_header_mutations(
+                        mutated["headers"],
+                        params,
+                        auth_context,
+                    )
             elif action == "delete_header":
                 key = params if isinstance(params, str) else list(params.keys())[0]
                 mutated["headers"] = {
@@ -163,3 +167,20 @@ class RequestMutator:
         result = {k: v for k, v in headers.items() if k.lower() not in self.AUTH_HEADERS}
         result[auth_header] = attacker_token
         return result
+
+    def _apply_header_mutations(self, headers: dict, params: dict, auth_context: dict) -> dict:
+        result = dict(headers or {})
+        auth_header = auth_context.get("auth_header", "Authorization")
+        for key, value in params.items():
+            key_text = str(key)
+            value_text = str(value)
+            if self._looks_like_auth_token(key_text) and value_text in {"1", "true", "True"}:
+                result = self._replace_auth_header(result, key_text, auth_header)
+                continue
+            result[key_text] = value
+        return result
+
+    @staticmethod
+    def _looks_like_auth_token(value: str) -> bool:
+        normalized = str(value or "").strip().lower()
+        return normalized.startswith(("bearer ", "basic "))

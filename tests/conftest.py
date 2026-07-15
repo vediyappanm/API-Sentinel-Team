@@ -3,6 +3,7 @@ import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from server.api.main import app
+from server.api.rate_limiter import limiter
 from server.modules.persistence.database import get_db, get_read_db
 from server.models import Base
 from server.config import settings
@@ -11,7 +12,23 @@ from server.modules.auth.jwt_issuer import JWTIssuer
 # Use an in-memory database for tests
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
-@pytest_asyncio.fixture(scope="session")
+def _reset_rate_limiter_state():
+    try:
+        limiter.reset()
+    except Exception:
+        storage = getattr(limiter, "_storage", None)
+        if storage is not None and hasattr(storage, "reset"):
+            storage.reset()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def reset_rate_limiter_state():
+    _reset_rate_limiter_state()
+    yield
+    _reset_rate_limiter_state()
+
+
+@pytest_asyncio.fixture
 async def test_engine():
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
     async with engine.begin() as conn:
@@ -44,7 +61,8 @@ async def client(db_session):
 @pytest.fixture
 def auth_headers():
     token = JWTIssuer.create_access_token({
-        "user_id": "test-user",
+        "sub": "test-user",
+        "email": "test@test.com",
         "account_id": 1000000,
         "role": "ADMIN",
     })

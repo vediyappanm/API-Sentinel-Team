@@ -2,9 +2,24 @@ from typing import Dict, Any, List, Optional
 from sqlalchemy.future import select
 from server.models.core import Vulnerability
 from server.modules.persistence.database import AsyncSessionLocal
+from server.modules.utils.redactor import Redactor
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_compliance_report_value(value: Any) -> Any:
+    """Redact secrets from values before compliance report export/rendering."""
+    if isinstance(value, dict):
+        return {
+            str(key): sanitize_compliance_report_value(item_value)
+            for key, item_value in value.items()
+        }
+    if isinstance(value, list):
+        return [sanitize_compliance_report_value(item) for item in value]
+    if isinstance(value, str):
+        return Redactor.redact_text(value)
+    return value
 
 class ComplianceReportGenerator:
     """
@@ -51,11 +66,14 @@ class ComplianceReportGenerator:
                         found_category = types[0] # Take the formal framework name
                         break
                 
-                report["sections"].setdefault(found_category, []).append({
+                report["sections"].setdefault(
+                    sanitize_compliance_report_value(found_category),
+                    [],
+                ).append({
                     "id": vuln.id,
-                    "title": vuln.template_id,
-                    "severity": vuln.severity,
-                    "endpoint": f"{vuln.method} {vuln.url}"
+                    "title": sanitize_compliance_report_value(vuln.template_id),
+                    "severity": sanitize_compliance_report_value(vuln.severity),
+                    "endpoint": sanitize_compliance_report_value(f"{vuln.method} {vuln.url}")
                 })
 
             return report

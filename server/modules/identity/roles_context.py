@@ -7,6 +7,12 @@ ${roles_access_context.ADMIN} to inject role-specific auth tokens.
 This module resolves those substitutions from configured test accounts.
 """
 
+from server.modules.identity.role_keys import authorization_role_key
+from server.modules.identity.test_account_secrets import TestAccountSecretCodec
+
+
+_ANONYMOUS_ROLE_KEYS = {"ANONYMOUS", "UNAUTHENTICATED", "PUBLIC", "GUEST"}
+
 
 class RolesContextBuilder:
     """
@@ -25,12 +31,15 @@ class RolesContextBuilder:
         """
         context = {}
         for account in test_accounts:
-            role = self._get_field(account, "role")
-            auth_headers = self._get_field(account, "auth_headers") or {}
+            role = authorization_role_key(account)
+            auth_headers = self._auth_headers(account)
+            if role in _ANONYMOUS_ROLE_KEYS:
+                context[role] = ""
+                continue
             if role and auth_headers:
                 # Store the full header value for the first auth header found
                 token_value = next(iter(auth_headers.values()), "")
-                context[role.upper()] = token_value
+                context[role] = token_value
         return context
 
     def flatten(self, roles_context: dict) -> dict:
@@ -45,10 +54,17 @@ class RolesContextBuilder:
             return obj.get(field)
         return getattr(obj, field, None)
 
+    def _auth_headers(self, obj) -> dict:
+        if isinstance(obj, dict):
+            return TestAccountSecretCodec.decrypt_headers(obj.get("auth_headers") or {})
+        return TestAccountSecretCodec.auth_headers(obj)
+
     def get_attacker_token(self, roles_context: dict, attacker_role: str = "MEMBER") -> str:
         """Return the attacker's auth token for BOLA tests."""
-        return roles_context.get(attacker_role.upper(), "")
+        role_key = authorization_role_key({"role": attacker_role})
+        return roles_context.get(role_key or "", "")
 
     def get_victim_token(self, roles_context: dict, victim_role: str = "ADMIN") -> str:
         """Return the victim's auth token."""
-        return roles_context.get(victim_role.upper(), "")
+        role_key = authorization_role_key({"role": victim_role})
+        return roles_context.get(role_key or "", "")

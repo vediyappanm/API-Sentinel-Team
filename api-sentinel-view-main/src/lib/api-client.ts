@@ -30,7 +30,7 @@ export const API_BASE_URL = `${API_ORIGIN}/api`;
 let _sessionToken: string | null = null;
 
 // Session expiry handling
-let _isRefreshing = false;
+const _isRefreshing = false;
 let _refreshSubscribers: ((token: string | null) => void)[] = [];
 
 function subscribeTokenRefresh(cb: (token: string | null) => void) {

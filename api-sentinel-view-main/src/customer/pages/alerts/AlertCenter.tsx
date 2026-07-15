@@ -32,9 +32,27 @@ interface AlertSummary {
   acknowledged: number;
 }
 
+interface RawAlert {
+  id: string;
+  severity?: AlertSeverity;
+  category?: string;
+  title?: string;
+  message?: string;
+  source_ip?: string;
+  endpoint?: string;
+  timestamp?: string;
+  created_at?: string;
+  status?: AlertStatus;
+}
+
+interface AlertsResponse {
+  items?: RawAlert[];
+  alerts?: RawAlert[];
+}
+
 // ─── API calls ────────────────────────────────────────────────────────────────
 
-function normalizeAlert(item: any): Alert {
+function normalizeAlert(item: RawAlert): Alert {
   return {
     id: item.id,
     severity: item.severity ?? 'LOW',
@@ -52,7 +70,7 @@ async function fetchAlerts(status?: string, severity?: string, signal?: AbortSig
   const params = new URLSearchParams({ limit: '100' });
   if (status && status !== 'ALL') params.set('status', status);
   if (severity && severity !== 'ALL') params.set('severity', severity);
-  const json = await get<any>(`/alerts/?${params.toString()}`, signal);
+  const json = await get<RawAlert[] | AlertsResponse>(`/alerts/?${params.toString()}`, signal);
   const items = Array.isArray(json) ? json : json.items ?? json.alerts ?? [];
   return items.map(normalizeAlert);
 }
@@ -203,7 +221,7 @@ const AlertCenter: React.FC = () => {
 
   const withActioning = (id: string, fn: () => void) => { setActioningIds((prev) => new Set([...prev, id])); fn(); };
 
-  const onSettled = (_data: any, _err: any, id: string) => {
+  const onSettled = (_data: unknown, _err: unknown, id: string) => {
     setActioningIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
     qc.invalidateQueries({ queryKey: ['alerts'] });
   };

@@ -9,10 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.core import Alert
-from server.modules.auth.rbac import RBAC, require_security_engineer
+from server.modules.auth.rbac import Permission, RBAC
 from server.modules.integrations.dispatcher import dispatch_event
 from server.modules.persistence.database import get_db
 from server.modules.response.playbook_executor import execute_playbooks
+from server.modules.utils.redactor import Redactor
 
 router = APIRouter()
 
@@ -31,7 +32,7 @@ async def list_alerts(
     status: str | None = Query(None),
     severity: str | None = Query(None),
     limit: int = Query(100, le=500),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload["account_id"]
@@ -48,7 +49,7 @@ async def list_alerts(
 
 @router.get("/summary")
 async def alert_summary(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload["account_id"]
@@ -69,19 +70,19 @@ async def alert_summary(
 @router.post("/")
 async def create_alert(
     body: AlertCreate,
-    payload: dict = Depends(require_security_engineer),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload["account_id"]
     alert = Alert(
         id=str(uuid.uuid4()),
         account_id=account_id,
-        title=body.title,
-        message=body.message,
+        title=Redactor.redact_text(body.title),
+        message=Redactor.redact_text(body.message or "") if body.message is not None else None,
         severity=body.severity.upper(),
         category=body.category,
         source_ip=body.source_ip,
-        endpoint=body.endpoint,
+        endpoint=Redactor.redact_text(body.endpoint or "") if body.endpoint is not None else None,
     )
     db.add(alert)
     await db.commit()
@@ -100,7 +101,7 @@ async def create_alert(
         account_id,
         db,
     )
-    await execute_playbooks(db, alert, evidence={"summary": alert.message or ""})
+    await execute_playbooks(db, alert, evidence={"summary": Redactor.redact_text(alert.message or "")})
     await db.commit()
     return _serialize(alert)
 
@@ -109,12 +110,12 @@ async def create_alert(
 async def acknowledge_alert(
     alert_id: str,
     by: str = Query("analyst"),
-    payload: dict = Depends(require_security_engineer),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     alert = await _get_alert(alert_id, payload["account_id"], db)
     alert.status = "ACKNOWLEDGED"
-    alert.acknowledged_by = by
+    alert.acknowledged_by = Redactor.redact_text(by)
     await db.commit()
     return {"status": "acknowledged", "id": alert_id}
 
@@ -122,7 +123,7 @@ async def acknowledge_alert(
 @router.patch("/{alert_id}/resolve")
 async def resolve_alert(
     alert_id: str,
-    payload: dict = Depends(require_security_engineer),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     alert = await _get_alert(alert_id, payload["account_id"], db)
@@ -135,7 +136,7 @@ async def resolve_alert(
 @router.delete("/{alert_id}")
 async def dismiss_alert(
     alert_id: str,
-    payload: dict = Depends(require_security_engineer),
+    payload: dict = Depends(RBAC.require_permission(Permission.VULNS_MANAGE)),
     db: AsyncSession = Depends(get_db),
 ):
     alert = await _get_alert(alert_id, payload["account_id"], db)
@@ -157,14 +158,14 @@ async def _get_alert(alert_id: str, account_id: int, db: AsyncSession) -> Alert:
 def _serialize(alert: Alert) -> dict:
     return {
         "id": alert.id,
-        "title": alert.title,
-        "message": alert.message,
+        "title": Redactor.redact_text(alert.title or ""),
+        "message": Redactor.redact_text(alert.message or "") if alert.message is not None else None,
         "severity": alert.severity,
         "category": alert.category,
         "source_ip": alert.source_ip,
-        "endpoint": alert.endpoint,
+        "endpoint": Redactor.redact_text(alert.endpoint or "") if alert.endpoint is not None else None,
         "status": alert.status,
-        "acknowledged_by": alert.acknowledged_by,
+        "acknowledged_by": Redactor.redact_text(alert.acknowledged_by or "") if alert.acknowledged_by else None,
         "resolved_at": alert.resolved_at.isoformat() if alert.resolved_at else None,
         "created_at": alert.created_at.isoformat() if alert.created_at else None,
     }

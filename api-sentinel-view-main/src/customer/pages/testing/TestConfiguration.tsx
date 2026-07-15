@@ -97,6 +97,7 @@ const TestConfiguration: React.FC = () => {
   }, [endpoints.data, selectedEndpointIds.length]);
 
   const preparedArtifacts = prepareMaterials.data?.artifacts ?? {};
+  const preparedEnginePlan = prepareMaterials.data?.summary.engine_plan ?? [];
   const infoError =
     detectionMeta.isError ||
     authProfiles.isError ||
@@ -380,6 +381,34 @@ const TestConfiguration: React.FC = () => {
                   ))}
                 </div>
               ))}
+              {Object.keys(preparedArtifacts).length === 0 && (
+                <div data-testid="prepared-no-artifacts" className="rounded-xl border border-border-subtle bg-bg-base px-4 py-4">
+                  <div className="text-sm font-semibold text-text-primary">No runnable engine artifacts</div>
+                  <div className="mt-1 text-[11px] text-text-muted">Review engine readiness before launching this profile.</div>
+                </div>
+              )}
+              {preparedEnginePlan.length > 0 && (
+                <div data-testid="prepared-engine-plan" className="rounded-xl border border-border-subtle bg-bg-base px-4 py-4">
+                  <div className="text-sm font-semibold text-text-primary">Engine readiness</div>
+                  <div className="mt-3 grid gap-2">
+                    {preparedEnginePlan.map((engine) => (
+                      <div
+                        key={engine.engine}
+                        data-testid={`prepared-engine-status-${engine.engine}`}
+                        className="flex items-center justify-between gap-3 rounded-lg border border-border-subtle px-3 py-2"
+                      >
+                        <div>
+                          <div className="text-xs font-semibold text-text-primary">{engine.display_name ?? engine.engine}</div>
+                          <div className="mt-0.5 text-[11px] text-text-muted">{engine.reason ?? 'ready'}</div>
+                        </div>
+                        <span className="rounded-full bg-brand/10 px-2 py-1 text-[10px] font-bold uppercase text-brand">
+                          {engine.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </GlassCard>

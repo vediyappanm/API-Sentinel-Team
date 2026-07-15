@@ -31,6 +31,8 @@ from server.modules.detection.pipeline import unified_detection_pipeline
 from server.modules.business_logic.graph_builder import detect_transition_violation
 from server.modules.cache.redis_cache import bump_cache_version
 from server.modules.ingestion.parsers import detect_attacks, parse_log_line
+from server.modules.ingestion.dead_letter import redact_dead_letter_error, redact_dead_letter_payload
+from server.modules.ingestion.redaction import redact_ingestion_path
 from server.modules.ingestion.schema import EventUnion
 from pydantic import TypeAdapter
 from server.modules.ingestion.quality import compute_quality
@@ -44,6 +46,8 @@ from server.modules.vulnerability_detector.pii_scanner import PIIScanner
 from server.modules.streaming.event_bus import get_event_bus, tenant_topic, track_topic
 from server.modules.agentic.mcp_security import record_tool_invocation
 from server.modules.agentic.mcp_parser import parse_mcp_invocation
+from server.modules.llm.findings import persist_llm_api_findings
+from server.modules.passive.findings import persist_passive_attack_signal, persist_sensitive_data_exposure
 from server.modules.vulnerability_detector.store import create_or_merge_vulnerability
 from server.config import settings
 
@@ -86,6 +90,25 @@ def _resolve_actor(event: Dict[str, Any]) -> str:
     if not actor:
         actor = event.get("source_ip") or str(headers.get("x-forwarded-for") or "unknown")
     return actor or "anonymous"
+
+
+def _observed_at_datetime(value: Any) -> datetime.datetime:
+    try:
+        timestamp = float(value)
+    except (TypeError, ValueError):
+        return func_now()
+    if timestamp > 1_000_000_000_000:
+        timestamp = timestamp / 1000
+    try:
+        return datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return func_now()
+
+
+def _elapsed_ms(later: datetime.datetime | None, earlier: datetime.datetime | None) -> int | None:
+    if later is None or earlier is None:
+        return None
+    return int((later - earlier).total_seconds() * 1000)
 
 
 async def _record_revision(db: Any, account_id: int, endpoint_id: str, schema_json: Dict[str, Any]) -> None:
@@ -224,19 +247,20 @@ async def _update_job(job_id: str, account_id: int | None = None, **fields: Any)
 async def process_stream_lines(job_id: str, account_id: int, payload: Dict[str, Any]) -> None:
     await _update_job(job_id, account_id=account_id, status="RUNNING", started_at=func_now())
     lines: List[str] = payload.get("lines") or []
-    sensor_key = payload.get("sensor_key")
+    sensor_id = payload.get("sensor_id")
 
     async with AsyncSessionLocal() as db:
         set_current_account_id(account_id)
         await apply_tenant_context(db)
         sensor = None
-        if sensor_key:
-            result = await db.execute(select(Sensor).where(Sensor.sensor_key == sensor_key))
+        if sensor_id:
+            result = await db.execute(
+                select(Sensor).where(
+                    Sensor.id == sensor_id,
+                    Sensor.account_id == account_id,
+                )
+            )
             sensor = result.scalar_one_or_none()
-            if sensor:
-                account_id = sensor.account_id
-                set_current_account_id(account_id)
-                await apply_tenant_context(db)
 
         logs: List[Dict[str, Any]] = []
         events: List[Dict[str, Any]] = []
@@ -251,6 +275,7 @@ async def process_stream_lines(job_id: str, account_id: int, payload: Dict[str, 
             parsed = parse_log_line(line)
             if not parsed:
                 continue
+            safe_path = redact_ingestion_path(parsed["path"])
             lines_processed += 1
             if pipeline_mode == "active":
                 result = await unified_detection_pipeline.process(
@@ -285,7 +310,7 @@ async def process_stream_lines(job_id: str, account_id: int, payload: Dict[str, 
                     "account_id": account_id,
                     "source_ip": parsed["ip"],
                     "method": parsed["method"],
-                    "path": parsed["path"],
+                    "path": safe_path,
                     "response_code": parsed["status"],
                     "created_at": parsed["time"],
                 })
@@ -297,7 +322,7 @@ async def process_stream_lines(job_id: str, account_id: int, payload: Dict[str, 
                         "account_id": account_id,
                         "actor": parsed["ip"],
                         "ip": parsed["ip"],
-                        "url": parsed["path"],
+                        "url": safe_path,
                         "method": parsed["method"],
                         "category": attack["category"],
                         "severity": attack["severity"],
@@ -309,18 +334,34 @@ async def process_stream_lines(job_id: str, account_id: int, payload: Dict[str, 
                             "id": str(uuid.uuid4()),
                             "account_id": account_id,
                             "title": f"{attack['category']} detected from {parsed['ip']}",
-                            "message": f"Attack pattern matched on {parsed['method']} {parsed['path']}",
+                            "message": f"Attack pattern matched on {parsed['method']} {safe_path}",
                             "severity": attack["severity"],
                             "category": attack["category"],
                             "source_ip": parsed["ip"],
-                            "endpoint": parsed["path"],
+                            "endpoint": safe_path,
                         })
+                    await persist_passive_attack_signal(
+                        db,
+                        account_id=account_id,
+                        category=attack["category"],
+                        severity=attack["severity"],
+                        response_code=parsed["status"],
+                        url=safe_path,
+                        method=parsed["method"],
+                        source="stream_line",
+                        actor=parsed["ip"],
+                        evidence={
+                            "user_agent": Redactor.redact_text(parsed.get("ua") or ""),
+                            "referer": Redactor.redact_url(parsed.get("referer") or ""),
+                            "bytes": parsed.get("bytes"),
+                        },
+                    )
             events_for_ws.append({
                 "type": "log_entry",
                 "data": {
                     "ip": parsed["ip"],
                     "method": parsed["method"],
-                    "path": parsed["path"],
+                    "path": safe_path,
                     "status": parsed["status"],
                     "bytes": parsed["bytes"],
                     "timestamp": parsed["time"].isoformat(),
@@ -365,6 +406,7 @@ async def process_http_traffic(job_id: str, account_id: int, payload: Dict[str, 
 
     method = payload.get("method", "GET")
     path = payload.get("path", "/")
+    safe_path = redact_ingestion_path(path)
     source_ip = payload.get("sourceIp", payload.get("source_ip", ""))
     status_code = payload.get("statusCode", payload.get("status_code", 200))
     request_payload = payload.get("requestPayload", payload.get("request_payload", ""))
@@ -425,7 +467,7 @@ async def process_http_traffic(job_id: str, account_id: int, payload: Dict[str, 
                     "account_id": account_id,
                     "source_ip": source_ip,
                     "method": method,
-                    "path": path,
+                    "path": safe_path,
                     "response_code": status_code,
                 }],
             )
@@ -437,9 +479,9 @@ async def process_http_traffic(job_id: str, account_id: int, payload: Dict[str, 
                     "account_id": account_id,
                     "actor": source_ip,
                     "ip": source_ip,
-                    "url": path,
+                    "url": safe_path,
                     "method": method,
-                    "payload": (request_payload or "")[:2000],
+                    "payload": Redactor.redact_text((request_payload or "")[:2000]),
                     "event_type": "EVENT_TYPE_SINGLE",
                     "category": category,
                     "sub_category": category,
@@ -448,14 +490,31 @@ async def process_http_traffic(job_id: str, account_id: int, payload: Dict[str, 
                     "status": "OPEN",
                     "api_collection_id": api_collection_id,
                     "event_metadata": {
-                        "request_headers": request_headers,
-                        "response_headers": response_headers,
-                        "response_payload": (response_payload or "")[:2000],
+                        "request_headers": Redactor.redact_headers(request_headers or {}),
+                        "response_headers": Redactor.redact_headers(response_headers or {}),
+                        "response_payload": Redactor.redact_text((response_payload or "")[:2000]),
                     },
                 })
 
             if events:
                 await db.execute(insert(MaliciousEventRecord), events)
+                for event_record in events:
+                    await persist_passive_attack_signal(
+                        db,
+                        account_id=account_id,
+                        category=event_record.get("category"),
+                        severity=event_record.get("severity"),
+                        response_code=status_code,
+                        url=safe_path,
+                        method=method,
+                        source="http_traffic",
+                        actor=source_ip,
+                        evidence={
+                            "payload": Redactor.redact_text((request_payload or "")[:500]),
+                            "request_headers": Redactor.redact_headers(request_headers or {}),
+                            "response_headers": Redactor.redact_headers(response_headers or {}),
+                        },
+                    )
         await db.commit()
 
     await bump_cache_version(account_id)
@@ -494,8 +553,8 @@ async def process_event_batch(job_id: str, account_id: int, payload: Dict[str, A
                 db.add(IngestionDeadLetter(
                     job_id=job_id,
                     account_id=account_id,
-                    payload=event,
-                    error_message=f"event_validation_failed: {exc}",
+                    payload=redact_dead_letter_payload(event),
+                    error_message=f"event_validation_failed: {redact_dead_letter_error(exc)}",
                 ))
                 continue
 
@@ -505,7 +564,7 @@ async def process_event_batch(job_id: str, account_id: int, payload: Dict[str, A
                 db.add(IngestionDeadLetter(
                     job_id=job_id,
                     account_id=account_id,
-                    payload=event,
+                    payload=redact_dead_letter_payload(event),
                     error_message=f"low_quality_event: {quality_score:.2f}",
                 ))
                 continue
@@ -517,6 +576,7 @@ async def process_event_batch(job_id: str, account_id: int, payload: Dict[str, A
                 resp = event.get("response") or {}
                 method = (req.get("method") or "GET").upper()
                 path = req.get("path") or "/"
+                safe_path = redact_ingestion_path(path)
                 host = req.get("host") or "unknown"
                 scheme = req.get("scheme") or "http"
                 port = 443 if scheme == "https" else 80
@@ -600,9 +660,10 @@ async def process_event_batch(job_id: str, account_id: int, payload: Dict[str, A
                     endpoint_id=endpoint.id,
                     source_ip=actor_id,
                     method=method,
-                    path=path,
+                    path=safe_path,
                     response_code=resp.get("status_code", 200),
                     response_time_ms=resp.get("latency_ms"),
+                    created_at=_observed_at_datetime(event.get("observed_at")),
                 ))
                 await db.flush()
                 # publish enriched stream event
@@ -612,7 +673,7 @@ async def process_event_batch(job_id: str, account_id: int, payload: Dict[str, A
                     "actor_id": actor_id or "anonymous",
                     "response_code": resp.get("status_code", 200),
                     "timestamp_ms": event.get("observed_at") or int(time.time() * 1000),
-                    "path": endpoint.path or path,
+                    "path": redact_ingestion_path(endpoint.path or path),
                     "method": method,
                     "latency_ms": resp.get("latency_ms"),
                     "quality_score": quality_score,
@@ -643,6 +704,7 @@ async def process_event_batch(job_id: str, account_id: int, payload: Dict[str, A
                             actor_id,
                             prev_logs[1].path,
                             prev_logs[0].path,
+                            elapsed_ms=_elapsed_ms(prev_logs[0].created_at, prev_logs[1].created_at),
                         )
 
                 # PII scan (store findings, do not store raw)
@@ -664,6 +726,25 @@ async def process_event_batch(job_id: str, account_id: int, payload: Dict[str, A
                         source="response",
                         confidence=0.6,
                     ))
+                    await persist_sensitive_data_exposure(
+                        db,
+                        account_id=account_id,
+                        endpoint_id=endpoint.id,
+                        entity_type=finding.get("entity_type"),
+                        source="response",
+                        path=path,
+                        method=method,
+                    )
+
+                await persist_llm_api_findings(
+                    db,
+                    account_id=account_id,
+                    endpoint_id=endpoint.id,
+                    path=path,
+                    method=method,
+                    request_body=req.get("body"),
+                    response_body=resp.get("body"),
+                )
 
                 # MCP parsing (JSON-RPC 2.0)
                 invocation = parse_mcp_invocation(
@@ -723,6 +804,7 @@ async def process_event_batch(job_id: str, account_id: int, payload: Dict[str, A
                     parsed = parse_log_line(line)
                     if not parsed:
                         continue
+                    safe_path = redact_ingestion_path(parsed["path"])
                     processed += 1
                     if pipeline_mode == "active":
                         result = await unified_detection_pipeline.process(
@@ -751,7 +833,7 @@ async def process_event_batch(job_id: str, account_id: int, payload: Dict[str, A
                             account_id=account_id,
                             source_ip=parsed["ip"],
                             method=parsed["method"],
-                            path=parsed["path"],
+                            path=safe_path,
                             response_code=parsed["status"],
                             created_at=parsed["time"],
                         ))
@@ -762,13 +844,25 @@ async def process_event_batch(job_id: str, account_id: int, payload: Dict[str, A
                                 account_id=account_id,
                                 actor=parsed["ip"],
                                 ip=parsed["ip"],
-                                url=parsed["path"],
+                                url=safe_path,
                                 method=parsed["method"],
                                 category=attack["category"],
                                 severity=attack["severity"],
                                 detected_at=int(parsed["time"].timestamp() * 1000),
                                 status="OPEN",
                             ))
+                            await persist_passive_attack_signal(
+                                db,
+                                account_id=account_id,
+                                category=attack["category"],
+                                severity=attack["severity"],
+                                response_code=parsed["status"],
+                                url=safe_path,
+                                method=parsed["method"],
+                                source="gateway_log",
+                                actor=parsed["ip"],
+                                evidence={"user_agent": Redactor.redact_text(parsed.get("ua") or "")},
+                            )
 
             elif etype == "test_result":
                 processed += 1

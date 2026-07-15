@@ -1,8 +1,8 @@
 """Nuclei vulnerability scanner integration."""
-import uuid
 import os
-import tempfile
 import shutil
+import tempfile
+import uuid
 from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
@@ -11,15 +11,98 @@ from sqlalchemy import and_, select, update, delete
 
 from server.modules.persistence.database import get_db
 from server.models.core import NucleiScan, NucleiTemplate
-from server.modules.auth.rbac import RBAC, can_run_nuclei
+from server.modules.auth.rbac import Permission, RBAC, can_run_nuclei
+from server.modules.nuclei.findings import persist_nuclei_findings, redact_nuclei_finding
 from server.modules.nuclei.runner import NucleiRunner
+from server.modules.nuclei.selectors import (
+    normalize_severities,
+    normalize_tags,
+    normalize_template_ids,
+    safe_template_filename,
+)
+from server.modules.pentest.auth_preflight import active_scan_auth_required
+from server.modules.pentest.target_policy import target_guard_policy_for_error, validate_pentest_target
+from server.modules.test_executor.kill_switch import (
+    KILL_SWITCH_REASON,
+    PentestKillSwitchError,
+    guard_pentest_execution,
+)
+from server.modules.test_executor.target_guard import TargetGuardError
 from server.modules.utils.finding_fingerprint import collapse_by_fingerprint, nuclei_fingerprint
+from server.modules.utils.redactor import Redactor
 
 router = APIRouter(tags=["Nuclei Scanner"])
 
 
+def _target_guard_exception(exc: TargetGuardError, *, target_url: str) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={
+            "message": str(exc),
+            "reason": "target_guard_blocked",
+            "target_guard_policy": target_guard_policy_for_error(exc, fallback_url=target_url),
+        },
+    )
+
+
+def _auth_profile_required_exception() -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={
+            "message": (
+                "Legacy Nuclei scans require an authenticated pentest profile. "
+                "Use /api/pentest/profiles/{profile_id}/nuclei/run for authenticated execution."
+            ),
+            "reason": "auth_profile_required",
+        },
+    )
+
+
+def _selector_exception(exc: ValueError) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={
+            "message": str(exc),
+            "reason": "invalid_nuclei_selector",
+        },
+    )
+
+
+def _safe_custom_template_path(custom_template_dir: str, filename: str) -> str:
+    root = os.path.abspath(custom_template_dir)
+    path = os.path.abspath(os.path.join(root, filename))
+    if os.path.commonpath([root, path]) != root:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "custom template filename escaped the temporary scan directory",
+                "reason": "invalid_custom_template_path",
+            },
+        )
+    return path
+
+
+def _normalize_custom_template_ids(values: List[str]) -> List[str]:
+    if len(values or []) > 100:
+        raise ValueError("custom_template_ids may contain at most 100 entries")
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for raw in values or []:
+        try:
+            template_id = str(uuid.UUID(str(raw or "").strip()))
+        except ValueError as exc:
+            raise ValueError("custom_template_ids contains an invalid UUID") from exc
+        if template_id in seen:
+            continue
+        seen.add(template_id)
+        normalized.append(template_id)
+    return normalized
+
+
 @router.get("/status")
-async def nuclei_status():
+async def nuclei_status(
+    payload: dict = Depends(RBAC.require_permission(Permission.NUCLEI_READ)),
+):
     available = NucleiRunner.is_available()
     return {"nuclei_available": available, "mode": "live" if available else "simulation",
             "install_docs": "https://github.com/projectdiscovery/nuclei" if not available else None}
@@ -36,6 +119,24 @@ async def start_scan(
     db: AsyncSession = Depends(get_db)
 ):
     account_id = payload["account_id"]
+    try:
+        guard_pentest_execution()
+    except PentestKillSwitchError as exc:
+        raise HTTPException(status_code=503, detail=KILL_SWITCH_REASON) from exc
+    if active_scan_auth_required():
+        raise _auth_profile_required_exception()
+
+    try:
+        validate_pentest_target(target)
+        template_ids = normalize_template_ids(template_ids)
+        custom_template_ids = _normalize_custom_template_ids(custom_template_ids)
+        tags = normalize_tags(tags)
+        severity = normalize_severities(severity)
+    except TargetGuardError as exc:
+        raise _target_guard_exception(exc, target_url=target) from exc
+    except ValueError as exc:
+        raise _selector_exception(exc) from exc
+
     scan = NucleiScan(id=str(uuid.uuid4()), account_id=account_id, target=target,
                       template_ids=template_ids, custom_template_ids=custom_template_ids,
                       tags=tags, severity_filter=severity,
@@ -58,8 +159,8 @@ async def start_scan(
         if custom_templates:
             custom_template_dir = tempfile.mkdtemp(prefix="nuclei_custom_")
             for ct in custom_templates:
-                fname = f"{ct.template_id or ct.id}.yaml"
-                fpath = os.path.join(custom_template_dir, fname)
+                fname = safe_template_filename(ct.template_id, ct.id)
+                fpath = _safe_custom_template_path(custom_template_dir, fname)
                 with open(fpath, "w", encoding="utf-8") as f:
                     f.write(ct.yaml_content)
                 extra_template_paths.append(fpath)
@@ -71,8 +172,12 @@ async def start_scan(
         severity=severity or None,
         extra_template_paths=extra_template_paths or None,
     )
+    safe_findings = [
+        redact_nuclei_finding(finding, target=target, account_id=account_id, include_fingerprint=True)
+        for finding in result["findings"]
+    ]
     unique_findings, duplicate_findings = collapse_by_fingerprint(
-        result["findings"],
+        safe_findings,
         lambda finding: nuclei_fingerprint(finding, target=target, account_id=account_id),
     )
     historical_result = await db.execute(
@@ -106,6 +211,20 @@ async def start_scan(
     scan.findings = unique_findings
     scan.total_found = len(unique_findings)
     scan.completed_at = datetime.now(timezone.utc)
+    try:
+        vulnerability_summary = await persist_nuclei_findings(
+            db,
+            account_id=account_id,
+            target=target,
+            findings=unique_findings,
+        )
+    except TargetGuardError as exc:
+        scan.status = "REJECTED"
+        scan.findings = []
+        scan.total_found = 0
+        scan.completed_at = datetime.now(timezone.utc)
+        await db.commit()
+        raise _target_guard_exception(exc, target_url=target) from exc
     await db.commit()
 
     return {
@@ -115,8 +234,11 @@ async def start_scan(
         "new_findings": len(new_findings),
         "repeated_findings": len(repeated_findings),
         "deduplicated_findings": len(duplicate_findings),
+        "vulnerabilities_created": vulnerability_summary["created_count"],
+        "vulnerabilities_merged": vulnerability_summary["merged_count"],
+        "vulnerabilities": vulnerability_summary["vulnerabilities"][:10],
         "findings": [
-            {**finding, "fingerprint": nuclei_fingerprint(finding, target=target, account_id=account_id)}
+            redact_nuclei_finding(finding, target=target, account_id=account_id, include_fingerprint=True)
             for finding in scan.findings[:10]
         ],
         "note": result.get("note"),
@@ -126,7 +248,7 @@ async def start_scan(
 @router.get("/scans")
 async def list_scans(
     limit: int = Query(50),
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.NUCLEI_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload["account_id"]
@@ -135,18 +257,28 @@ async def list_scans(
         .order_by(NucleiScan.created_at.desc()).limit(limit)
     )
     scans = result.scalars().all()
-    return {"total": len(scans), "scans": [
-        {"id": s.id, "target": s.target, "status": s.status, "total_found": s.total_found,
-         "tags": s.tags, "severity_filter": s.severity_filter,
-         "started_at": s.started_at, "completed_at": s.completed_at}
-        for s in scans
-    ]}
+    return {
+        "total": len(scans),
+        "scans": [
+            {
+                "id": s.id,
+                "target": Redactor.redact_url(str(s.target or "")),
+                "status": s.status,
+                "total_found": s.total_found,
+                "tags": s.tags,
+                "severity_filter": s.severity_filter,
+                "started_at": s.started_at,
+                "completed_at": s.completed_at,
+            }
+            for s in scans
+        ],
+    }
 
 
 @router.get("/scans/{scan_id}")
 async def get_scan(
     scan_id: str,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.NUCLEI_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     account_id = payload["account_id"]
@@ -156,19 +288,25 @@ async def get_scan(
     scan = result.scalar_one_or_none()
     if not scan:
         raise HTTPException(404, "Scan not found")
-    return {"id": scan.id, "target": scan.target, "status": scan.status,
-            "total_found": scan.total_found, "findings": [
-                {**finding, "fingerprint": nuclei_fingerprint(finding, target=scan.target, account_id=account_id)}
-                for finding in (scan.findings or [])
-            ],
-            "started_at": scan.started_at, "completed_at": scan.completed_at}
+    return {
+        "id": scan.id,
+        "target": Redactor.redact_url(str(scan.target or "")),
+        "status": scan.status,
+        "total_found": scan.total_found,
+        "findings": [
+            redact_nuclei_finding(finding, target=scan.target, account_id=account_id, include_fingerprint=True)
+            for finding in (scan.findings or [])
+        ],
+        "started_at": scan.started_at,
+        "completed_at": scan.completed_at,
+    }
 
 
 # ── Custom template management ────────────────────────────────────────────────
 
 @router.get("/templates")
 async def list_custom_templates(
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.NUCLEI_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """List all custom Nuclei templates uploaded for this account."""
@@ -178,12 +316,7 @@ async def list_custom_templates(
         .order_by(NucleiTemplate.created_at.desc())
     )
     templates = result.scalars().all()
-    return {"total": len(templates), "templates": [
-        {"id": t.id, "name": t.name, "template_id": t.template_id,
-         "severity": t.severity, "tags": t.tags, "enabled": t.enabled,
-         "description": t.description, "created_at": t.created_at}
-        for t in templates
-    ]}
+    return {"total": len(templates), "templates": [_serialize_template(template) for template in templates]}
 
 
 @router.post("/templates")
@@ -211,6 +344,12 @@ async def create_custom_template(
                 tags = [t.strip() for t in tags.split(",")]
     except Exception:
         pass
+    try:
+        template_id = normalize_template_ids([template_id])[0] if template_id else None
+        severity = (normalize_severities([severity]) or ["medium"])[0]
+        tags = normalize_tags(tags)
+    except ValueError as exc:
+        raise _selector_exception(exc) from exc
 
     t = NucleiTemplate(
         id=str(uuid.uuid4()), account_id=account_id, name=name,
@@ -261,7 +400,7 @@ async def delete_custom_template(
 @router.get("/templates/{template_id}/content")
 async def get_template_content(
     template_id: str,
-    payload: dict = Depends(RBAC.require_auth),
+    payload: dict = Depends(RBAC.require_permission(Permission.NUCLEI_RUN)),
     db: AsyncSession = Depends(get_db),
 ):
     """Return the raw YAML content of a custom template."""
@@ -274,4 +413,21 @@ async def get_template_content(
     t = result.scalar_one_or_none()
     if not t:
         raise HTTPException(404, "Template not found")
-    return {"id": t.id, "name": t.name, "yaml_content": t.yaml_content}
+    return {
+        "id": t.id,
+        "name": Redactor.redact_text(t.name or ""),
+        "yaml_content": Redactor.redact_text(t.yaml_content or ""),
+    }
+
+
+def _serialize_template(template: NucleiTemplate) -> dict:
+    return {
+        "id": template.id,
+        "name": Redactor.redact_text(template.name or ""),
+        "template_id": template.template_id,
+        "severity": template.severity,
+        "tags": Redactor.redact_json(template.tags or []),
+        "enabled": template.enabled,
+        "description": Redactor.redact_text(template.description or "") if template.description else None,
+        "created_at": template.created_at,
+    }

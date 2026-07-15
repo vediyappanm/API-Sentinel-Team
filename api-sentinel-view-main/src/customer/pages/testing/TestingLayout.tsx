@@ -11,9 +11,10 @@ const TestingLayout: React.FC = () => {
 
   const tabs = [
     { key: '', label: 'Vulnerabilities' },
-    { key: 'dashboard', label: 'Test Dashboard' },
+    { key: 'dashboard', label: 'Red Team Command' },
     { key: 'configuration', label: 'Profiles & Prep' },
     { key: 'inspector', label: 'Run Inspector' },
+    { key: 'governance', label: 'Release Governance' },
   ];
 
   const handleTabChange = (key: string) => {

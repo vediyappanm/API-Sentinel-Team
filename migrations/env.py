@@ -97,6 +97,7 @@ def do_run_migrations(connection):
     context.configure(connection=connection, target_metadata=target_metadata)
     with context.begin_transaction():
         context.run_migrations()
+    connection.commit()
 
 async def run_async_migrations():
     """In this scenario we need to create an Engine

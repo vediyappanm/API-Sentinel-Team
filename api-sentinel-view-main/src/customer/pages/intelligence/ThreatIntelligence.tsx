@@ -2,7 +2,6 @@ import React, { useMemo } from 'react';
 import { RefreshCw, Brain, Zap, Eye, Shield, TrendingUp, AlertTriangle, Activity, Target } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useThreatCategoryCount, useSeverityCount, useThreatTopN, useActorsGeoCount } from '@/hooks/use-protection';
-import { useDashboardKPIs } from '@/hooks/use-dashboard';
 import GeoMap from '@/components/charts/GeoMap';
 import DonutChart from '@/components/charts/DonutChart';
 import GlassCard from '@/components/ui/GlassCard';
@@ -31,15 +30,15 @@ const ThreatIntelligence: React.FC = () => {
   const topN = useThreatTopN();
   const geo = useActorsGeoCount();
 
-  const cats = (catCount.data as any)?.categoryCount ?? {};
-  const sev = (sevCount.data as any)?.severityCount ?? {};
+  const cats: Record<string, number> = catCount.data?.categoryCount ?? {};
+  const sev: Record<string, number> = sevCount.data?.severityCount ?? {};
   const crit = sev['CRITICAL'] ?? sev['HIGH'] ?? 0;
   const high = sev['HIGH'] ?? 0;
   const med = sev['MEDIUM'] ?? 0;
   const riskScore = computeRiskScore(crit, high, med);
 
-  const totalEvents = Object.values(cats).reduce((a: any, b: any) => a + b, 0) as number;
-  const topAttack = Object.entries(cats).sort((a: any, b: any) => b[1] - a[1])[0];
+  const totalEvents = Object.values(cats).reduce((a, b) => a + b, 0);
+  const topAttack = Object.entries(cats).sort((a, b) => b[1] - a[1])[0];
 
   const expertVotes = useMemo(() => {
     const catLower = Object.fromEntries(Object.entries(cats).map(([k, v]) => [k.toLowerCase(), v as number]));
@@ -66,7 +65,28 @@ const ThreatIntelligence: React.FC = () => {
     };
   }, [cats]);
 
-  const geoThreats = Object.entries(geo.data?.countPerCountry ?? {}).map(([code, count]) => ({ country: code, count }));
+  const geoThreats = Object.entries(geo.data?.countPerCountry ?? {}).map(([code, count]) => {
+    const countryCoords: Record<string, { lat: number; lng: number }> = {
+      US: { lat: 37.0902, lng: -95.7129 },
+      CN: { lat: 35.8617, lng: 104.1954 },
+      RU: { lat: 61.5240, lng: 105.3188 },
+      DE: { lat: 51.1657, lng: 10.4515 },
+      GB: { lat: 55.3781, lng: -3.4360 },
+      FR: { lat: 46.2276, lng: 2.2137 },
+      IN: { lat: 20.5937, lng: 78.9629 },
+      BR: { lat: -14.2350, lng: -51.9253 },
+      JP: { lat: 36.2048, lng: 138.2529 },
+      AU: { lat: -25.2744, lng: 133.7751 },
+    };
+    const coords = countryCoords[code] || countryCoords.US;
+    return {
+      lat: coords.lat,
+      lng: coords.lng,
+      severity: count > 100 ? 'critical' as const : count > 50 ? 'high' as const : 'medium' as const,
+      country: code,
+      count,
+    };
+  });
 
   const severityData = [
     { name: 'Critical', value: sev['CRITICAL'] ?? 0, color: '#EF4444' },
@@ -170,7 +190,7 @@ const ThreatIntelligence: React.FC = () => {
             </div>
           ) : (
             <div className="space-y-2.5">
-              {Object.entries(cats).sort((a: any, b: any) => b[1] - a[1]).filter(([, cnt]: any) => cnt > 0).slice(0, 8).map(([cat, cnt]: any, idx) => {
+              {Object.entries(cats).sort((a, b) => b[1] - a[1]).filter(([, cnt]) => cnt > 0).slice(0, 8).map(([cat, cnt], idx) => {
                 const pct = totalEvents > 0 ? (cnt / totalEvents) * 100 : 0;
                 const colors = ['#EF4444', '#632CA6', '#EAB308', '#3B82F6', '#7C3AED', '#22C55E', '#632CA6', '#EF4444'];
                 const col = colors[idx % colors.length];
@@ -252,14 +272,14 @@ const ThreatIntelligence: React.FC = () => {
       </div>
 
       {/* Top Attacked Endpoints */}
-      {(topN.data as any)?.top_apis?.length > 0 && (
+      {topN.data?.topApis?.length > 0 && (
         <GlassCard variant="default" className="p-5">
           <div className="flex items-center gap-2 mb-4">
             <Target size={14} className="text-sev-critical" />
             <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Most Targeted Attack Patterns</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-            {(topN.data as any).top_apis.slice(0, 5).map((item: any, idx: number) => (
+            {topN.data.topApis.slice(0, 5).map((item, idx) => (
               <div key={idx} className="metric-card p-3">
                 <span className="text-[9px] text-text-muted uppercase">#{idx + 1}</span>
                 <p className="text-xs font-semibold text-text-primary mt-1 truncate">{item.name}</p>
