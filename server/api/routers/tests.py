@@ -1,6 +1,7 @@
 import uuid
 import datetime
 import json
+import logging
 from fastapi import APIRouter, Depends, BackgroundTasks, Query, HTTPException, Request, Body
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -64,6 +65,7 @@ from server.modules.business_logic.active_tests import (
 from server.modules.business_logic.graph_builder import get_latest_graph
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 _pentest_profiles = PentestProfileService()
 _CONFIRMATORY_RETEST_SEVERITIES = {"HIGH", "CRITICAL"}
 _CANCEL_REQUESTED_STATUSES = {"CANCEL_REQUESTED", "CANCELED"}
@@ -511,6 +513,7 @@ def _build_scan_plan_for_run(
     has_openapi_spec: bool = False,
     engine_runtime_availability: dict[str, bool] | None = None,
     generated_templates: list[dict] | None = None,
+    test_accounts_count: int = 0,
 ) -> dict:
     scan_plan = build_readable_scan_plan(
         templates=_templates_for_scan_plan(templates, template_ids),
@@ -531,6 +534,7 @@ def _build_scan_plan_for_run(
         nuclei_available=bool(runtime_availability.get("nuclei")),
         zap_available=bool(runtime_availability.get("zap")),
         require_authenticated_active_scan=active_scan_auth_required(),
+        test_accounts_count=test_accounts_count,
     )
     if generated_templates:
         safe_generated = Redactor.redact_json(generated_templates)
@@ -859,6 +863,48 @@ async def _confirm_test_result(
         }
 
 
+async def _run_agentic_scan_pass(
+    *,
+    engine: ExecutionEngine,
+    endpoints: list,
+    templates: list,
+    account_id: int,
+    pentest_profile,
+    prior_findings: list | None = None,
+    test_accounts: list | None = None,
+) -> dict:
+    """Run the agentic proposer-confirmer loop over the scanned endpoints.
+
+    Thin adapter from ORM endpoints to the agentic ``run_agentic_scan_async``
+    entry point, reusing the live engine + real safety guards. Gated upstream by
+    AGENTIC_LLM_ENABLED; here we just translate inputs.
+    """
+    from server.modules.agentic.orchestration import run_agentic_scan_async
+
+    endpoint_dicts = [
+        {
+            "id": str(ep.id),
+            "method": ep.method,
+            "path": ep.path,
+            "host": ep.host or "",
+            "protocol": ep.protocol or "http",
+            "auth_types_found": ep.auth_types_found or [],
+            "private_variable_count": ep.private_variable_count or 0,
+            "account_id": account_id,
+        }
+        for ep in endpoints
+    ]
+    return await run_agentic_scan_async(
+        engine=engine,
+        endpoints=endpoint_dicts,
+        templates=templates,
+        prior_findings=prior_findings,
+        test_accounts=test_accounts,
+        allow_state_change=pentest_profile.allow_state_change,
+        allow_destructive_methods=pentest_profile.allow_destructive_methods,
+    )
+
+
 async def _scan_cancel_requested(db: AsyncSession, run_id: str) -> bool:
     status = await db.scalar(select(TestRun.status).where(TestRun.id == run_id))
     return (status or "").upper() in _CANCEL_REQUESTED_STATUSES
@@ -953,6 +999,9 @@ async def _run_security_tasks(
     err_count = 0
     canceled = False
     cancel_reason = None
+    # Confirmed deterministic findings, fed to the agentic pass as prior_findings
+    # so its strategist can chain from real leaks (e.g. a leaked id -> BOLA).
+    deterministic_findings: list[dict] = []
 
     session_factory = AsyncSessionLocal if db_bind is None else async_sessionmaker(
         bind=db_bind,
@@ -1208,7 +1257,11 @@ async def _run_security_tasks(
         test_accounts_result = await db.execute(
             select(TestAccount).where(TestAccount.account_id == account_id)
         )
-        roles_context = RolesContextBuilder().build(test_accounts_result.scalars().all())
+        # Retain the identity list so the agentic pass can run authenticated
+        # multi-identity BOLA/BFLA replay (needs >=2 identities), not just build
+        # the roles_context summary.
+        test_accounts = list(test_accounts_result.scalars().all())
+        roles_context = RolesContextBuilder().build(test_accounts)
         try:
             effective_test_intensity = normalize_test_intensity(
                 getattr(run_context, "test_intensity", None),
@@ -1474,6 +1527,14 @@ async def _run_security_tasks(
                     if is_vuln and not non_executed_skip:
                         vuln_count += 1
                         await aggregator.add_vulnerability(test_result, ep_dict)
+                        deterministic_findings.append(
+                            {
+                                "type": test_result.get("type") or test_result.get("template_id"),
+                                "endpoint_id": str(ep.id),
+                                "severity": test_result.get("severity"),
+                                "exposed_fields": test_result.get("exposed_fields") or [],
+                            }
+                        )
 
                     # Persist individual result
                     tr = TestResult(
@@ -1515,6 +1576,68 @@ async def _run_security_tasks(
                 })
             if canceled:
                 break
+
+        # ── Agentic proposer-confirmer pass (opt-in via AGENTIC_LLM_ENABLED) ──
+        # Runs AFTER the deterministic scan, reusing the same engine, endpoints,
+        # and safety guards. The LLM only proposes which category to try on which
+        # in-scope endpoint; the deterministic engine executes and confirms. A
+        # no-op when disabled, and fully wrapped so it can never fail a scan.
+        if not canceled and settings.AGENTIC_LLM_ENABLED:
+            try:
+                agentic_result = await _run_agentic_scan_pass(
+                    engine=engine,
+                    endpoints=endpoints,
+                    templates=runtime_templates,
+                    account_id=account_id,
+                    pentest_profile=pentest_profile,
+                    prior_findings=deterministic_findings,
+                    test_accounts=test_accounts,
+                )
+                agentic_findings = (
+                    agentic_result.get("outcome", {}).get("confirmed_findings", [])
+                )
+                endpoint_by_id = {str(ep.id): ep for ep in endpoints}
+                for finding in agentic_findings:
+                    ep = endpoint_by_id.get(str(finding.get("endpoint_id")))
+                    if ep is None:
+                        continue
+                    total += 1
+                    vuln_count += 1
+                    db.add(
+                        TestResult(
+                            run_id=run_id,
+                            endpoint_id=ep.id,
+                            template_id=f"AGENTIC:{finding.get('type', 'UNKNOWN')}",
+                            is_vulnerable=True,
+                            severity=finding.get("severity"),
+                            evidence=json.dumps(
+                                {
+                                    "engine": "agentic",
+                                    "type": finding.get("type"),
+                                    "confidence": finding.get("confidence"),
+                                    "rationale": finding.get("rationale"),
+                                },
+                                sort_keys=True,
+                            ),
+                            skip_reason=None,
+                        )
+                    )
+            except Exception as exc:  # never let the agentic pass break a scan
+                logger.warning("agentic_pass_failed run_id=%s error=%s", run_id, str(exc))
+
+        # Stamp last_tested on the scanned endpoints so continuous-discovery does
+        # not re-queue them, and so the inventory reflects test coverage. Only on
+        # a completed (non-canceled) run.
+        if not canceled and endpoints:
+            scanned_endpoint_ids = [ep.id for ep in endpoints]
+            await db.execute(
+                update(APIEndpoint)
+                .where(
+                    APIEndpoint.account_id == account_id,
+                    APIEndpoint.id.in_(scanned_endpoint_ids),
+                )
+                .values(last_tested=datetime.datetime.now(datetime.timezone.utc))
+            )
 
         final_update_filters = [TestRun.id == run_id, TestRun.account_id == account_id]
         if worker_id:
@@ -1789,7 +1912,8 @@ async def run_scan(
     test_accounts_result = await db.execute(
         select(TestAccount).where(TestAccount.account_id == account_id)
     )
-    roles_context = RolesContextBuilder().build(test_accounts_result.scalars().all())
+    test_accounts_list = test_accounts_result.scalars().all()
+    roles_context = RolesContextBuilder().build(test_accounts_list)
     has_openapi_spec = await _account_has_openapi_spec(db, account_id=account_id)
     engine_runtime_availability = _scan_engine_runtime_availability()
     scan_plan = _build_scan_plan_for_run(
@@ -1804,6 +1928,7 @@ async def run_scan(
         has_openapi_spec=has_openapi_spec,
         engine_runtime_availability=engine_runtime_availability,
         generated_templates=generated_templates,
+        test_accounts_count=len(test_accounts_list),
     )
 
     run_id = str(uuid.uuid4())
