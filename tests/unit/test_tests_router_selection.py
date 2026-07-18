@@ -1666,7 +1666,7 @@ async def test_run_scan_persists_multi_engine_plan_for_worker_accountability(db_
         "ready": 4,
         "available": 1,
         "disabled": 0,
-        "blocked": 0,
+        "blocked": 1,  # authorization_replay is blocked (no test accounts configured)
     }
     assert audit.details["scan_plan"]["ready_active_engines"] == [
         "templates",

@@ -15,6 +15,7 @@ QUERYABLE_AUTH_POSTURE_KEYS = {
 QUERYABLE_CONTROL_PLANE_VALUES = {
     "auth_context",
     "auth_context_ready",
+    "authorization_replay",
     "bfla_replay_testable",
     "body_key",
     "bola_replay_testable",

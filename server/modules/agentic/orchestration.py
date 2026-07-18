@@ -204,10 +204,14 @@ async def _run_targeted_detectors(
     allow_state_change: bool,
     max_endpoints: int = 100,
 ) -> list[dict[str, Any]]:
-    """Run sensitive-exposure / SQLi / mass-assignment detectors per endpoint."""
+    """Run sensitive-exposure / SQLi / mass-assignment / business-abuse detectors per endpoint."""
+    from server.modules.identity.business_abuse import detect_coupon_reuse, detect_otp_spam
     from server.modules.identity.mass_assignment import detect_mass_assignment
     from server.modules.identity.sensitive_exposure import detect_sensitive_exposure
-    from server.modules.identity.sqli_probe import detect_error_based_sqli
+    from server.modules.identity.sqli_probe import (
+        detect_boolean_based_sqli,
+        detect_error_based_sqli,
+    )
     from server.modules.test_executor.target_guard import TargetGuard
 
     guard = TargetGuard.from_settings(settings)
@@ -230,6 +234,7 @@ async def _run_targeted_detectors(
             if method in {"GET", "HEAD"}:
                 _record(await detect_sensitive_exposure(endpoint=endpoint, target_guard=guard), endpoint)
                 _record(await detect_error_based_sqli(endpoint=endpoint, target_guard=guard), endpoint)
+                _record(await detect_boolean_based_sqli(endpoint=endpoint, target_guard=guard), endpoint)
             elif method in {"POST", "PUT", "PATCH"}:
                 # Mass assignment needs a base payload; use the captured/sampled body
                 # when present, else a minimal generic registration-style payload.
@@ -238,6 +243,22 @@ async def _run_targeted_detectors(
                     await detect_mass_assignment(
                         endpoint=endpoint,
                         base_payload=base_payload,
+                        target_guard=guard,
+                        allow_state_change=allow_state_change,
+                    ),
+                    endpoint,
+                )
+                _record(
+                    await detect_otp_spam(
+                        endpoint=endpoint,
+                        target_guard=guard,
+                        allow_state_change=allow_state_change,
+                    ),
+                    endpoint,
+                )
+                _record(
+                    await detect_coupon_reuse(
+                        endpoint=endpoint,
                         target_guard=guard,
                         allow_state_change=allow_state_change,
                     ),
