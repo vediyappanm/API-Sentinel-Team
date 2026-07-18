@@ -41,11 +41,7 @@ async function fetchSensitiveDataSummary(): Promise<SensitiveDataSummary> {
   return summary;
 }
 
-const MOCK_DATA: SensitiveDataSummary = {
-  total: 14,
-  by_type: { email: 6, credit_card: 3, ssn: 2, bearer_token: 2, aws_key: 1 },
-  by_severity: { HIGH: 5, MEDIUM: 7, LOW: 2 },
-};
+
 
 const TYPE_COLORS: Record<string, string> = {
   email: '#3B82F6',
@@ -70,7 +66,8 @@ const SensitiveDataWidget: React.FC<Props> = () => {
     retry: 1,
   });
 
-  const summary = isError || !data ? MOCK_DATA : data;
+  const summary = data || { total: 0, by_type: {}, by_severity: { HIGH: 0, MEDIUM: 0, LOW: 0 } };
+  const isEmpty = summary.total === 0;
 
   const typeEntries = useMemo(
     () => Object.entries(summary.by_type).sort((a, b) => b[1] - a[1]),
@@ -160,9 +157,9 @@ const SensitiveDataWidget: React.FC<Props> = () => {
         </div>
       </div>
 
-      {isError && (
+      {isEmpty && !isLoading && (
         <p className="text-[10px] text-text-muted text-center">
-          Showing sample data — backend endpoint not yet available.
+          Awaiting telemetry — no sensitive data detected yet.
         </p>
       )}
     </GlassCard>

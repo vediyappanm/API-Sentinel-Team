@@ -26,6 +26,7 @@ from server.modules.persistence.database import AsyncSessionLocal, engine, get_d
 from server.modules.recon.scheduler import ReconScheduler
 from server.modules.response.default_playbooks import ensure_default_playbooks
 from server.modules.scheduler.test_scheduler import TestScheduler
+from server.modules.scheduler.continuous_testing import ContinuousTestingProcessor
 from server.modules.storage.archiver import ArchiveProcessor
 from server.modules.storage.warm_exporter import WarmStoreExporter
 from server.modules.streaming.kafka_alert_consumer import KafkaAlertConsumer
@@ -165,6 +166,14 @@ def _build_runtime_components() -> list[tuple[str, Callable[[], Awaitable[None]]
     if settings.STARTUP_ENABLE_RECON_SCHEDULER and settings.RECON_SCHEDULER_ENABLED:
         recon_scheduler = ReconScheduler(interval_sec=settings.RECON_SCHEDULER_INTERVAL_SECONDS)
         components.append(("recon_scheduler", recon_scheduler.start, recon_scheduler.stop))
+
+    if settings.STARTUP_ENABLE_CONTINUOUS_TESTING and settings.CONTINUOUS_TESTING_ENABLED:
+        continuous_testing = ContinuousTestingProcessor(
+            interval_sec=settings.CONTINUOUS_TESTING_SWEEP_INTERVAL_SECONDS
+        )
+        components.append(
+            ("continuous_testing", continuous_testing.start, continuous_testing.stop)
+        )
 
     if settings.STARTUP_ENABLE_STREAM_PIPELINE and settings.STREAM_PROCESSING_ENABLED:
         stream_pipeline = StreamPipeline()

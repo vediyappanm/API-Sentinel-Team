@@ -19,14 +19,7 @@ interface SchemaViolation {
   last_seen: string;
 }
 
-const DEMO_VIOLATIONS: SchemaViolation[] = [
-  { id: '1', endpoint: '/api/users', method: 'POST', violation_type: 'MISSING_REQUIRED_FIELD', field: 'email', expected: 'string (required)', actual: 'absent', severity: 'high', count: 23, last_seen: new Date(Date.now() - 300000).toISOString() },
-  { id: '2', endpoint: '/api/orders', method: 'POST', violation_type: 'TYPE_MISMATCH', field: 'amount', expected: 'number', actual: 'string "19.99"', severity: 'medium', count: 7, last_seen: new Date(Date.now() - 600000).toISOString() },
-  { id: '3', endpoint: '/api/products/:id', method: 'PUT', violation_type: 'EXTRA_FIELD', field: 'internal_cost', expected: 'absent (not in schema)', actual: 'number', severity: 'high', count: 3, last_seen: new Date(Date.now() - 1800000).toISOString() },
-  { id: '4', endpoint: '/api/auth/login', method: 'POST', violation_type: 'ENUM_VIOLATION', field: 'role', expected: 'user|admin|guest', actual: '"superuser"', severity: 'high', count: 1, last_seen: new Date(Date.now() - 3600000).toISOString() },
-  { id: '5', endpoint: '/api/payments', method: 'POST', violation_type: 'FORMAT_VIOLATION', field: 'card_number', expected: 'pattern: /^[0-9]{16}$/', actual: '4111-1111-1111-1111 (dashes)', severity: 'medium', count: 12, last_seen: new Date(Date.now() - 900000).toISOString() },
-  { id: '6', endpoint: '/api/users/:id', method: 'PATCH', violation_type: 'UNEXPECTED_NULL', field: 'username', expected: 'string (not nullable)', actual: 'null', severity: 'low', count: 2, last_seen: new Date(Date.now() - 7200000).toISOString() },
-];
+
 
 const VIOLATION_TYPE_LABELS: Record<string, string> = {
   MISSING_REQUIRED_FIELD: 'Missing Required Field',
@@ -101,8 +94,8 @@ export default function SchemaValidation() {
     retry: false,
   });
 
-  const violations: SchemaViolation[] = data?.violations?.length ? data.violations : DEMO_VIOLATIONS;
-  const isDemo = !data?.violations?.length;
+  const violations: SchemaViolation[] = data?.violations || [];
+  const isEmpty = violations.length === 0;
 
   const filtered = severityFilter === 'all' ? violations : violations.filter(v => v.severity === severityFilter);
   const highCount = violations.filter(v => v.severity === 'high').length;
@@ -121,9 +114,9 @@ export default function SchemaValidation() {
             Requests that violate your OpenAPI schema — type mismatches, missing fields, mass assignment
           </p>
         </div>
-        {isDemo && (
-          <span className="text-[10px] bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">
-            Demo data · Upload OpenAPI spec to enable real validation
+        {isEmpty && (
+          <span className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
+            Awaiting data · Upload OpenAPI spec to enable real validation
           </span>
         )}
       </div>

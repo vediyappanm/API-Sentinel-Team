@@ -114,6 +114,16 @@ def _complete_confirmed_vulnerability_evidence(template_id: str = "historic-bola
     return evidence
 
 
+def _refresh_artifact_hash(payload: dict) -> None:
+    from server.modules.pentest.execution_artifacts import (
+        _artifact_digest,
+        verify_execution_artifact_payload,
+    )
+
+    payload["artifact_hash"] = _artifact_digest(payload)
+    payload["artifact_verification"] = verify_execution_artifact_payload(payload)
+
+
 @pytest_asyncio.fixture
 async def admin_token():
     """Return a test admin cookie for the default tenant used by these fixtures."""
@@ -380,6 +390,116 @@ async def test_strict_gate_blocks_authorization_replay_without_boundary_coverage
     assert data["scan_context"]["auth_context_reason"] == "authorization_replay_test_accounts"
     assert data["counts"]["missing_authorization_boundary_results"] == 1
     assert data["missing_authorization_boundary_results"][0]["template_id"] == "bfla-authz-replay"
+    assert "raw-attacker-token" not in str(data)
+    assert "tenant-a" not in str(data)
+
+
+async def test_strict_gate_blocks_authorization_replay_boundary_that_does_not_match_issue_type(
+    client: AsyncClient,
+    db_session,
+    auth_headers,
+):
+    from server.models.core import TestRun, TestResult
+    from server.modules.test_executor.evidence import evidence_digest
+    import uuid
+
+    run_id = str(uuid.uuid4())
+    evidence = {
+        "engine": "authorization_replay",
+        "template_id": "bfla-authz-replay",
+        "issue_type": "BFLA",
+        "identity_pair": {
+            "victim": {"role": "ADMIN", "id": "victim-admin"},
+            "attacker": {"role": "MEMBER", "id": "attacker-member"},
+        },
+        "replay_request": {
+            "method": "GET",
+            "url": "https://api.example.com/admin/users/123",
+            "headers": {
+                "Authorization": "Bearer raw-attacker-token",
+                "X-Tenant-ID": "tenant-a",
+            },
+        },
+        "authorization_boundary_coverage": {
+            "primary_boundary_kind": "cross_tenant",
+            "boundary_kinds": ["cross_tenant"],
+            "compared_fields": ["X-Tenant-ID"],
+            "changed_fields": ["X-Tenant-ID"],
+            "unchanged_fields": ["X-Request-ID"],
+        },
+        "evidence_completeness": {
+            "complete": True,
+            "required": ["evidence_completeness"],
+            "present": ["evidence_completeness"],
+            "missing": [],
+        },
+        "safety_policies": {
+            "target_guard_policy": {
+                "policy": "target_guard",
+                "blocked": False,
+                "url": "https://api.example.com/admin/users/123",
+            },
+            "state_change_policy": {
+                "policy": "state_change_guard",
+                "method": "GET",
+                "allow_state_change": False,
+                "allow_destructive_methods": False,
+                "destructive_method": False,
+            },
+        },
+        "retest_support": {
+            "supported": True,
+            "queued_scan_supported": True,
+            "manual_outcome_supported": True,
+            "reason": "queued_scan_available",
+            "missing_fields": [],
+        },
+    }
+    evidence["hash_algorithm"] = "sha256"
+    evidence["evidence_hash"] = evidence_digest(evidence)
+    db_session.add(
+        TestRun(
+            id=run_id,
+            account_id=1000000,
+            status="COMPLETED",
+            total_tests=1,
+            vulnerable_count=0,
+            error_count=0,
+            template_ids=["bfla-authz-replay"],
+            endpoint_ids=["ep-authz"],
+        )
+    )
+    db_session.add(
+        TestResult(
+            id=str(uuid.uuid4()),
+            run_id=run_id,
+            endpoint_id="ep-authz",
+            template_id="bfla-authz-replay",
+            is_vulnerable=False,
+            severity="INFO",
+            evidence=json.dumps(evidence, sort_keys=True),
+        )
+    )
+    await db_session.commit()
+
+    r = await client.get(f"/api/cicd/gate/{run_id}", headers=auth_headers)
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "FAILED"
+    assert data["reason"] == "missing_authorization_boundary_coverage"
+    assert data["counts"]["missing_authorization_boundary_results"] == 1
+    coverage = data["missing_authorization_boundary_results"][0]["authorization_boundary_coverage"]
+    assert coverage == {
+        "present": True,
+        "complete": False,
+        "reason": "incomplete_authorization_boundary_coverage",
+        "boundary_kinds": ["cross_tenant"],
+        "compared_boundary_field_count": 1,
+        "changed_boundary_field_count": 1,
+        "unchanged_boundary_field_count": 1,
+        "missing_fields": ["bfla_boundary_kind"],
+    }
     assert "raw-attacker-token" not in str(data)
     assert "tenant-a" not in str(data)
 
@@ -699,6 +819,142 @@ async def test_strict_gate_fails_when_engine_execution_artifact_payload_is_for_w
     assert "raw-runtime-token" not in str(data)
 
 
+async def test_strict_gate_fails_when_engine_artifact_content_governance_is_not_proven(
+    client: AsyncClient,
+    db_session,
+    auth_headers,
+):
+    from server.models.core import AuthProfile, PentestArtifact, PentestProfile, TestResult, TestRun
+    from server.modules.pentest.execution_artifacts import build_execution_artifact_payload
+    import uuid
+
+    run_id = str(uuid.uuid4())
+    auth_profile_id = str(uuid.uuid4())
+    profile_id = str(uuid.uuid4())
+    engine_plan = [
+        {"engine": "schemathesis", "status": "ready", "reason": "requirements_satisfied"},
+    ]
+    payload = build_execution_artifact_payload(
+        engine="schemathesis",
+        target_url="https://api.example.com/openapi.json?token=raw-runtime-token",
+        profile_id=profile_id,
+        execution={"status": "COMPLETED", "stdout": "token=raw-runtime-token"},
+        engine_plan=engine_plan,
+        run_id=run_id,
+    )
+    payload["content_redacted"] = False
+    payload["secret_values_persisted"] = True
+    payload["normalized_evidence"]["secret_values_persisted"] = True
+    payload["execution"]["stdout"] = "Authorization: Bearer raw-runtime-token token=raw-runtime-token"
+    _refresh_artifact_hash(payload)
+    db_session.add(
+        AuthProfile(
+            id=auth_profile_id,
+            account_id=1000000,
+            name=f"content-governance-auth-{auth_profile_id}",
+            auth_mode="header",
+            header_name="Authorization",
+            header_value="Bearer raw-runtime-token",
+            is_active=True,
+        )
+    )
+    db_session.add(
+        PentestProfile(
+            id=profile_id,
+            account_id=1000000,
+            name=f"content-governance-profile-{profile_id}",
+            auth_profile_id=auth_profile_id,
+        )
+    )
+    db_session.add(
+        TestRun(
+            id=run_id,
+            account_id=1000000,
+            status="COMPLETED",
+            total_tests=1,
+            vulnerable_count=0,
+            error_count=0,
+            template_ids=["engine-clean-check"],
+            endpoint_ids=["ep-engine-content-governance"],
+            pentest_profile_id=profile_id,
+            scan_plan={"engine_plan": engine_plan},
+        )
+    )
+    db_session.add(
+        TestResult(
+            id=str(uuid.uuid4()),
+            run_id=run_id,
+            endpoint_id="ep-engine-content-governance",
+            template_id="engine-clean-check",
+            is_vulnerable=False,
+            severity="INFO",
+            evidence=_complete_clean_evidence(),
+        )
+    )
+    db_session.add(
+        PentestArtifact(
+            account_id=1000000,
+            run_id=run_id,
+            pentest_profile_id=profile_id,
+            artifact_type="schemathesis_execution",
+            filename="schemathesis-execution.json",
+            content_json=payload,
+        )
+    )
+    await db_session.commit()
+
+    r = await client.get(f"/api/cicd/gate/{run_id}", headers=auth_headers)
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "FAILED"
+    assert data["passed"] is False
+    assert data["reason"] == "artifact_content_governance_failed"
+    assert data["counts"]["missing_engine_artifact_results"] == 1
+    assert data["counts"]["content_governance_failed_engine_artifacts"] == 1
+    expected_governance = {
+        "required": True,
+        "complete": False,
+        "status": "failed",
+        "redaction_policy": "api_sentinel_redactor",
+        "normalized_evidence_status": "present",
+        "failed_fields": [
+            "content_redacted",
+            "secret_values_persisted",
+            "normalized_evidence.secret_values_persisted",
+        ],
+        "missing_fields": [],
+    }
+    assert data["missing_engine_artifact_results"] == [
+        {
+            "engine": "schemathesis",
+            "artifact_type": "schemathesis_execution",
+            "status": "artifact_content_governance_failed",
+            "verification_status": "VERIFIED",
+            "normalized_evidence_status": "present",
+            "artifact_content_governance": expected_governance,
+        }
+    ]
+    assert data["content_governance_failed_engine_artifacts"] == [
+        {
+            "engine": "schemathesis",
+            "artifact_type": "schemathesis_execution",
+            "present": True,
+            "verified": False,
+            "status": "artifact_content_governance_failed",
+            "hash_algorithm": "sha256",
+            "artifact_hash": payload["artifact_hash"],
+            "expected_hash": payload["artifact_hash"],
+            "actual_hash": payload["artifact_hash"],
+            "artifact_content_governance": expected_governance,
+        }
+    ]
+    accountability = data["report_artifacts"]["engine_accountability"]
+    assert accountability["complete"] is False
+    assert accountability["content_governance_failed_artifact_count"] == 1
+    assert "raw-runtime-token" not in str(data)
+
+
 async def test_strict_gate_fails_when_engine_execution_artifacts_are_duplicated(
     client: AsyncClient,
     db_session,
@@ -826,6 +1082,138 @@ async def test_strict_gate_fails_when_engine_execution_artifacts_are_duplicated(
     accountability = data["report_artifacts"]["engine_accountability"]
     assert accountability["complete"] is False
     assert accountability["duplicate_artifact_count"] == 1
+    assert "raw-runtime-token" not in str(data)
+
+
+async def test_strict_gate_fails_when_engine_artifact_lacks_external_worker_isolation_contract(
+    client: AsyncClient,
+    db_session,
+    auth_headers,
+):
+    from server.models.core import AuthProfile, PentestArtifact, PentestProfile, TestResult, TestRun
+    from server.modules.pentest.execution_artifacts import build_execution_artifact_payload
+    import uuid
+
+    run_id = str(uuid.uuid4())
+    auth_profile_id = str(uuid.uuid4())
+    profile_id = str(uuid.uuid4())
+    engine_plan = [
+        {"engine": "schemathesis", "status": "ready", "reason": "requirements_satisfied"},
+    ]
+    payload = build_execution_artifact_payload(
+        engine="schemathesis",
+        target_url="https://api.example.com/openapi.json?token=raw-runtime-token",
+        profile_id=profile_id,
+        execution={"status": "COMPLETED", "stdout": "token=raw-runtime-token"},
+        engine_plan=engine_plan,
+        run_id=run_id,
+        worker_isolation={
+            "configured_worker_isolation_mode": "kubernetes_job",
+            "resource_limits": {
+                "cpu": "750m",
+                "memory": "768Mi",
+                "ephemeral_storage": "1536Mi",
+            },
+            "kubernetes_job": {"enabled": True},
+            "secret_values_persisted": False,
+        },
+    )
+    db_session.add(
+        AuthProfile(
+            id=auth_profile_id,
+            account_id=1000000,
+            name=f"worker-isolation-auth-{auth_profile_id}",
+            auth_mode="header",
+            header_name="Authorization",
+            header_value="Bearer raw-runtime-token",
+            is_active=True,
+        )
+    )
+    db_session.add(
+        PentestProfile(
+            id=profile_id,
+            account_id=1000000,
+            name=f"worker-isolation-profile-{profile_id}",
+            auth_profile_id=auth_profile_id,
+        )
+    )
+    db_session.add(
+        TestRun(
+            id=run_id,
+            account_id=1000000,
+            status="COMPLETED",
+            total_tests=1,
+            vulnerable_count=0,
+            error_count=0,
+            template_ids=["engine-clean-check"],
+            endpoint_ids=["ep-engine"],
+            pentest_profile_id=profile_id,
+            scan_plan={"engine_plan": engine_plan},
+        )
+    )
+    db_session.add(
+        TestResult(
+            id=str(uuid.uuid4()),
+            run_id=run_id,
+            endpoint_id="ep-engine",
+            template_id="engine-clean-check",
+            is_vulnerable=False,
+            severity="INFO",
+            evidence=_complete_clean_evidence(),
+        )
+    )
+    db_session.add(
+        PentestArtifact(
+            account_id=1000000,
+            run_id=run_id,
+            pentest_profile_id=profile_id,
+            artifact_type="schemathesis_execution",
+            filename="schemathesis-execution.json",
+            content_json=payload,
+        )
+    )
+    await db_session.commit()
+
+    r = await client.get(f"/api/cicd/gate/{run_id}", headers=auth_headers)
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "FAILED"
+    assert data["passed"] is False
+    assert data["reason"] == "incomplete_worker_isolation_artifacts"
+    assert data["counts"]["missing_engine_artifact_results"] == 0
+    assert data["counts"]["incomplete_worker_isolation_engine_artifacts"] == 1
+    assert data["incomplete_worker_isolation_engine_artifacts"] == [
+        {
+            "engine": "schemathesis",
+            "artifact_type": "schemathesis_execution",
+            "present": True,
+            "verified": False,
+            "status": "worker_isolation_incomplete",
+            "hash_algorithm": "sha256",
+            "artifact_hash": payload["artifact_hash"],
+            "expected_hash": payload["artifact_hash"],
+            "actual_hash": payload["artifact_hash"],
+            "worker_isolation": {
+                "required": True,
+                "complete": False,
+                "status": "incomplete",
+                "mode": "kubernetes_job",
+                "missing_fields": [
+                    "session",
+                    "sandbox.created",
+                    "sandbox.path_confined_to_work_dir",
+                    "manifest.sha256",
+                    "enforcement.runtime_context_created",
+                    "enforcement.filesystem_workdir_enforced",
+                    "enforcement.subprocess_cwd_confined",
+                ],
+            },
+        }
+    ]
+    accountability = data["report_artifacts"]["engine_accountability"]
+    assert accountability["complete"] is False
+    assert accountability["incomplete_worker_isolation_artifact_count"] == 1
     assert "raw-runtime-token" not in str(data)
 
 

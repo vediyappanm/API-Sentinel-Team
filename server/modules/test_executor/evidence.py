@@ -461,7 +461,13 @@ def _has_sent_request(value: Any) -> bool:
 def _has_received_response(value: Any) -> bool:
     if not isinstance(value, dict):
         return False
-    return any(item not in (None, "", {}, []) for item in value.values())
+    status = value.get("status_code")
+    if isinstance(status, int) and status > 0:
+        return True
+    # For engines that don't emit a numeric status code, accept a non-empty body
+    # (e.g. schemathesis external-report mode before HTTP extraction is available).
+    body = value.get("body")
+    return bool(body) and status is None
 
 
 def evidence_reproducibility_contract(evidence: dict[str, Any]) -> dict[str, Any]:

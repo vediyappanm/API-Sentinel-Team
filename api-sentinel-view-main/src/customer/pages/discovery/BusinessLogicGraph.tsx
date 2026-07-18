@@ -131,32 +131,7 @@ function riskColor(risk?: number) {
   return '#22c55e';
 }
 
-// Fallback demo data when no graph is built
-const DEMO_NODES: GraphNode[] = [
-  { id: 'POST /auth/login', method: 'POST', path: '/auth/login', call_count: 1240, avg_latency_ms: 42 },
-  { id: 'GET /users/me', method: 'GET', path: '/users/me', call_count: 8700, avg_latency_ms: 18 },
-  { id: 'GET /orders', method: 'GET', path: '/orders', call_count: 3100, avg_latency_ms: 55 },
-  { id: 'POST /orders', method: 'POST', path: '/orders', call_count: 890, avg_latency_ms: 120 },
-  { id: 'GET /products', method: 'GET', path: '/products', call_count: 5200, avg_latency_ms: 30 },
-  { id: 'PUT /users/:id', method: 'PUT', path: '/users/:id', call_count: 340, avg_latency_ms: 65, risk_score: 0.72 },
-  { id: 'DELETE /orders/:id', method: 'DELETE', path: '/orders/:id', call_count: 120, avg_latency_ms: 40, risk_score: 0.45 },
-  { id: 'GET /payments', method: 'GET', path: '/payments', call_count: 760, avg_latency_ms: 35 },
-];
 
-const DEMO_EDGES: GraphEdge[] = [
-  { source: 'POST /auth/login', target: 'GET /users/me', weight: 0.9, transition_count: 1100 },
-  { source: 'GET /users/me', target: 'GET /orders', weight: 0.6, transition_count: 890 },
-  { source: 'GET /users/me', target: 'GET /products', weight: 0.7, transition_count: 1200 },
-  { source: 'GET /products', target: 'POST /orders', weight: 0.4, transition_count: 780 },
-  { source: 'POST /orders', target: 'GET /payments', weight: 0.8, transition_count: 820 },
-  { source: 'GET /orders', target: 'DELETE /orders/:id', weight: 0.1, transition_count: 95 },
-  { source: 'GET /users/me', target: 'PUT /users/:id', weight: 0.05, transition_count: 40 },
-];
-
-const DEMO_VIOLATIONS: Violation[] = [
-  { id: '1', actor_id: 'ip:1.2.3.4', from_path: 'POST /auth/login', to_path: 'DELETE /orders/:id', type: 'UNEXPECTED_SEQUENCE', confidence: 0.91, created_at: new Date(Date.now() - 120000).toISOString() },
-  { id: '2', actor_id: 'user:bob', from_path: 'GET /products', to_path: 'PUT /users/:id', type: 'PRIVILEGE_ESCALATION', confidence: 0.77, created_at: new Date(Date.now() - 900000).toISOString() },
-];
 
 export default function BusinessLogicGraph() {
   const qc = useQueryClient();
@@ -181,10 +156,10 @@ export default function BusinessLogicGraph() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['business-logic-graph'] }),
   });
 
-  const nodes: GraphNode[] = graphData?.nodes?.length ? graphData.nodes : DEMO_NODES;
-  const edges: GraphEdge[] = graphData?.edges?.length ? graphData.edges : DEMO_EDGES;
-  const violations: Violation[] = violationsData?.violations?.length ? violationsData.violations : DEMO_VIOLATIONS;
-  const isDemo = !graphData?.nodes?.length;
+  const nodes: GraphNode[] = graphData?.nodes || [];
+  const edges: GraphEdge[] = graphData?.edges || [];
+  const violations: Violation[] = violationsData?.violations || [];
+  const isEmpty = nodes.length === 0 && edges.length === 0;
 
   const positions = useForceLayout(nodes, edges);
   const W = 800, H = 560;
@@ -207,9 +182,9 @@ export default function BusinessLogicGraph() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {isDemo && (
-            <span className="text-[10px] bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">
-              Demo data · Rebuild to analyse real traffic
+          {isEmpty && (
+            <span className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
+              Awaiting data · Rebuild to analyze real traffic
             </span>
           )}
           {graphData?.built_at && (

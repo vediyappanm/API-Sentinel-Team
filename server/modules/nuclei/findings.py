@@ -121,6 +121,7 @@ def build_nuclei_vulnerability_data(
             "severity": severity,
         },
         received_response=_nuclei_received_response(finding),
+        sent_request=_nuclei_sent_request(finding, evidence_url=evidence_url, method=method),
         similarity={
             "source": "nuclei_matcher",
             "confidence": "external_report",
@@ -146,16 +147,39 @@ def build_nuclei_vulnerability_data(
 
 def _nuclei_received_response(finding: dict[str, Any]) -> dict[str, Any]:
     response: dict[str, Any] = {}
-    status_code = finding.get("status-code") or finding.get("status_code") or finding.get("response-status-code")
-    try:
-        response["status_code"] = int(status_code or 0)
-    except (TypeError, ValueError):
-        response["status_code"] = 0
+    raw_status = finding.get("status-code") or finding.get("status_code") or finding.get("response-status-code")
+    if raw_status is not None:
+        try:
+            code = int(raw_status)
+            if code > 0:
+                response["status_code"] = code
+        except (TypeError, ValueError):
+            pass
 
     body = finding.get("response") or finding.get("response-body") or finding.get("extracted-results")
     if body not in (None, "", []):
         response["body"] = body
     return response
+
+
+def _nuclei_sent_request(finding: dict[str, Any], *, evidence_url: str, method: str) -> dict[str, Any] | None:
+    """Extract a real sent_request from nuclei's curl-command or raw request field."""
+    import re as _re
+
+    curl_cmd = finding.get("curl-command") or finding.get("curl_command")
+    if curl_cmd and isinstance(curl_cmd, str):
+        m = _re.search(r"-X\s+(\w+)\s+['\"]?(https?://[^\s'\"]+)", curl_cmd)
+        if m:
+            return {"method": m.group(1).upper(), "url": m.group(2)}
+
+    raw_request = finding.get("request")
+    if raw_request and isinstance(raw_request, str):
+        first_line = raw_request.split("\n", 1)[0].strip()
+        parts = first_line.split(" ")
+        if len(parts) >= 2 and parts[0].upper() in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}:
+            return {"method": parts[0].upper(), "url": evidence_url}
+
+    return None
 
 
 async def persist_nuclei_findings(

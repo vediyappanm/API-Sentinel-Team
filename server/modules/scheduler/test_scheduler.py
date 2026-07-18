@@ -248,6 +248,7 @@ class TestScheduler:
         endpoint_ids: list,
         account_id: int,
         pentest_profile_id: str | None = None,
+        trigger_source: str = "schedule",
     ):
         """Called by APScheduler — import here to avoid circular imports."""
         if kill_switch_enabled():
@@ -307,6 +308,7 @@ class TestScheduler:
                     "blocked_endpoints": blocked_auth_targets,
                 }
 
+            is_schedule = trigger_source == "schedule"
             db.add(
                 TestRun(
                     id=run_id,
@@ -315,8 +317,8 @@ class TestScheduler:
                     template_ids=template_ids,
                     endpoint_ids=endpoint_ids,
                     pentest_profile_id=pentest_profile.id if pentest_profile is not None else None,
-                    trigger_source="schedule",
-                    source_schedule_id=schedule_id,
+                    trigger_source=trigger_source,
+                    source_schedule_id=schedule_id if is_schedule else None,
                 )
             )
             await log_action(
@@ -326,16 +328,16 @@ class TestScheduler:
                 resource_type="test_run",
                 resource_id=run_id,
                 details={
-                    "source": "schedule",
-                    "schedule_id": schedule_id,
-                    "source_schedule_id": schedule_id,
+                    "source": trigger_source,
+                    "schedule_id": schedule_id if is_schedule else None,
+                    "source_schedule_id": schedule_id if is_schedule else None,
                     "template_count": len(template_ids or []),
                     "endpoint_count": len(endpoint_ids or []),
                     "planned_tests": len(template_ids or []) * len(endpoint_ids or []),
                     "pentest_profile_id": pentest_profile.id if pentest_profile is not None else None,
                     **active_scan_auth_audit_context(pentest_profile, auth_profile),
                     "execution_mode": execution_mode,
-                    "trigger_source": "schedule",
+                    "trigger_source": trigger_source,
                 },
             )
             await db.commit()
@@ -353,6 +355,66 @@ class TestScheduler:
             pentest_profile.id if pentest_profile is not None else pentest_profile_id,
         )
         return {"status": "started", "run_id": run_id, "source_schedule_id": schedule_id}
+
+    async def trigger_continuous_discovery_scan(
+        self,
+        account_id: int,
+        *,
+        max_endpoints: int | None = None,
+        pentest_profile_id: str | None = None,
+    ) -> dict:
+        """Auto-scan newly-discovered (never-tested) endpoints.
+
+        Closes the Discovery -> Testing pipeline gap. Finds endpoints with no
+        ``last_tested`` stamp and runs a scan over them, reusing the full safety
+        path (target guard, auth scope, kill switch) via the standard run flow.
+        Gated by ``CONTINUOUS_TESTING_ENABLED`` at the call site.
+        """
+        if kill_switch_enabled():
+            return {"status": "blocked", "reason": KILL_SWITCH_REASON}
+
+        limit = max_endpoints or settings.CONTINUOUS_TESTING_MAX_ENDPOINTS_PER_SWEEP
+        profile_id = pentest_profile_id or (settings.CONTINUOUS_TESTING_PROFILE_ID or None)
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(APIEndpoint)
+                .where(
+                    APIEndpoint.account_id == account_id,
+                    APIEndpoint.last_tested.is_(None),
+                )
+                .order_by(APIEndpoint.last_seen.desc())
+                .limit(limit)
+            )
+            endpoints = result.scalars().all()
+
+        if not endpoints:
+            return {"status": "noop", "reason": "no_untested_endpoints", "endpoint_count": 0}
+
+        endpoint_ids = [ep.id for ep in endpoints]
+        template_ids = self._all_active_template_ids()
+        if not template_ids:
+            return {"status": "noop", "reason": "no_templates", "endpoint_count": len(endpoint_ids)}
+
+        return await self._trigger_run(
+            schedule_id=f"continuous-discovery-{account_id}",
+            template_ids=template_ids,
+            endpoint_ids=endpoint_ids,
+            account_id=account_id,
+            pentest_profile_id=profile_id,
+            trigger_source="continuous_discovery",
+        )
+
+    @staticmethod
+    def _all_active_template_ids() -> list:
+        from server.modules.test_executor.wordlist_manager import WordlistManager
+
+        templates = WordlistManager.get_instance().templates
+        return [
+            str(t.get("id"))
+            for t in templates
+            if isinstance(t, dict) and t.get("id")
+        ]
 
     async def cancel(self, schedule_id: str, db: AsyncSession) -> None:
         if self._scheduler:

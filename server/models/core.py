@@ -63,6 +63,9 @@ class TestAccount(Base):
     auth_headers: Mapped[dict] = mapped_column(JSON, nullable=True)   # {"Authorization": "Bearer xyz"}
     auth_token: Mapped[str] = mapped_column(String, nullable=True)    # legacy plain token
     role: Mapped[str] = mapped_column(String(50), nullable=True)      # ADMIN, MEMBER, ATTACKER
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="ACTIVE")  # ACTIVE|EXPIRED|DISABLED
+    expired_at = mapped_column(DateTime(timezone=True), nullable=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
     created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -18,7 +18,9 @@ def test_build_nuclei_vulnerability_data_redacts_secret_evidence():
         "name": "API Key Exposure",
         "severity": "high",
         "matched-at": "https://api.example.com/debug?session=raw-session",
-        "curl-command": "curl -H 'Authorization: Bearer raw-token'",
+        # Real nuclei output includes status-code and a parseable curl-command
+        "status-code": 200,
+        "curl-command": "curl -i -X GET 'https://api.example.com/debug?session=raw-session' -H 'Authorization: Bearer raw-token'",
         "info": {
             "description": "Sensitive token exposed",
             "remediation": "Disable debug endpoint",
@@ -59,7 +61,7 @@ def test_build_nuclei_vulnerability_data_redacts_secret_evidence():
         "method": "GET",
         "url": "https://api.example.com/debug?session=****",
     }
-    assert payload["evidence"]["received_response"]["status_code"] == 0
+    assert payload["evidence"]["received_response"]["status_code"] == 200
     assert payload["evidence"]["similarity"] == {
         "source": "nuclei_matcher",
         "confidence": "external_report",

@@ -14,10 +14,20 @@ from server.modules.vulnerability_detector.lifecycle import (
 
 
 def _junit_report(*, failure_type: str = "response_schema_conformance") -> str:
+    # Failure text matches real schemathesis output: includes HTTP request+response block
+    # so _extract_schemathesis_request_response can parse a real status_code.
+    failure_text = (
+        "AssertionError: Response violates schema\n"
+        "GET /users/{user_id}?session=raw-session HTTP/1.1\n"
+        "Authorization: Bearer raw-token\n\n"
+        "HTTP/1.1 422 Unprocessable Entity\n"
+        "Content-Type: application/json\n\n"
+        '{"error": "schema violation"}'
+    )
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <testsuite name="schemathesis" tests="2" failures="1">
   <testcase classname="schemathesis" name="GET /users/{{user_id}}?session=raw-session">
-    <failure type="{failure_type}" message="{failure_type}: Authorization: Bearer raw-token">Observed token=raw-token in failing example</failure>
+    <failure type="{failure_type}" message="{failure_type}: Authorization: Bearer raw-token">{failure_text}</failure>
   </testcase>
   <testcase classname="schemathesis" name="POST /orders" />
 </testsuite>
@@ -79,7 +89,10 @@ def test_build_schemathesis_vulnerability_data_redacts_evidence():
         "method": "GET",
         "url": "https://api.example.com/users/{user_id}?session=****",
     }
-    assert payload["evidence"]["received_response"]["body"] == "Observed token=**** in failing example"
+    # Body contains the redacted failure text (HTTP block from fixture)
+    body = payload["evidence"]["received_response"]["body"]
+    assert "HTTP/1.1 422" in body
+    assert "****" in body  # secrets are redacted
     assert payload["evidence"]["similarity"] == {
         "source": "schemathesis_check",
         "check": "response_schema_conformance",
@@ -97,6 +110,7 @@ def test_build_schemathesis_vulnerability_data_redacts_evidence():
         "secret_values_persisted": False,
         "body_content_persisted": True,
         "details_content_persisted": True,
+        "business_logic_scenario_content_persisted": False,
         "persisted_material": [
             "metadata",
             "redacted_http_messages",

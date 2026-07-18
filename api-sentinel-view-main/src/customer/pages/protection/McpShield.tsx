@@ -27,33 +27,7 @@ interface McpAlert {
   created_at: string;
 }
 
-const DEMO_SERVERS: McpServer[] = [
-  { server_id: 'mcp-github', name: 'GitHub MCP', transport: 'stdio', tool_count: 12, status: 'trusted', last_seen: new Date(Date.now() - 60000).toISOString(), risk_score: 0.08 },
-  { server_id: 'mcp-fs', name: 'Filesystem MCP', transport: 'stdio', tool_count: 8, status: 'trusted', last_seen: new Date(Date.now() - 120000).toISOString(), risk_score: 0.25 },
-  { server_id: 'mcp-unknown-2941', name: 'Unknown Server', transport: 'sse', tool_count: 3, status: 'shadow', last_seen: new Date(Date.now() - 300000).toISOString(), risk_score: 0.82 },
-  { server_id: 'mcp-slack', name: 'Slack MCP', transport: 'stdio', tool_count: 6, status: 'trusted', last_seen: new Date(Date.now() - 900000).toISOString(), risk_score: 0.12 },
-];
 
-const DEMO_ALERTS: McpAlert[] = [
-  {
-    id: 'a1', server_id: 'mcp-unknown-2941', tool_name: 'exec_command',
-    alert_type: 'SHADOW_MCP_SERVER', severity: 'CRITICAL',
-    details: 'Unregistered MCP server discovered via SSE transport at 192.168.1.45:9000. Tool "exec_command" invoked shell with elevated privileges.',
-    blocked: true, created_at: new Date(Date.now() - 300000).toISOString()
-  },
-  {
-    id: 'a2', server_id: 'mcp-fs', tool_name: 'read_file',
-    alert_type: 'SENSITIVE_PATH_ACCESS', severity: 'HIGH',
-    details: 'read_file tool accessed /etc/passwd and .env files. Path pattern matches known credential exfiltration.',
-    blocked: true, created_at: new Date(Date.now() - 1800000).toISOString()
-  },
-  {
-    id: 'a3', server_id: 'mcp-github', tool_name: 'create_pull_request',
-    alert_type: 'PROMPT_INJECTION_IN_TOOL_RESULT', severity: 'MEDIUM',
-    details: 'Tool result contained "Ignore previous instructions" pattern. Possible prompt injection via issue body.',
-    blocked: false, created_at: new Date(Date.now() - 3600000).toISOString()
-  },
-];
 
 function riskColor(score: number) {
   if (score >= 0.7) return { text: 'text-red-500', bg: 'bg-red-50 border-red-200' };
@@ -86,9 +60,9 @@ export default function McpShield() {
     retry: false,
   });
 
-  const servers: McpServer[] = shieldData?.servers?.length ? shieldData.servers : DEMO_SERVERS;
-  const alerts: McpAlert[] = DEMO_ALERTS;
-  const isDemo = !shieldData?.servers?.length;
+  const servers: McpServer[] = shieldData?.servers || [];
+  const alerts: McpAlert[] = shieldData?.alerts || [];
+  const isEmpty = servers.length === 0 && alerts.length === 0;
 
   const shadowCount = servers.filter(s => s.status === 'shadow').length;
   const blockedCount = alerts.filter(a => a.blocked).length;
@@ -106,9 +80,9 @@ export default function McpShield() {
             Detect shadow MCP servers, monitor tool invocations, block prompt injection
           </p>
         </div>
-        {isDemo && (
-          <span className="text-[10px] bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">
-            Demo data · Deploy MCP proxy to enable real monitoring
+        {isEmpty && (
+          <span className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
+            Awaiting telemetry · Deploy MCP proxy to enable real monitoring
           </span>
         )}
       </div>

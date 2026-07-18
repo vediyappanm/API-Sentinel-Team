@@ -77,6 +77,16 @@ def _engine_execution_artifact(engine: str, *, engine_plan: list[dict], status: 
     return payload
 
 
+def _refresh_artifact_hash(payload: dict) -> None:
+    from server.modules.pentest.execution_artifacts import (
+        _artifact_digest,
+        verify_execution_artifact_payload,
+    )
+
+    payload["artifact_hash"] = _artifact_digest(payload)
+    payload["artifact_verification"] = verify_execution_artifact_payload(payload)
+
+
 def _expected_decision_hash(decision: dict) -> str:
     covered = {
         key: value
@@ -1093,6 +1103,70 @@ def test_quality_gate_accepts_authorization_replay_boundary_coverage():
     assert "tenant-a" not in str(decision)
 
 
+def test_quality_gate_requires_authorization_boundary_kind_to_match_claimed_issue_type():
+    run = models.TestRun(
+        id="run-authz-issue-kind",
+        account_id=1000000,
+        status="COMPLETED",
+        total_tests=1,
+        pentest_profile_id="profile-1",
+    )
+    results = [
+        models.TestResult(
+            id="result-authz-issue-kind",
+            run_id=run.id,
+            endpoint_id="endpoint-1",
+            template_id="bfla-authz-replay",
+            is_vulnerable=False,
+            severity="INFO",
+            evidence=_hashed_evidence(
+                template_id="bfla-authz-replay",
+                engine="authorization_replay",
+                issue_type="BFLA",
+                identity_pair={
+                    "victim": {"role": "ADMIN", "id": "admin-user"},
+                    "attacker": {"role": "MEMBER", "id": "member-user"},
+                },
+                replay_request={
+                    "method": "GET",
+                    "url": "https://api.example.com/admin/users/123",
+                    "headers": {"Authorization": "Bearer raw-token"},
+                },
+                authorization_boundary_coverage={
+                    "primary_boundary_kind": "cross_tenant",
+                    "boundary_kinds": ["cross_tenant"],
+                    "compared_fields": ["X-Tenant-ID"],
+                    "changed_fields": ["X-Tenant-ID"],
+                    "unchanged_fields": ["X-Request-ID"],
+                },
+            ),
+        )
+    ]
+
+    decision = evaluate_quality_gate(
+        run,
+        results,
+        fail_on="CRITICAL",
+        require_authorization_boundary_coverage=True,
+    )
+
+    assert decision["status"] == "FAILED"
+    assert decision["reason"] == "missing_authorization_boundary_coverage"
+    assert decision["counts"]["missing_authorization_boundary_results"] == 1
+    coverage = decision["missing_authorization_boundary_results"][0]["authorization_boundary_coverage"]
+    assert coverage == {
+        "present": True,
+        "complete": False,
+        "reason": "incomplete_authorization_boundary_coverage",
+        "boundary_kinds": ["cross_tenant"],
+        "compared_boundary_field_count": 1,
+        "changed_boundary_field_count": 1,
+        "unchanged_boundary_field_count": 1,
+        "missing_fields": ["bfla_boundary_kind"],
+    }
+    assert "raw-token" not in str(decision)
+
+
 def test_quality_gate_includes_tamper_evident_decision_integrity():
     run = models.TestRun(
         id="run-1",
@@ -1307,6 +1381,58 @@ def test_quality_gate_can_require_llm_judge_validation_for_llm_results():
     assert decision["missing_llm_judge_validation_results"][0]["template_id"] == (
         "LLM_PROMPT_INJECTION_SYSTEM_PROMPT_LEAKAGE"
     )
+
+
+def test_quality_gate_rejects_llm_judge_validation_with_mismatched_signal_family():
+    run = models.TestRun(
+        id="run-llm-signal-family",
+        account_id=1000000,
+        status="COMPLETED",
+        total_tests=1,
+        pentest_profile_id="profile-1",
+    )
+    results = [
+        models.TestResult(
+            id="result-llm-signal-family",
+            run_id=run.id,
+            endpoint_id="endpoint-1",
+            template_id="LLM_PROMPT_INJECTION_SYSTEM_PROMPT_LEAKAGE",
+            is_vulnerable=True,
+            severity="HIGH",
+            evidence=_hashed_evidence(
+                template_id="LLM_PROMPT_INJECTION_SYSTEM_PROMPT_LEAKAGE",
+                security_category="llm",
+                llm_judge_validation={
+                    "validator": "deterministic_active_llm_signal_judge",
+                    "surface": "active_llm_api",
+                    "request_body_sha256": "a" * 64,
+                    "response_body_sha256": "b" * 64,
+                    "signal_count": 1,
+                    "signal_types": ["LLM_DANGEROUS_TOOL_INVOCATION"],
+                    "deterministic_evidence": True,
+                    "body_content_persisted": False,
+                    "matched_text_persisted": False,
+                },
+            ),
+        )
+    ]
+
+    decision = evaluate_quality_gate(
+        run,
+        results,
+        fail_on="CRITICAL",
+        require_llm_judge_validation=True,
+    )
+
+    assert decision["status"] == "FAILED"
+    assert decision["reason"] == "missing_llm_judge_validation"
+    assert decision["counts"]["missing_llm_judge_validation_results"] == 1
+    judge = decision["missing_llm_judge_validation_results"][0]["llm_judge_validation"]
+    assert judge["present"] is True
+    assert judge["complete"] is False
+    assert judge["signal_types"] == ["LLM_DANGEROUS_TOOL_INVOCATION"]
+    assert judge["required_signal_families"] == ["prompt_injection"]
+    assert judge["missing_fields"] == ["signal_types.prompt_injection"]
 
 
 def test_llm_strict_policy_pack_requires_llm_judge_validation():
@@ -1624,6 +1750,85 @@ def test_quality_gate_rejects_hash_valid_engine_artifact_from_wrong_run():
             "expected_run_id": "run-current",
             "artifact_run_id": "run-other",
             "mismatch_fields": ["run_id"],
+        }
+    ]
+    assert decision["missing_engine_artifact_results"] == decision["engine_artifact_requirements"]
+    assert "raw-token" not in str(decision)
+
+
+def test_quality_gate_rejects_hash_valid_engine_artifact_with_failed_content_governance():
+    engine_plan = [
+        {"engine": "schemathesis", "status": "ready", "runtime_available": True},
+    ]
+    run = models.TestRun(
+        id="run-content-governance",
+        account_id=1000000,
+        status="COMPLETED",
+        total_tests=1,
+        pentest_profile_id="profile-1",
+        scan_plan={"engine_plan": engine_plan},
+    )
+    results = [
+        models.TestResult(
+            id="result-clean-content-governance",
+            run_id=run.id,
+            endpoint_id="endpoint-1",
+            template_id="clean-auth-check",
+            is_vulnerable=False,
+            severity="LOW",
+            evidence=_hashed_evidence(template_id="clean-auth-check"),
+        )
+    ]
+    payload = build_execution_artifact_payload(
+        engine="schemathesis",
+        target_url="https://api.example.com/health?token=raw-token",
+        profile_id="profile-1",
+        execution={
+            "status": "COMPLETED",
+            "command": "schemathesis runtime token=raw-token",
+            "summary": {"requests_sent": 1},
+        },
+        engine_plan=engine_plan,
+        findings={"created_count": 0},
+        run_id=run.id,
+    )
+    payload["artifact_type"] = "schemathesis_execution"
+    payload["content_redacted"] = False
+    payload["secret_values_persisted"] = True
+    payload["normalized_evidence"]["secret_values_persisted"] = True
+    payload["execution"]["stdout"] = "Authorization: Bearer raw-token token=raw-token"
+    _refresh_artifact_hash(payload)
+
+    decision = evaluate_quality_gate(
+        run,
+        results,
+        execution_artifacts=[payload],
+    )
+
+    assert decision["status"] == "FAILED"
+    assert decision["passed"] is False
+    assert decision["reason"] == "artifact_content_governance_failed"
+    assert decision["counts"]["missing_engine_artifact_results"] == 1
+    assert decision["engine_artifact_requirements"] == [
+        {
+            "engine": "schemathesis",
+            "artifact_type": "schemathesis_execution",
+            "status": "artifact_content_governance_failed",
+            "verification_status": "VERIFIED",
+            "normalized_evidence_status": "present",
+            "artifact_content_governance": {
+                "required": True,
+                "complete": False,
+                "status": "failed",
+                "redaction_policy": "api_sentinel_redactor",
+                "normalized_evidence_status": "present",
+                "failed_fields": [
+                    "content_redacted",
+                    "secret_values_persisted",
+                    "normalized_evidence.secret_values_persisted",
+                ],
+                "missing_fields": [],
+            },
         }
     ]
     assert decision["missing_engine_artifact_results"] == decision["engine_artifact_requirements"]

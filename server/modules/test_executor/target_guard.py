@@ -56,18 +56,20 @@ class TargetGuard:
         self.allowlist_error = self._unsafe_allowlist_reason()
 
     @classmethod
-    def from_settings(cls) -> "TargetGuard":
-        raw_allowlist = getattr(settings, "PENTEST_TARGET_ALLOWLIST", "") or ""
+    def from_settings(cls, settings_obj: object | None = None) -> "TargetGuard":
+        source = settings_obj if settings_obj is not None else settings
+        raw_allowlist = getattr(source, "PENTEST_TARGET_ALLOWLIST", "") or ""
         allowlist = [item.strip() for item in raw_allowlist.split(",") if item.strip()]
         return cls(
             allowlist=allowlist,
             allow_private_targets=bool(
-                getattr(settings, "PENTEST_ALLOW_PRIVATE_TARGETS", False) or settings.DEBUG
+                getattr(source, "PENTEST_ALLOW_PRIVATE_TARGETS", False)
+                or getattr(source, "DEBUG", False)
             ),
-            enforce=bool(getattr(settings, "PENTEST_ENFORCE_TARGET_GUARD", True)),
-            resolve_hosts=bool(getattr(settings, "PENTEST_RESOLVE_TARGET_HOSTS", False)),
+            enforce=bool(getattr(source, "PENTEST_ENFORCE_TARGET_GUARD", True)),
+            resolve_hosts=bool(getattr(source, "PENTEST_RESOLVE_TARGET_HOSTS", False)),
             fail_closed_on_dns_error=bool(
-                getattr(settings, "PENTEST_FAIL_CLOSED_ON_TARGET_DNS_ERROR", True)
+                getattr(source, "PENTEST_FAIL_CLOSED_ON_TARGET_DNS_ERROR", True)
             ),
         )
 

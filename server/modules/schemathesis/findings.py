@@ -75,6 +75,37 @@ def _extract_url(blob: str, target_url: str) -> str:
     return target_url
 
 
+_HTTP_REQUEST_LINE_RE = re.compile(
+    r"(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)\s+(\S+)\s+HTTP",
+    re.IGNORECASE,
+)
+_HTTP_RESPONSE_STATUS_RE = re.compile(r"HTTP/[\d.]+\s+(\d{3})", re.IGNORECASE)
+
+
+def _extract_schemathesis_request_response(
+    text: str, *, base_url: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Parse method, URL, and response status from a Schemathesis failure/system-out block.
+
+    Returns (sent_request, received_response_extras). Both may be empty dicts when
+    the failure text contains no HTTP block.
+    """
+    req: dict[str, Any] = {}
+    resp: dict[str, Any] = {}
+
+    req_match = _HTTP_REQUEST_LINE_RE.search(text)
+    if req_match:
+        req["method"] = req_match.group(1).upper()
+        raw_path = req_match.group(2)
+        req["url"] = raw_path if raw_path.startswith("http") else (base_url.rstrip("/") + raw_path)
+
+    resp_match = _HTTP_RESPONSE_STATUS_RE.search(text)
+    if resp_match:
+        resp["status_code"] = int(resp_match.group(1))
+
+    return req, resp
+
+
 def _check_name(classname: str, name: str, node: ET.Element) -> str:
     blob = f"{classname} {name} {node.get('type') or ''} {node.get('message') or ''} {node.text or ''}".lower()
     for needle, check in _CHECK_HINTS:
@@ -169,6 +200,17 @@ def build_schemathesis_vulnerability_data(
         classname=redacted_classname,
         name=redacted_name,
     )
+    # Extract real HTTP method/url/status from the failure text when schemathesis
+    # includes an HTTP block (Request: … / HTTP/1.1 NNN …).
+    raw_failure_text = (failure.get("failure_text") or failure.get("message") or "")
+    extracted_req, extracted_resp = _extract_schemathesis_request_response(
+        raw_failure_text, base_url=target_url
+    )
+    received_resp = {"body": failure_text or message}
+    if extracted_resp.get("status_code"):
+        received_resp["status_code"] = extracted_resp["status_code"]
+    sent_req = extracted_req if extracted_req.get("method") else None
+
     evidence = finalize_finding_evidence({
         "engine": "schemathesis",
         "confirmation": {
@@ -198,7 +240,8 @@ def build_schemathesis_vulnerability_data(
             "kind": kind,
             "type": _truncate(failure.get("failure_type"), 200),
         },
-        received_response={"body": failure_text or message},
+        received_response=received_resp,
+        sent_request=sent_req,
         similarity={
             "source": "schemathesis_check",
             "check": check_name,

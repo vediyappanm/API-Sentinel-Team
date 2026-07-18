@@ -6,7 +6,10 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 
 from server.models.core import TestRun, TestResult
 from server.modules.pentest.engine_plan import ENGINE_EXECUTION_ORDER, engine_outcome_summaries
-from server.modules.pentest.execution_artifacts import verify_execution_artifact_payload
+from server.modules.pentest.execution_artifacts import (
+    artifact_content_governance_summary,
+    verify_execution_artifact_payload,
+)
 from server.modules.utils.redactor import Redactor
 from server.modules.vulnerability_detector.lifecycle import (
     confirmation_status_from_evidence,
@@ -53,6 +56,30 @@ _ACTIVE_FAMILY_KEYS = (
     "ready",
     "status",
     "signals",
+)
+_EXTERNAL_WORKER_ISOLATION_MODES = {"leased_external_worker", "kubernetes_job"}
+_WORKER_ISOLATION_MODE_ALIASES = {
+    "queued": "leased_external_worker",
+    "external_worker": "leased_external_worker",
+    "leased_external_worker": "leased_external_worker",
+    "k8s": "kubernetes_job",
+    "k8s_job": "kubernetes_job",
+    "kubernetes": "kubernetes_job",
+    "kubernetes_job": "kubernetes_job",
+}
+_WORKER_ISOLATION_RESOURCE_LIMIT_KEYS = ("cpu", "memory", "ephemeral_storage")
+_WORKER_ISOLATION_SESSION_FIELDS = (
+    "run_id",
+    "worker_id",
+    "engine",
+    "mode",
+    "sandbox_id",
+    "created_at",
+)
+_WORKER_ISOLATION_ENFORCEMENT_FIELDS = (
+    "runtime_context_created",
+    "filesystem_workdir_enforced",
+    "subprocess_cwd_confined",
 )
 
 
@@ -225,6 +252,83 @@ def _json_sha256(payload: dict) -> str:
 
 def _text_sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _is_sha256(value: object) -> bool:
+    text = str(value or "").strip().lower()
+    return len(text) == 64 and all(ch in "0123456789abcdef" for ch in text)
+
+
+def _normalized_worker_isolation_mode(isolation: dict[str, object]) -> str:
+    session = isolation.get("session") if isinstance(isolation.get("session"), dict) else {}
+    raw_mode = str(
+        session.get("mode")
+        or isolation.get("configured_worker_isolation_mode")
+        or isolation.get("isolation_mode")
+        or ""
+    ).strip().lower()
+    return _WORKER_ISOLATION_MODE_ALIASES.get(raw_mode, raw_mode)
+
+
+def _worker_isolation_accountability(content: dict[str, object] | None) -> dict[str, object]:
+    isolation = content.get("worker_isolation") if isinstance(content, dict) else None
+    isolation = isolation if isinstance(isolation, dict) else {}
+    mode = _normalized_worker_isolation_mode(isolation)
+    if mode not in _EXTERNAL_WORKER_ISOLATION_MODES:
+        return {
+            "required": False,
+            "complete": True,
+            "status": "not_required",
+            "mode": Redactor.redact_text(mode or "background"),
+            "missing_fields": [],
+        }
+
+    missing_fields: list[str] = []
+    session = isolation.get("session") if isinstance(isolation.get("session"), dict) else None
+    sandbox = isolation.get("sandbox") if isinstance(isolation.get("sandbox"), dict) else {}
+    manifest = isolation.get("manifest") if isinstance(isolation.get("manifest"), dict) else {}
+    resource_limits = (
+        isolation.get("resource_limits")
+        if isinstance(isolation.get("resource_limits"), dict)
+        else {}
+    )
+    kubernetes_job = (
+        isolation.get("kubernetes_job")
+        if isinstance(isolation.get("kubernetes_job"), dict)
+        else {}
+    )
+    enforcement = isolation.get("enforcement") if isinstance(isolation.get("enforcement"), dict) else {}
+
+    if not isinstance(session, dict):
+        missing_fields.append("session")
+    else:
+        for field in _WORKER_ISOLATION_SESSION_FIELDS:
+            if not str(session.get(field) or "").strip():
+                missing_fields.append(f"session.{field}")
+    if sandbox.get("created") is not True:
+        missing_fields.append("sandbox.created")
+    if sandbox.get("path_confined_to_work_dir") is not True:
+        missing_fields.append("sandbox.path_confined_to_work_dir")
+    if not _is_sha256(manifest.get("sha256")):
+        missing_fields.append("manifest.sha256")
+    for field in _WORKER_ISOLATION_RESOURCE_LIMIT_KEYS:
+        if not str(resource_limits.get(field) or "").strip():
+            missing_fields.append(f"resource_limits.{field}")
+    if mode == "kubernetes_job" and kubernetes_job.get("enabled") is not True:
+        missing_fields.append("kubernetes_job.enabled")
+    for field in _WORKER_ISOLATION_ENFORCEMENT_FIELDS:
+        if enforcement.get(field) is not True:
+            missing_fields.append(f"enforcement.{field}")
+    if isolation.get("secret_values_persisted") is not False:
+        missing_fields.append("secret_values_persisted")
+
+    return {
+        "required": True,
+        "complete": not missing_fields,
+        "status": "complete" if not missing_fields else "incomplete",
+        "mode": Redactor.redact_text(mode),
+        "missing_fields": _safe_signal_list(missing_fields, limit=120),
+    }
 
 
 def _run_engine_plan(run: TestRun) -> list[dict[str, object]]:
@@ -677,6 +781,26 @@ def _engine_artifact_accountability_detail(
                     "duplicate_artifact_hashes": _safe_signal_list(artifact_hashes, limit=128),
                 }
             )
+        elif detail.get("status") == "verified":
+            content_governance = artifact_content_governance_summary(content, expected_engine=engine)
+            if content_governance.get("complete") is not True:
+                detail.update(
+                    {
+                        "verified": False,
+                        "status": "artifact_content_governance_failed",
+                        "artifact_content_governance": content_governance,
+                    }
+                )
+            else:
+                worker_isolation = _worker_isolation_accountability(content)
+                if worker_isolation.get("required") is True and worker_isolation.get("complete") is not True:
+                    detail.update(
+                        {
+                            "verified": False,
+                            "status": "worker_isolation_incomplete",
+                            "worker_isolation": worker_isolation,
+                        }
+                    )
     return detail
 
 
@@ -718,6 +842,8 @@ def _engine_accountability_manifest(
     missing_count = 0
     unverified_count = 0
     duplicate_count = 0
+    incomplete_worker_isolation_count = 0
+    content_governance_failed_count = 0
     for engine in ready_active_engines:
         artifact_type = _ENGINE_EXECUTION_ARTIFACT_TYPES[engine]
         detail = _engine_artifact_accountability_detail(
@@ -732,12 +858,18 @@ def _engine_accountability_manifest(
             unverified_count += 1
         if detail.get("status") == "duplicate_artifact":
             duplicate_count += 1
+        if detail.get("status") == "worker_isolation_incomplete":
+            incomplete_worker_isolation_count += 1
+        if detail.get("status") == "artifact_content_governance_failed":
+            content_governance_failed_count += 1
         required_artifacts.append(detail)
 
     continuous_artifacts: list[dict[str, object]] = []
     missing_continuous_count = 0
     unverified_continuous_count = 0
     duplicate_continuous_count = 0
+    incomplete_continuous_worker_isolation_count = 0
+    content_governance_failed_continuous_count = 0
     for engine in continuous_engines:
         artifact_type = _ENGINE_EXECUTION_ARTIFACT_TYPES[engine]
         detail = _engine_artifact_accountability_detail(
@@ -752,6 +884,10 @@ def _engine_accountability_manifest(
             unverified_continuous_count += 1
         if detail.get("status") == "duplicate_artifact":
             duplicate_continuous_count += 1
+        if detail.get("status") == "worker_isolation_incomplete":
+            incomplete_continuous_worker_isolation_count += 1
+        if detail.get("status") == "artifact_content_governance_failed":
+            content_governance_failed_continuous_count += 1
         continuous_artifacts.append(detail)
 
     return {
@@ -775,17 +911,27 @@ def _engine_accountability_manifest(
         "missing_artifact_count": missing_count,
         "unverified_artifact_count": unverified_count,
         "duplicate_artifact_count": duplicate_count,
+        "incomplete_worker_isolation_artifact_count": incomplete_worker_isolation_count,
+        "content_governance_failed_artifact_count": content_governance_failed_count,
         "continuous_artifacts": continuous_artifacts,
         "continuous_artifact_count": len(continuous_artifacts),
         "missing_continuous_artifact_count": missing_continuous_count,
         "unverified_continuous_artifact_count": unverified_continuous_count,
         "duplicate_continuous_artifact_count": duplicate_continuous_count,
+        "incomplete_continuous_worker_isolation_artifact_count": (
+            incomplete_continuous_worker_isolation_count
+        ),
+        "content_governance_failed_continuous_artifact_count": (
+            content_governance_failed_continuous_count
+        ),
         "continuous_artifact_accountability_complete": (
             not continuous_engines
             or (
                 missing_continuous_count == 0
                 and unverified_continuous_count == 0
                 and duplicate_continuous_count == 0
+                and incomplete_continuous_worker_isolation_count == 0
+                and content_governance_failed_continuous_count == 0
             )
         ),
         "engine_outcomes": engine_outcome_summaries(engine_plan),

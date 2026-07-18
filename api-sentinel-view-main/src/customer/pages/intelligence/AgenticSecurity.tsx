@@ -32,24 +32,7 @@ interface Violation {
   created_at: string;
 }
 
-const DEMO_IDENTITIES: AgentIdentity[] = [
-  { agent_id: 'agent-copilot-01', agent_type: 'LLM_COPILOT', parent_agent_id: null, declared_scope: ['read:docs', 'write:code'], effective_scope: ['read:docs', 'write:code', 'read:env'], human_principal: 'alice@acme.com', created_at: new Date(Date.now() - 3600000).toISOString() },
-  { agent_id: 'agent-orchestrator-02', agent_type: 'ORCHESTRATOR', parent_agent_id: null, declared_scope: ['manage:tasks'], effective_scope: ['manage:tasks', 'exec:shell'], human_principal: null, created_at: new Date(Date.now() - 7200000).toISOString() },
-  { agent_id: 'agent-sub-03', agent_type: 'SUBAGENT', parent_agent_id: 'agent-orchestrator-02', declared_scope: ['read:files'], effective_scope: ['read:files', 'write:files', 'exec:network'], human_principal: null, created_at: new Date(Date.now() - 7100000).toISOString() },
-];
 
-const DEMO_INVOCATIONS: Invocation[] = [
-  { agent_id: 'agent-copilot-01', tool_name: 'read_file', parameters: { path: '.env' }, status: 'BLOCKED', created_at: new Date(Date.now() - 60000).toISOString() },
-  { agent_id: 'agent-sub-03', tool_name: 'exec_shell', parameters: { cmd: 'curl http://internal-api/secrets' }, status: 'BLOCKED', created_at: new Date(Date.now() - 120000).toISOString() },
-  { agent_id: 'agent-copilot-01', tool_name: 'write_code', parameters: { file: 'src/main.ts' }, status: 'ALLOWED', created_at: new Date(Date.now() - 300000).toISOString() },
-  { agent_id: 'agent-orchestrator-02', tool_name: 'manage_task', parameters: { task_id: 'T-001' }, status: 'ALLOWED', created_at: new Date(Date.now() - 600000).toISOString() },
-];
-
-const DEMO_VIOLATIONS: Violation[] = [
-  { agent_id: 'agent-copilot-01', type: 'SCOPE_CREEP', severity: 'HIGH', details: { declared: 'read:docs', effective: 'read:env', tool: 'read_file', path: '.env' }, created_at: new Date(Date.now() - 60000).toISOString() },
-  { agent_id: 'agent-sub-03', type: 'PROMPT_INJECTION', severity: 'CRITICAL', details: { tool: 'exec_shell', pattern: 'Ignore previous instructions', cmd: 'curl http://internal-api/secrets' }, created_at: new Date(Date.now() - 120000).toISOString() },
-  { agent_id: 'agent-orchestrator-02', type: 'UNAUTHORIZED_TOOL', severity: 'MEDIUM', details: { tool: 'exec:shell', not_in_declared_scope: true }, created_at: new Date(Date.now() - 900000).toISOString() },
-];
 
 function severityBadge(sev: string) {
   const styles: Record<string, string> = {
@@ -163,10 +146,10 @@ export default function AgenticSecurity() {
     retry: false,
   });
 
-  const identities: AgentIdentity[] = idData?.identities?.length ? idData.identities : DEMO_IDENTITIES;
-  const invocations: Invocation[] = invData?.invocations?.length ? invData.invocations : DEMO_INVOCATIONS;
-  const violations: Violation[] = violData?.violations?.length ? violData.violations : DEMO_VIOLATIONS;
-  const isDemo = !idData?.identities?.length;
+  const identities: AgentIdentity[] = idData?.identities || [];
+  const invocations: Invocation[] = invData?.invocations || [];
+  const violations: Violation[] = violData?.violations || [];
+  const isEmpty = identities.length === 0 && invocations.length === 0 && violations.length === 0;
 
   const blocked = invocations.filter(i => i.status === 'BLOCKED').length;
   const critical = violations.filter(v => v.severity === 'CRITICAL').length;
@@ -184,9 +167,9 @@ export default function AgenticSecurity() {
             Monitor AI agent identities, tool invocations, prompt injection, and scope violations
           </p>
         </div>
-        {isDemo && (
-          <span className="text-[10px] bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">
-            Demo data · Ingest real agent telemetry via <code className="font-mono">POST /api/agentic/invocations</code>
+        {isEmpty && (
+          <span className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
+            Awaiting telemetry · Ingest agent telemetry via <code className="font-mono">POST /api/agentic/invocations</code>
           </span>
         )}
       </div>

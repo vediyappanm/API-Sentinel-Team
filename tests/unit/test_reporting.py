@@ -38,6 +38,16 @@ def _canonical_sarif_payload(payload: dict) -> dict:
     return canonical
 
 
+def _refresh_artifact_hash(payload: dict) -> None:
+    from server.modules.pentest.execution_artifacts import (
+        _artifact_digest,
+        verify_execution_artifact_payload,
+    )
+
+    payload["artifact_hash"] = _artifact_digest(payload)
+    payload["artifact_verification"] = verify_execution_artifact_payload(payload)
+
+
 def _json_sha256(payload: dict) -> str:
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -588,6 +598,59 @@ def test_report_artifact_manifest_rejects_hash_valid_payload_for_wrong_run():
     assert "raw-token" not in str(manifest)
 
 
+def test_report_artifact_manifest_rejects_hash_valid_artifact_with_failed_content_governance():
+    engine_plan = [
+        {"engine": "schemathesis", "status": "ready", "reason": "requirements_satisfied"},
+    ]
+    run = models.TestRun(
+        id="run-content-governance",
+        account_id=1000000,
+        status="COMPLETED",
+        scan_plan={"engine_plan": engine_plan},
+    )
+    payload = build_execution_artifact_payload(
+        engine="schemathesis",
+        target_url="https://api.example.com/users?token=raw-token",
+        profile_id="profile-1",
+        execution={"status": "COMPLETED", "stdout": "token=raw-token"},
+        engine_plan=engine_plan,
+        run_id=run.id,
+    )
+    payload["content_redacted"] = False
+    payload["secret_values_persisted"] = True
+    payload["normalized_evidence"]["secret_values_persisted"] = True
+    payload["execution"]["stdout"] = "Authorization: Bearer raw-token token=raw-token"
+    _refresh_artifact_hash(payload)
+    artifacts = [
+        SimpleNamespace(artifact_type="schemathesis_execution", content_json=payload),
+    ]
+
+    manifest = build_report_artifact_manifest(run, [], execution_artifacts=artifacts)
+    accountability = manifest["engine_accountability"]
+    required = {item["engine"]: item for item in accountability["required_artifacts"]}
+
+    assert accountability["complete"] is False
+    assert accountability["unverified_artifact_count"] == 1
+    assert accountability["content_governance_failed_artifact_count"] == 1
+    assert required["schemathesis"]["present"] is True
+    assert required["schemathesis"]["verified"] is False
+    assert required["schemathesis"]["status"] == "artifact_content_governance_failed"
+    assert required["schemathesis"]["artifact_content_governance"] == {
+        "required": True,
+        "complete": False,
+        "status": "failed",
+        "redaction_policy": "api_sentinel_redactor",
+        "normalized_evidence_status": "present",
+        "failed_fields": [
+            "content_redacted",
+            "secret_values_persisted",
+            "normalized_evidence.secret_values_persisted",
+        ],
+        "missing_fields": [],
+    }
+    assert "raw-token" not in str(manifest)
+
+
 def test_report_artifact_manifest_rejects_duplicate_required_engine_execution_artifacts():
     engine_plan = [
         {"engine": "schemathesis", "status": "ready", "reason": "requirements_satisfied"},
@@ -634,6 +697,66 @@ def test_report_artifact_manifest_rejects_duplicate_required_engine_execution_ar
         first_payload["artifact_hash"],
         second_payload["artifact_hash"],
     ]
+    assert "raw-token" not in str(manifest)
+
+
+def test_report_artifact_manifest_rejects_external_worker_artifact_with_incomplete_isolation_contract():
+    engine_plan = [
+        {"engine": "schemathesis", "status": "ready", "reason": "requirements_satisfied"},
+    ]
+    run = models.TestRun(
+        id="run-worker-isolation-incomplete",
+        account_id=1000000,
+        status="COMPLETED",
+        scan_plan={"engine_plan": engine_plan},
+    )
+    payload = build_execution_artifact_payload(
+        engine="schemathesis",
+        target_url="https://api.example.com/users?token=raw-token",
+        profile_id="profile-1",
+        execution={"status": "COMPLETED", "stdout": "token=raw-token"},
+        engine_plan=engine_plan,
+        run_id=run.id,
+        worker_isolation={
+            "configured_worker_isolation_mode": "kubernetes_job",
+            "resource_limits": {
+                "cpu": "750m",
+                "memory": "768Mi",
+                "ephemeral_storage": "1536Mi",
+            },
+            "kubernetes_job": {"enabled": True},
+            "secret_values_persisted": False,
+        },
+    )
+    artifacts = [
+        SimpleNamespace(artifact_type="schemathesis_execution", content_json=payload),
+    ]
+
+    manifest = build_report_artifact_manifest(run, [], execution_artifacts=artifacts)
+    accountability = manifest["engine_accountability"]
+    required = {item["engine"]: item for item in accountability["required_artifacts"]}
+
+    assert accountability["complete"] is False
+    assert accountability["unverified_artifact_count"] == 1
+    assert accountability["incomplete_worker_isolation_artifact_count"] == 1
+    assert required["schemathesis"]["present"] is True
+    assert required["schemathesis"]["verified"] is False
+    assert required["schemathesis"]["status"] == "worker_isolation_incomplete"
+    assert required["schemathesis"]["worker_isolation"] == {
+        "required": True,
+        "complete": False,
+        "status": "incomplete",
+        "mode": "kubernetes_job",
+        "missing_fields": [
+            "session",
+            "sandbox.created",
+            "sandbox.path_confined_to_work_dir",
+            "manifest.sha256",
+            "enforcement.runtime_context_created",
+            "enforcement.filesystem_workdir_enforced",
+            "enforcement.subprocess_cwd_confined",
+        ],
+    }
     assert "raw-token" not in str(manifest)
 
 

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.modules.cache import redis_cache
 from server.config import settings
 from server.models.core import BlockedIP, MaliciousEvent, MaliciousEventRecord, ThreatActor
+from server.modules.api_inventory.endpoint_risk import endpoint_risk_multiplier
 
 from .correlation_agent import correlation_agent
 from .enforcement_agent import enforcement_agent
@@ -128,6 +129,17 @@ async def correlate_threat(
         actor.event_count += 1
 
     risk_increment = SEVERITY_WEIGHTS.get(severity, 0.05)
+    # Shared risk memory: amplify the increment when this event targets an
+    # endpoint the scanner has PROVEN is vulnerable. Hostile traffic against a
+    # confirmed-BOLA endpoint counts for more than the same traffic elsewhere.
+    if endpoint_id:
+        try:
+            multiplier = await endpoint_risk_multiplier(
+                db, account_id=account_id, endpoint_id=endpoint_id
+            )
+            risk_increment = min(1.0, risk_increment * multiplier)
+        except Exception:  # pragma: no cover - never let risk lookup break detection
+            pass
     new_risk_score = min(1.0, actor.risk_score + risk_increment)
     now = _utc_now()
     actor.risk_score = new_risk_score

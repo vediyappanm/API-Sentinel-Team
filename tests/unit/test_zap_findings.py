@@ -107,6 +107,7 @@ def test_build_zap_vulnerability_data_redacts_report_evidence():
         "secret_values_persisted": False,
         "body_content_persisted": True,
         "details_content_persisted": True,
+        "business_logic_scenario_content_persisted": False,
         "persisted_material": [
             "metadata",
             "redacted_http_messages",

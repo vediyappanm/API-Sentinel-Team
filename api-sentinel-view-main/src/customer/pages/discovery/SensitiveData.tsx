@@ -18,14 +18,7 @@ interface SensitiveDataFinding {
   regulations: string[];
 }
 
-const DEMO_FINDINGS: SensitiveDataFinding[] = [
-  { id: '1', endpoint: '/api/users', method: 'GET', location: 'response', data_type: 'SSN', field_path: 'data[].ssn', sample_masked: '***-**-6789', severity: 'critical', occurrences: 148, last_seen: new Date(Date.now() - 300000).toISOString(), encrypted: false, regulations: ['PCI-DSS', 'HIPAA', 'GDPR'] },
-  { id: '2', endpoint: '/api/payments', method: 'POST', location: 'request', data_type: 'CREDIT_CARD', field_path: 'body.card_number', sample_masked: '4111-****-****-1111', severity: 'critical', occurrences: 34, last_seen: new Date(Date.now() - 600000).toISOString(), encrypted: false, regulations: ['PCI-DSS'] },
-  { id: '3', endpoint: '/api/auth/login', method: 'POST', location: 'response', data_type: 'PASSWORD_HASH', field_path: 'user.password_hash', sample_masked: '$2b$12$****', severity: 'high', occurrences: 7, last_seen: new Date(Date.now() - 1800000).toISOString(), encrypted: true, regulations: ['SOC2'] },
-  { id: '4', endpoint: '/api/logs', method: 'GET', location: 'response', data_type: 'EMAIL', field_path: 'entries[].user_email', sample_masked: 'a***@e*****.com', severity: 'medium', occurrences: 892, last_seen: new Date(Date.now() - 900000).toISOString(), encrypted: false, regulations: ['GDPR'] },
-  { id: '5', endpoint: '/api/profile', method: 'GET', location: 'response', data_type: 'PHONE_NUMBER', field_path: 'phone', sample_masked: '+1-***-***-7890', severity: 'medium', occurrences: 254, last_seen: new Date(Date.now() - 3600000).toISOString(), encrypted: false, regulations: ['GDPR', 'CCPA'] },
-  { id: '6', endpoint: '/api/debug/trace', method: 'GET', location: 'response', data_type: 'JWT_TOKEN', field_path: 'trace.auth_header', sample_masked: 'eyJhbGc...****', severity: 'high', occurrences: 2, last_seen: new Date(Date.now() - 7200000).toISOString(), encrypted: false, regulations: ['SOC2'] },
-];
+
 
 const TYPE_ICONS: Record<string, string> = {
   SSN: '🪪', CREDIT_CARD: '💳', EMAIL: '📧', PHONE_NUMBER: '📱',
@@ -55,8 +48,8 @@ export default function SensitiveData() {
     retry: false,
   });
 
-  const findings: SensitiveDataFinding[] = data?.findings?.length ? data.findings : DEMO_FINDINGS;
-  const isDemo = !data?.findings?.length;
+  const findings: SensitiveDataFinding[] = data?.findings || [];
+  const isEmpty = findings.length === 0;
 
   const filtered = findings.filter(f =>
     (filter === 'all' || f.severity === filter) &&
@@ -88,9 +81,9 @@ export default function SensitiveData() {
             {showSamples ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
             {showSamples ? 'Hide samples' : 'Show masked samples'}
           </button>
-          {isDemo && (
-            <span className="text-[10px] bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">
-              Demo data
+          {isEmpty && (
+            <span className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
+              Awaiting data
             </span>
           )}
         </div>

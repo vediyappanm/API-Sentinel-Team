@@ -7,7 +7,10 @@ from typing import Iterable
 
 from server.config import settings
 from server.models.core import TestResult, TestRun
-from server.modules.pentest.execution_artifacts import verify_execution_artifact_payload
+from server.modules.pentest.execution_artifacts import (
+    artifact_content_governance_summary,
+    verify_execution_artifact_payload,
+)
 from server.modules.utils.redactor import Redactor
 from server.modules.vulnerability_detector.lifecycle import (
     confirmation_result_from_evidence,
@@ -46,6 +49,41 @@ _AUTHORIZATION_BOUNDARY_FIELD_KEYS = (
     "unchanged_boundary_fields",
 )
 _AUTHORIZATION_REPLAY_ISSUE_TYPES = {"BOLA", "BFLA"}
+_AUTHORIZATION_BOLA_BOUNDARY_KINDS = {"cross_tenant", "cross_account", "identity_boundary_changed"}
+_AUTHORIZATION_BFLA_BOUNDARY_KINDS = {"cross_role", "cross_scope", "cross_permission"}
+_LLM_SIGNAL_FAMILY_ACCEPTED_SIGNALS = {
+    "prompt_injection": {
+        "PROMPT_INJECTION",
+        "PROMPT_INJECTION_ATTEMPT",
+        "PROMPT_INJECTION_SUCCESS",
+        "SYSTEM_PROMPT_LEAKAGE",
+        "LLM_SECRET_EXPOSURE",
+    },
+    "rag_exfiltration": {"RAG_EXFILTRATION", "LLM_RAG_EXFILTRATION"},
+    "indirect_prompt_injection": {"INDIRECT_PROMPT_INJECTION", "LLM_INDIRECT_PROMPT_INJECTION"},
+    "dangerous_tool_invocation": {"DANGEROUS_TOOL_INVOCATION", "LLM_DANGEROUS_TOOL_INVOCATION"},
+    "privilege_escalating_tool_invocation": {
+        "PRIVILEGE_ESCALATING_TOOL_INVOCATION",
+        "LLM_PRIVILEGE_ESCALATING_TOOL_INVOCATION",
+    },
+    "tool_chain_injection": {"TOOL_CHAIN_PROMPT_INJECTION", "LLM_TOOL_CHAIN_PROMPT_INJECTION"},
+}
+_LLM_SIGNAL_FAMILY_MARKERS = (
+    ("tool_chain_injection", ("TOOL_CHAIN_PROMPT_INJECTION", "TOOL_CHAIN_INJECTION")),
+    ("indirect_prompt_injection", ("INDIRECT_PROMPT_INJECTION",)),
+    ("privilege_escalating_tool_invocation", ("PRIVILEGE_ESCALATING_TOOL_INVOCATION",)),
+    ("dangerous_tool_invocation", ("DANGEROUS_TOOL_INVOCATION",)),
+    ("rag_exfiltration", ("RAG_CONTEXT_EXFILTRATION", "RAG_EXFILTRATION")),
+    (
+        "prompt_injection",
+        (
+            "SYSTEM_PROMPT_LEAKAGE",
+            "PROMPT_INJECTION_SUCCESS",
+            "PROMPT_INJECTION_ATTEMPT",
+            "PROMPT_INJECTION",
+        ),
+    ),
+)
 _ENGINE_EXECUTION_ARTIFACT_TYPES = {
     "templates": "templates_execution",
     "schemathesis": "schemathesis_execution",
@@ -217,6 +255,17 @@ def _llm_judge_validation_summary(result: TestResult) -> dict[str, object]:
     except (TypeError, ValueError):
         signal_count = 0
     signal_types = _string_list(safe_validation.get("signal_types"))
+    required_signal_families = _llm_required_signal_families(result, evidence)
+    covered_signal_families = _llm_covered_signal_families(signal_types)
+    missing_signal_family_fields = (
+        [
+            f"signal_types.{family}"
+            for family in required_signal_families
+            if family not in covered_signal_families
+        ]
+        if signal_types
+        else []
+    )
     missing_fields = [
         field
         for field in (
@@ -229,6 +278,7 @@ def _llm_judge_validation_summary(result: TestResult) -> dict[str, object]:
         )
         if field not in safe_validation or safe_validation.get(field) in (None, "", [])
     ]
+    missing_fields.extend(missing_signal_family_fields)
     complete = (
         not missing_fields
         and safe_validation.get("deterministic_evidence") is True
@@ -244,12 +294,76 @@ def _llm_judge_validation_summary(result: TestResult) -> dict[str, object]:
         "surface": Redactor.redact_text(str(safe_validation.get("surface") or "")),
         "signal_count": signal_count,
         "signal_types": signal_types,
+        "required_signal_families": required_signal_families,
+        "covered_signal_families": covered_signal_families,
         "deterministic_evidence": safe_validation.get("deterministic_evidence") is True,
         "body_content_persisted": safe_validation.get("body_content_persisted") is True,
         "matched_text_persisted": safe_validation.get("matched_text_persisted") is True,
         "missing_fields": missing_fields,
         "reason": None if complete else "incomplete_llm_judge_validation",
     }
+
+
+def _llm_required_signal_families(result: TestResult, evidence: dict[str, object]) -> list[str]:
+    values: list[object] = [
+        getattr(result, "template_id", None),
+        evidence.get("template_id"),
+        evidence.get("signal_type"),
+        evidence.get("llm_attack_family"),
+        evidence.get("active_family"),
+        evidence.get("active_test_family"),
+        evidence.get("test_family"),
+    ]
+    matched_rule = evidence.get("matched_rule")
+    if isinstance(matched_rule, dict):
+        values.extend(
+            [
+                matched_rule.get("id"),
+                matched_rule.get("type"),
+                matched_rule.get("signal_type"),
+                matched_rule.get("llm_attack_family"),
+            ]
+        )
+
+    families: list[str] = []
+    for value in values:
+        family = _llm_signal_family_from_value(value)
+        if family and family not in families:
+            families.append(family)
+    return families
+
+
+def _llm_covered_signal_families(signal_types: list[str]) -> list[str]:
+    signal_tokens = {_llm_signal_token(signal_type) for signal_type in signal_types}
+    signal_tokens.discard("")
+    covered: list[str] = []
+    for family, accepted_signals in _LLM_SIGNAL_FAMILY_ACCEPTED_SIGNALS.items():
+        family_tokens = {
+            _llm_signal_token(family),
+            *(_llm_signal_token(signal) for signal in accepted_signals),
+        }
+        if signal_tokens.intersection(family_tokens):
+            covered.append(family)
+    return covered
+
+
+def _llm_signal_family_from_value(value: object) -> str | None:
+    token = _llm_signal_token(value)
+    if not token:
+        return None
+    for family, markers in _LLM_SIGNAL_FAMILY_MARKERS:
+        if any(marker in token for marker in markers):
+            return family
+    return None
+
+
+def _llm_signal_token(value: object) -> str:
+    token = str(value or "").strip().upper()
+    for old, new in (("-", "_"), (" ", "_"), (":", "_"), (".", "_"), ("/", "_")):
+        token = token.replace(old, new)
+    while "__" in token:
+        token = token.replace("__", "_")
+    return token.strip("_")
 
 
 def _is_authorization_replay_result(result: TestResult) -> bool:
@@ -337,6 +451,12 @@ def _authorization_boundary_coverage_summary(result: TestResult) -> dict[str, ob
         missing_fields.append("boundary_kinds")
     if compared_count <= 0:
         missing_fields.append("compared_fields")
+    issue_types = _authorization_replay_issue_types(evidence, matched_rule)
+    boundary_kind_set = set(boundary_kinds)
+    if "BOLA" in issue_types and not boundary_kind_set.intersection(_AUTHORIZATION_BOLA_BOUNDARY_KINDS):
+        missing_fields.append("bola_boundary_kind")
+    if "BFLA" in issue_types and not boundary_kind_set.intersection(_AUTHORIZATION_BFLA_BOUNDARY_KINDS):
+        missing_fields.append("bfla_boundary_kind")
     if boundary_metadata.get("value_material_retained") is True:
         missing_fields.append("redacted_field_names_only")
     complete = bool(
@@ -364,6 +484,31 @@ def is_authorization_replay_result(result: TestResult) -> bool:
 
 def authorization_boundary_coverage_summary(result: TestResult) -> dict[str, object]:
     return _authorization_boundary_coverage_summary(result)
+
+
+def _authorization_replay_issue_types(evidence: dict[str, object], matched_rule: dict[str, object]) -> set[str]:
+    issue_types: set[str] = set()
+    for raw_issue_type in (
+        evidence.get("issue_type"),
+        matched_rule.get("issue_type"),
+        matched_rule.get("type"),
+    ):
+        normalized = str(raw_issue_type or "").strip().upper()
+        if normalized in _AUTHORIZATION_REPLAY_ISSUE_TYPES:
+            issue_types.add(normalized)
+
+    classification = evidence.get("authorization_issue_classification")
+    classification_issue_types = (
+        classification.get("issue_types")
+        if isinstance(classification, dict)
+        else None
+    )
+    if isinstance(classification_issue_types, list):
+        for raw_issue_type in classification_issue_types:
+            normalized = str(raw_issue_type or "").strip().upper()
+            if normalized in _AUTHORIZATION_REPLAY_ISSUE_TYPES:
+                issue_types.add(normalized)
+    return issue_types
 
 
 def _is_llm_result(result: TestResult) -> bool:
@@ -668,12 +813,20 @@ def _execution_artifact_lookup(
         if not isinstance(raw_artifact, dict):
             continue
         verification = _fresh_execution_artifact_verification(raw_artifact)
+        raw_engine = str(raw_artifact.get("engine") or "").strip().lower()
+        content_governance = artifact_content_governance_summary(
+            raw_artifact,
+            expected_engine=raw_engine or None,
+        )
         artifact = Redactor.redact_json(raw_artifact)
         if not isinstance(artifact, dict):
             continue
         safe_verification = Redactor.redact_json(verification)
         if isinstance(safe_verification, dict):
             artifact["_fresh_artifact_verification"] = safe_verification
+        safe_content_governance = Redactor.redact_json(content_governance)
+        if isinstance(safe_content_governance, dict):
+            artifact["_artifact_content_governance"] = safe_content_governance
         engine = str(artifact.get("engine") or "").strip().lower()
         artifact_type = str(
             artifact.get("artifact_type")
@@ -748,6 +901,13 @@ def _engine_artifact_requirement_summary(
             and normalized_evidence.get("evidence_present") is True
             and normalized_evidence.get("execution_observed") is True
         )
+        content_governance = (
+            artifact.get("_artifact_content_governance")
+            if isinstance(artifact, dict)
+            else {}
+        )
+        content_governance = content_governance if isinstance(content_governance, dict) else {}
+        content_governance_complete = content_governance.get("complete") is True
         artifact_run_id = Redactor.redact_text(str(artifact.get("run_id") or "")) if isinstance(artifact, dict) else ""
         run_matches = not artifact_run_id or artifact_run_id == expected_run_id
         verification_status = str(
@@ -780,8 +940,15 @@ def _engine_artifact_requirement_summary(
                     "mismatch_fields": ["run_id"],
                 }
             )
+        elif verified and normalized and run_matches and not content_governance_complete:
+            summary.update(
+                {
+                    "status": "artifact_content_governance_failed",
+                    "artifact_content_governance": content_governance,
+                }
+            )
         summaries.append(summary)
-        if not (verified and normalized and run_matches):
+        if not (verified and normalized and run_matches and content_governance_complete):
             missing.append(summary)
 
     return summaries, missing
@@ -1007,7 +1174,14 @@ def evaluate_quality_gate(
         exit_code = 1
     elif require_engine_artifacts and missing_engine_artifacts:
         status = "FAILED"
-        reason = "missing_engine_execution_artifacts"
+        reason = (
+            "artifact_content_governance_failed"
+            if any(
+                item.get("status") == "artifact_content_governance_failed"
+                for item in missing_engine_artifacts
+            )
+            else "missing_engine_execution_artifacts"
+        )
         exit_code = 1
     elif require_authorization_boundary_coverage and missing_authorization_boundary_results:
         status = "FAILED"

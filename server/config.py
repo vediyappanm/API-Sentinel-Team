@@ -291,6 +291,26 @@ class Settings(BaseSettings):
     MCP_SHIELD_ENABLED: bool = True
     MCP_DEFAULT_RATE_LIMIT_RPM: int = 60
 
+    # ── Agentic Reasoning (proposer-confirmer) ───────────────────────────
+    # The LLM only PROPOSES tests; deterministic guards + judge dispose.
+    # Disabled by default and degrades to deterministic selection when off.
+    AGENTIC_LLM_ENABLED: bool = False
+    AGENTIC_LLM_MODEL: str = ""          # e.g. "ollama/llama3", "gpt-4o-mini"
+    AGENTIC_LLM_API_BASE: str = ""       # e.g. "http://localhost:11434" for Ollama
+    AGENTIC_LLM_API_KEY: str = ""        # hosted-provider key; never logged
+    AGENTIC_LLM_TIMEOUT_SECONDS: float = 30.0
+    AGENTIC_LOOP_MAX_ROUNDS: int = 3
+
+    # ── Continuous Testing (discovery -> auto-scan) ──────────────────────
+    # When enabled, newly-discovered (never-tested) endpoints are automatically
+    # enqueued for a scan, closing the Discovery -> Testing pipeline gap.
+    # Off by default; requires a default pentest profile + allowlisted targets.
+    CONTINUOUS_TESTING_ENABLED: bool = False
+    CONTINUOUS_TESTING_PROFILE_ID: str = ""       # pentest profile to use; blank = default
+    CONTINUOUS_TESTING_MAX_ENDPOINTS_PER_SWEEP: int = 25
+    CONTINUOUS_TESTING_SWEEP_INTERVAL_SECONDS: int = 600
+    STARTUP_ENABLE_CONTINUOUS_TESTING: bool = False
+
     @field_validator("DEBUG", mode="before")
     @classmethod
     def _coerce_debug_value(cls, value):

@@ -738,6 +738,16 @@ def _apply_engine_artifact_accountability_gate(
         for artifact in required_artifacts
         if artifact.get("status") == "duplicate_artifact"
     ]
+    incomplete_worker_isolation_artifacts = [
+        artifact
+        for artifact in required_artifacts
+        if artifact.get("status") == "worker_isolation_incomplete"
+    ]
+    content_governance_failed_artifacts = [
+        artifact
+        for artifact in required_artifacts
+        if artifact.get("status") == "artifact_content_governance_failed"
+    ]
     continuous_artifacts = _engine_accountability_continuous_artifacts(report_artifacts)
     missing_continuous_artifacts = [
         artifact
@@ -756,22 +766,56 @@ def _apply_engine_artifact_accountability_gate(
         for artifact in continuous_artifacts
         if artifact.get("status") == "duplicate_artifact"
     ]
+    incomplete_continuous_worker_isolation_artifacts = [
+        artifact
+        for artifact in continuous_artifacts
+        if artifact.get("status") == "worker_isolation_incomplete"
+    ]
+    content_governance_failed_continuous_artifacts = [
+        artifact
+        for artifact in continuous_artifacts
+        if artifact.get("status") == "artifact_content_governance_failed"
+    ]
 
     counts = decision.get("counts")
     if isinstance(counts, dict):
         counts["missing_engine_execution_artifacts"] = len(missing_artifacts)
         counts["unverified_engine_execution_artifacts"] = len(unverified_artifacts)
         counts["duplicate_engine_execution_artifacts"] = len(duplicate_artifacts)
+        counts["incomplete_worker_isolation_engine_artifacts"] = len(
+            incomplete_worker_isolation_artifacts
+        )
+        counts["content_governance_failed_engine_artifacts"] = len(
+            content_governance_failed_artifacts
+        )
         counts["missing_continuous_engine_artifacts"] = len(missing_continuous_artifacts)
         counts["unverified_continuous_engine_artifacts"] = len(unverified_continuous_artifacts)
         counts["duplicate_continuous_engine_artifacts"] = len(duplicate_continuous_artifacts)
+        counts["incomplete_worker_isolation_continuous_artifacts"] = len(
+            incomplete_continuous_worker_isolation_artifacts
+        )
+        counts["content_governance_failed_continuous_artifacts"] = len(
+            content_governance_failed_continuous_artifacts
+        )
 
     decision["missing_engine_execution_artifacts"] = missing_artifacts[:25]
     decision["unverified_engine_execution_artifacts"] = unverified_artifacts[:25]
     decision["duplicate_engine_execution_artifacts"] = duplicate_artifacts[:25]
+    decision["incomplete_worker_isolation_engine_artifacts"] = (
+        incomplete_worker_isolation_artifacts[:25]
+    )
+    decision["content_governance_failed_engine_artifacts"] = (
+        content_governance_failed_artifacts[:25]
+    )
     decision["missing_continuous_engine_artifacts"] = missing_continuous_artifacts[:25]
     decision["unverified_continuous_engine_artifacts"] = unverified_continuous_artifacts[:25]
     decision["duplicate_continuous_engine_artifacts"] = duplicate_continuous_artifacts[:25]
+    decision["incomplete_worker_isolation_continuous_artifacts"] = (
+        incomplete_continuous_worker_isolation_artifacts[:25]
+    )
+    decision["content_governance_failed_continuous_artifacts"] = (
+        content_governance_failed_continuous_artifacts[:25]
+    )
 
     selection_accountability = _engine_accountability_selection_accountability(report_artifacts)
     selection_details = selection_accountability.get("engine_details")
@@ -804,6 +848,28 @@ def _apply_engine_artifact_accountability_gate(
     accountability = report_artifacts.get("engine_accountability")
     if not isinstance(accountability, dict) or accountability.get("required") is not True:
         return decision
+    if (
+        decision.get("status") == "PASSED"
+        and (
+            content_governance_failed_artifacts
+            or content_governance_failed_continuous_artifacts
+        )
+    ):
+        decision["status"] = "FAILED"
+        decision["passed"] = False
+        decision["reason"] = "artifact_content_governance_failed"
+        decision["exit_code"] = 1
+    if (
+        decision.get("status") == "PASSED"
+        and (
+            incomplete_worker_isolation_artifacts
+            or incomplete_continuous_worker_isolation_artifacts
+        )
+    ):
+        decision["status"] = "FAILED"
+        decision["passed"] = False
+        decision["reason"] = "incomplete_worker_isolation_artifacts"
+        decision["exit_code"] = 1
     if (
         decision.get("status") == "PASSED"
         and (duplicate_artifacts or duplicate_continuous_artifacts)
@@ -1702,6 +1768,14 @@ async def legacy_ci_gate_decision(
         elif artifact.get("status") == "duplicate_artifact":
             blocked_reasons.append(
                 f"duplicate_engine_execution_artifact: engine={engine} artifact_type={artifact_type}"
+            )
+        elif artifact.get("status") == "worker_isolation_incomplete":
+            blocked_reasons.append(
+                f"incomplete_worker_isolation_artifact: engine={engine} artifact_type={artifact_type}"
+            )
+        elif artifact.get("status") == "artifact_content_governance_failed":
+            blocked_reasons.append(
+                f"artifact_content_governance_failed: engine={engine} artifact_type={artifact_type}"
             )
         elif artifact.get("status") == "unverified" or (
             artifact.get("present") is True and artifact.get("verified") is not True
