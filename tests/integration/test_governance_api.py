@@ -97,3 +97,66 @@ async def test_governance_rules_require_manage_permission_and_redact_outputs(cli
     violations_response = await client.get("/api/governance/violations", headers=member_headers)
     assert violations_response.status_code == 200
     assert raw_token not in str(violations_response.json())
+
+
+@pytest.mark.asyncio
+async def test_violations_are_enriched_paginated_and_filterable_by_status(client, db_session):
+    account_id = 9408002
+    security_headers = _headers_for_role("SECURITY_ENGINEER", account_id)
+
+    endpoint = APIEndpoint(
+        account_id=account_id,
+        method="DELETE",
+        host="api.example.com",
+        path="/users/123",
+        protocol="https",
+    )
+    db_session.add(endpoint)
+    await db_session.commit()
+
+    open_violation = PolicyViolation(
+        account_id=account_id,
+        endpoint_id=endpoint.id,
+        rule_type="SECURITY",
+        severity="HIGH",
+        status="OPEN",
+        message="No DELETE on sensitive paths violated",
+    )
+    resolved_violation = PolicyViolation(
+        account_id=account_id,
+        endpoint_id=endpoint.id,
+        rule_type="NAMING",
+        severity="LOW",
+        status="RESOLVED",
+        message="API paths should be lowercase violated",
+    )
+    db_session.add_all([open_violation, resolved_violation])
+    await db_session.commit()
+
+    all_response = await client.get("/api/governance/violations", headers=security_headers)
+    assert all_response.status_code == 200
+    all_body = all_response.json()
+    assert all_body["total"] == 2
+    assert len(all_body["violations"]) == 2
+
+    open_only = await client.get(
+        "/api/governance/violations?status=OPEN", headers=security_headers
+    )
+    assert open_only.status_code == 200
+    open_body = open_only.json()
+    assert open_body["total"] == 1
+    row = open_body["violations"][0]
+    assert row["status"] == "OPEN"
+    assert row["method"] == "DELETE"
+    assert row["url"].endswith("/users/123")
+    assert row["subCategory"] == "SECURITY"
+    assert isinstance(row["timestamp"], int) and row["timestamp"] > 0
+    assert row["eventId"] == open_violation.id[:8]
+
+    paginated = await client.get(
+        "/api/governance/violations?skip=0&limit=1", headers=security_headers
+    )
+    assert paginated.status_code == 200
+    paginated_body = paginated.json()
+    assert paginated_body["total"] == 2
+    assert len(paginated_body["violations"]) == 1

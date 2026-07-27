@@ -161,13 +161,34 @@ export async function fetchNewEndpointsTrend(
   return { trend: [] };
 }
 
+export interface GovernanceEvent {
+  id: string;
+  severity: string;
+  method?: string;
+  url?: string;
+  timestamp: number;
+  subCategory?: string;
+  description?: string;
+  status: string;
+  eventId?: string;
+}
+
 export async function fetchGovernanceEvents(
   skip: number = 0,
   limit: number = 50,
   filters?: Record<string, unknown>,
   signal?: AbortSignal,
 ) {
-  return { auditDataList: [], total: 0 };
+  const params = new URLSearchParams({ skip: String(skip), limit: String(limit) });
+  const status = filters?.status;
+  if (typeof status === 'string' && status) {
+    params.set('status', status);
+  }
+  const data = await get<{ total: number; violations: GovernanceEvent[] }>(
+    `/governance/violations?${params.toString()}`,
+    signal,
+  );
+  return { auditDataList: data.violations || [], total: data.total || 0 };
 }
 
 export async function fetchApiStats(signal?: AbortSignal) {

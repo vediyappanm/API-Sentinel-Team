@@ -241,19 +241,41 @@ async def scan_endpoints(
 async def list_policy_violations(
     payload: dict = Depends(RBAC.require_permission(Permission.COMPLIANCE_READ)),
     db: AsyncSession = Depends(get_db),
+    skip: int = Query(0, ge=0),
     limit: int = Query(100, le=500),
+    status: str | None = Query(None, description="Filter by violation status, e.g. OPEN"),
 ):
     account_id = payload.get("account_id")
+    filters = [PolicyViolation.account_id == account_id]
+    if status:
+        filters.append(PolicyViolation.status == status.upper())
+
+    total = await db.scalar(
+        select(func.count()).select_from(PolicyViolation).where(and_(*filters))
+    )
     result = await db.execute(
         select(PolicyViolation)
-        .where(PolicyViolation.account_id == account_id)
+        .where(and_(*filters))
         .order_by(PolicyViolation.created_at.desc())
+        .offset(skip)
         .limit(limit)
     )
     violations = result.scalars().all()
+
+    endpoint_ids = sorted({v.endpoint_id for v in violations if v.endpoint_id})
+    endpoints_by_id: dict[str, APIEndpoint] = {}
+    if endpoint_ids:
+        eps_result = await db.execute(
+            select(APIEndpoint).where(APIEndpoint.id.in_(endpoint_ids))
+        )
+        endpoints_by_id = {ep.id: ep for ep in eps_result.scalars().all()}
+
     return {
-        "total": len(violations),
-        "violations": [_serialize_violation(v) for v in violations],
+        "total": total or 0,
+        "violations": [
+            _serialize_violation(v, endpoint=endpoints_by_id.get(v.endpoint_id))
+            for v in violations
+        ],
     }
 
 
@@ -311,13 +333,24 @@ def _serialize_rule(rule: GovernanceRule) -> dict:
     }
 
 
-def _serialize_violation(violation: PolicyViolation) -> dict:
+def _serialize_violation(violation: PolicyViolation, *, endpoint: APIEndpoint | None = None) -> dict:
+    timestamp = int(violation.created_at.timestamp()) if violation.created_at else 0
     return {
         "id": violation.id,
         "rule_id": violation.rule_id,
         "endpoint_id": violation.endpoint_id,
         "rule_type": violation.rule_type,
         "severity": violation.severity,
+        "status": violation.status,
         "message": Redactor.redact_text(violation.message or "") if violation.message else None,
         "created_at": str(violation.created_at),
+        # Event-table fields for the governance dashboard: endpoint method/url
+        # (joined, since PolicyViolation only stores endpoint_id), epoch
+        # timestamp, and a short display id distinct from the full row id.
+        "method": endpoint.method if endpoint else None,
+        "url": Redactor.redact_url(f"{endpoint.host or ''}{endpoint.path or ''}") if endpoint else None,
+        "timestamp": timestamp,
+        "subCategory": violation.rule_type,
+        "description": Redactor.redact_text(violation.message or "") if violation.message else None,
+        "eventId": violation.id[:8] if violation.id else None,
     }
