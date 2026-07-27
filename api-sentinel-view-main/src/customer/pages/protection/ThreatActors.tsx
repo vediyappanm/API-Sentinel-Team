@@ -9,6 +9,7 @@ import MetricWidget from '@/components/ui/MetricWidget';
 import GlassCard from '@/components/ui/GlassCard';
 import ProgressRing from '@/components/ui/ProgressRing';
 import { useThreatActors, useActorsGeoCount, useSeverityCount, useModifyActorStatus } from '@/hooks/use-protection';
+import { centroidForCountryCode } from '@/lib/country-centroids';
 import { useQueryClient } from '@tanstack/react-query';
 
 function formatTs(epoch: number) {
@@ -46,11 +47,23 @@ const ThreatActors: React.FC = () => {
   }, [rows]);
 
   const sev = sevCount.data?.severityCount ?? {};
-  const geoThreats = useMemo(() => Object.entries(geoCount.data?.countPerCountry ?? {}).slice(0, 10).map(([, count]) => ({
-    lat: Math.random() * 120 - 60, lng: Math.random() * 240 - 120,
-    severity: count > 100 ? 'critical' as const : count > 50 ? 'high' as const : 'medium' as const,
-    count,
-  })), [geoCount.data]);
+  const geoThreats = useMemo(() => {
+    const entries = Object.entries(geoCount.data?.countPerCountry ?? {});
+    return entries
+      .map(([countryCode, count]) => {
+        const centroid = centroidForCountryCode(countryCode);
+        if (!centroid) return null;
+        return {
+          ...centroid,
+          label: countryCode,
+          severity: count > 100 ? ('critical' as const) : count > 50 ? ('high' as const) : ('medium' as const),
+          count,
+        };
+      })
+      .filter((marker): marker is NonNullable<typeof marker> => marker !== null)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  }, [geoCount.data]);
 
   return (
     <div className="space-y-5 animate-fade-in w-full pb-10">
@@ -66,7 +79,7 @@ const ThreatActors: React.FC = () => {
 
       {/* Summary */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricWidget label="Total Actors" value={total} icon={Users} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, total + Math.floor(Math.random() * 6 - 3)))} sparkColor="#F97316" />
+        <MetricWidget label="Total Actors" value={total} icon={Users} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" />
 
         <GlassCard variant="default" className="p-4 flex items-center gap-4">
           <DonutChart data={[

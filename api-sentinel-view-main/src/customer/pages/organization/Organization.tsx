@@ -108,8 +108,7 @@ const Organization: React.FC = () => {
           { label: 'Blocked Actors', value: blockedActors, icon: Lock, color: '#22C55E', bg: 'rgba(34,197,94,0.1)' },
         ] as const).map((item, i) => (
           <div key={item.label} className={`animate-stagger-${Math.min(i + 1, 6)}`}>
-            <MetricWidget label={item.label} value={item.value} icon={item.icon} iconColor={item.color} iconBg={item.bg}
-              sparkData={Array.from({ length: 7 }, () => Math.max(0, item.value + Math.floor(Math.random() * 4 - 2)))} sparkColor={item.color} />
+            <MetricWidget label={item.label} value={item.value} icon={item.icon} iconColor={item.color} iconBg={item.bg} />
           </div>
         ))}
       </div>

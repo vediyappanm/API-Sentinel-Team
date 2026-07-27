@@ -268,11 +268,11 @@ const AlertCenter: React.FC = () => {
 
       {/* Summary */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-        <MetricWidget label="Total" value={summary?.total ?? alerts.length} icon={Filter} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, (summary?.total ?? 0) + Math.floor(Math.random() * 4 - 2)))} sparkColor="#F97316" />
-        <MetricWidget label="Open" value={summary?.open ?? tabCounts.OPEN} icon={AlertTriangle} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, (summary?.open ?? 0) + Math.floor(Math.random() * 3 - 1)))} sparkColor="#EF4444" />
-        <MetricWidget label="Critical" value={summary?.critical ?? tabCounts.CRITICAL} icon={XCircle} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, (summary?.critical ?? 0) + Math.floor(Math.random() * 2)))} sparkColor="#EF4444" />
-        <MetricWidget label="High" value={summary?.high ?? alerts.filter(a => a.severity === 'HIGH').length} icon={AlertTriangle} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, (summary?.high ?? 0) + Math.floor(Math.random() * 3 - 1)))} sparkColor="#F97316" />
-        <MetricWidget label="Acknowledged" value={summary?.acknowledged ?? tabCounts.ACKNOWLEDGED} icon={Activity} iconColor="#EAB308" iconBg="rgba(234,179,8,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, (summary?.acknowledged ?? 0) + Math.floor(Math.random() * 2)))} sparkColor="#EAB308" />
+        <MetricWidget label="Total" value={summary?.total ?? alerts.length} icon={Filter} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" />
+        <MetricWidget label="Open" value={summary?.open ?? tabCounts.OPEN} icon={AlertTriangle} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" />
+        <MetricWidget label="Critical" value={summary?.critical ?? tabCounts.CRITICAL} icon={XCircle} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" />
+        <MetricWidget label="High" value={summary?.high ?? alerts.filter(a => a.severity === 'HIGH').length} icon={AlertTriangle} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" />
+        <MetricWidget label="Acknowledged" value={summary?.acknowledged ?? tabCounts.ACKNOWLEDGED} icon={Activity} iconColor="#EAB308" iconBg="rgba(234,179,8,0.1)" />
       </div>
 
       {/* Tabs */}

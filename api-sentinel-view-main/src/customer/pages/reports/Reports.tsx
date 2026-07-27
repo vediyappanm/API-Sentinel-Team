@@ -169,8 +169,8 @@ const Reports: React.FC = () => {
 
       {/* Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <MetricWidget label="Total Findings" value={totalFindings} icon={AlertTriangle} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, totalFindings + Math.floor(Math.random() * 4 - 2)))} sparkColor="#EF4444" />
-        <MetricWidget label="Failed Controls" value={failedControls} icon={Shield} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, failedControls + Math.floor(Math.random() * 3 - 1)))} sparkColor="#F97316" />
+        <MetricWidget label="Total Findings" value={totalFindings} icon={AlertTriangle} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" />
+        <MetricWidget label="Failed Controls" value={failedControls} icon={Shield} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" />
         <GlassCard variant="elevated" className="p-4 flex items-center gap-4">
           <ProgressRing value={postureScore} max={100} size={80} strokeWidth={7} label="Score" />
           <div>

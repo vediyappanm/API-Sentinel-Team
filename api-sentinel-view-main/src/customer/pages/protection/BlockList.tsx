@@ -283,10 +283,10 @@ const BlockList: React.FC = () => {
 
       {/* Summary */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-        <MetricWidget label="Total Blocked" value={stats.total} icon={Ban} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, stats.total + Math.floor(Math.random() * 4 - 2)))} sparkColor="#EF4444" />
-        <MetricWidget label="Auto-Blocked" value={stats.auto} icon={Zap} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, stats.auto + Math.floor(Math.random() * 3 - 1)))} sparkColor="#F97316" />
-        <MetricWidget label="Manual" value={stats.manual} icon={Shield} iconColor="#3B82F6" iconBg="rgba(59,130,246,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, stats.manual + Math.floor(Math.random() * 3 - 1)))} sparkColor="#3B82F6" />
-        <MetricWidget label="Expiring Soon" value={stats.expiringSoon} icon={Clock} iconColor="#EAB308" iconBg="rgba(234,179,8,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, stats.expiringSoon + Math.floor(Math.random() * 2)))} sparkColor="#EAB308" />
+        <MetricWidget label="Total Blocked" value={stats.total} icon={Ban} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" />
+        <MetricWidget label="Auto-Blocked" value={stats.auto} icon={Zap} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" />
+        <MetricWidget label="Manual" value={stats.manual} icon={Shield} iconColor="#3B82F6" iconBg="rgba(59,130,246,0.1)" />
+        <MetricWidget label="Expiring Soon" value={stats.expiringSoon} icon={Clock} iconColor="#EAB308" iconBg="rgba(234,179,8,0.1)" />
       </div>
 
       {/* Auto-block success banner */}

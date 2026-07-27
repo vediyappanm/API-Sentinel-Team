@@ -135,8 +135,6 @@ const Vulnerabilities: React.FC = () => {
               icon={item.icon}
               iconColor={item.color}
               iconBg={item.bg}
-              sparkData={Array.from({ length: 7 }, () => Math.max(0, item.value + Math.floor(Math.random() * 6 - 3)))}
-              sparkColor={item.color}
             />
           </div>
         ))}

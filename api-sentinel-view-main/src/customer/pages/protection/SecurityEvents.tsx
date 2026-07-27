@@ -165,7 +165,7 @@ const SecurityEvents: React.FC = () => {
 
       {/* Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <MetricWidget label="Total Events" value={totalEvents} icon={Zap} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, totalEvents + Math.floor(Math.random() * 10 - 5)))} sparkColor="#F97316" />
+        <MetricWidget label="Total Events" value={totalEvents} icon={Zap} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" />
 
         <GlassCard variant="default" className="p-4 flex items-center gap-4">
           <DonutChart data={sevData} size={90} innerRadius={28} outerRadius={40} centerValue={totalEvents} centerLabel="Total" />

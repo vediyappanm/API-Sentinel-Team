@@ -49,7 +49,7 @@ const ThreatIntelligence: React.FC = () => {
       if (e.id === 'traversal') conf = Math.min(100, ((catLower['path traversal'] ?? catLower['path_traversal'] ?? 0) / Math.max(1, totalEvents)) * 300);
       if (e.id === 'scanner') conf = Math.min(100, ((catLower['scanning tool'] ?? catLower['scanner'] ?? 0) / Math.max(1, totalEvents)) * 300);
       if (e.id === 'xss') conf = Math.min(100, ((catLower['xss'] ?? 0) / Math.max(1, totalEvents)) * 300);
-      if (e.id === 'anomaly') conf = totalEvents > 0 ? Math.min(100, 20 + Math.random() * 30) : 0;
+      if (e.id === 'anomaly') conf = Math.min(100, ((catLower['anomaly'] ?? catLower['behavioral anomaly'] ?? 0) / Math.max(1, totalEvents)) * 300);
       return { id: e.id, confidence: Math.round(conf), active: conf > 10 };
     });
   }, [cats, totalEvents]);
@@ -130,7 +130,7 @@ const ThreatIntelligence: React.FC = () => {
           </div>
         </GlassCard>
 
-        <MetricWidget label="Events Detected" value={totalEvents} icon={Activity} iconColor="#3B82F6" iconBg="rgba(59,130,246,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, totalEvents + Math.floor(Math.random() * 10 - 5)))} sparkColor="#3B82F6" />
+        <MetricWidget label="Events Detected" value={totalEvents} icon={Activity} iconColor="#3B82F6" iconBg="rgba(59,130,246,0.1)" />
 
         <GlassCard variant="default" className="p-4 flex flex-col gap-2">
           <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5"><AlertTriangle size={10} /> Top Attack Vector</span>

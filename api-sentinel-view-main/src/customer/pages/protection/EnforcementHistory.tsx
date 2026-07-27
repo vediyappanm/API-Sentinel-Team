@@ -68,7 +68,7 @@ const EnforcementHistory: React.FC = () => {
 
       {/* Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <MetricWidget label="Total Enforcements" value={total} icon={ShieldBan} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" sparkData={Array.from({ length: 7 }, () => Math.max(0, total + Math.floor(Math.random() * 6 - 3)))} sparkColor="#EF4444" />
+        <MetricWidget label="Total Enforcements" value={total} icon={ShieldBan} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" />
 
         <GlassCard variant="default" className="p-4 flex items-center gap-4">
           <DonutChart data={[

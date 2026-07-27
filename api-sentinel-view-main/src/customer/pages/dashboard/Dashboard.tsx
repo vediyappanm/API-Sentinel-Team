@@ -18,6 +18,7 @@ import AnimatedCounter from '@/components/ui/AnimatedCounter';
 import OWASPCoverageWidget from '@/components/widgets/OWASPCoverageWidget';
 import { useDashboardKPIs, useIssuesTrend, useThreatTrend, useSeverityBreakdown } from '@/hooks/use-dashboard';
 import { useThreatCategoryCount, useActorsGeoCount } from '@/hooks/use-protection';
+import { centroidForCountryCode } from '@/lib/country-centroids';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/auth-context';
@@ -120,39 +121,31 @@ const Dashboard: React.FC = () => {
     return [];
   }, [issuesTrend.data]);
 
-  // Generate sparkline data (using timeline or mock)
-  const sparkGen = (base: number) => Array.from({ length: 7 }, (_, i) => Math.max(0, base + Math.floor(Math.random() * base * 0.4 - base * 0.2)));
-
   const categories = Object.entries(categoryCount.data?.categoryCount ?? {});
   const topCategories = categories.sort((a, b) => b[1] - a[1]).slice(0, 6);
   const maxCatVal = topCategories.length > 0 ? (topCategories[0][1] as number) : 1;
 
-  // Real geo coordinates from threat actor IPs (using country data)
+  // Real geo coordinates from threat actor IPs (using country data). Countries
+  // with no known centroid are dropped rather than defaulted to the US — a
+  // silent fallback would misattribute their attacks to the wrong country.
   const geoThreats = useMemo(() => {
-    const countryCoords: Record<string, { lat: number; lng: number }> = {
-      'US': { lat: 37.0902, lng: -95.7129 },
-      'CN': { lat: 35.8617, lng: 104.1954 },
-      'RU': { lat: 61.5240, lng: 105.3188 },
-      'DE': { lat: 51.1657, lng: 10.4515 },
-      'GB': { lat: 55.3781, lng: -3.4360 },
-      'FR': { lat: 46.2276, lng: 2.2137 },
-      'IN': { lat: 20.5937, lng: 78.9629 },
-      'BR': { lat: -14.2350, lng: -51.9253 },
-      'JP': { lat: 36.2048, lng: 138.2529 },
-      'AU': { lat: -25.2744, lng: 133.7751 },
-    };
-    
     const countryCounts = geoCount.data?.countPerCountry || {};
-    return Object.entries(countryCounts).map(([country, count]) => {
-      const coords = countryCoords[country] || countryCoords['US'];
-      return {
-        lat: coords.lat + (Math.random() - 0.5) * 10, // Add slight randomization for visual spread
-        lng: coords.lng + (Math.random() - 0.5) * 10,
-        severity: count > 100 ? 'critical' as const : count > 50 ? 'high' as const : 'medium' as const,
-        count,
-        country,
-      };
-    });
+    return Object.entries(countryCounts)
+      .map(([country, count]) => {
+        const coords = centroidForCountryCode(country);
+        if (!coords) return null;
+        return {
+          // Small deterministic-looking jitter so markers for the same
+          // country don't all stack on one pixel — purely visual spread,
+          // not a substitute for real per-event coordinates.
+          lat: coords.lat + (Math.random() - 0.5) * 4,
+          lng: coords.lng + (Math.random() - 0.5) * 4,
+          severity: count > 100 ? ('critical' as const) : count > 50 ? ('high' as const) : ('medium' as const),
+          count,
+          country,
+        };
+      })
+      .filter((marker): marker is NonNullable<typeof marker> => marker !== null);
   }, [geoCount.data]);
 
   const hasError = issues.isError || endpoints.isError;
@@ -230,8 +223,6 @@ const Dashboard: React.FC = () => {
             icon={Database}
             iconColor="#3B82F6"
             iconBg="rgba(59,130,246,0.1)"
-            sparkData={[30, 45, 60, 72, 80, 85, behavioralDays]}
-            sparkColor="#3B82F6"
             changeLabel="Behavioral baselines retained"
           />
           <MetricWidget
@@ -240,8 +231,6 @@ const Dashboard: React.FC = () => {
             icon={FileCheck}
             iconColor="#22C55E"
             iconBg="rgba(34,197,94,0.1)"
-            sparkData={sparkGen(typeof evidencePackages === 'number' ? evidencePackages : 0)}
-            sparkColor="#22C55E"
             changeLabel="Redacted payloads + timeline"
           />
           <MetricWidget
@@ -251,8 +240,6 @@ const Dashboard: React.FC = () => {
             icon={GitBranch}
             iconColor="#EAB308"
             iconBg="rgba(234,179,8,0.1)"
-            sparkData={[blgCoverage - 8, blgCoverage - 5, blgCoverage - 4, blgCoverage - 2, blgCoverage]}
-            sparkColor="#EAB308"
             changeLabel="BLG transitions learned"
           />
           <MetricWidget
@@ -261,8 +248,6 @@ const Dashboard: React.FC = () => {
             icon={Bot}
             iconColor="#632CA6"
             iconBg="rgba(99,44,175,0.1)"
-            sparkData={sparkGen(typeof mcpSessions === 'number' ? mcpSessions : 0)}
-            sparkColor="#632CA6"
             changeLabel="Tool invocation monitoring"
           />
         </div>

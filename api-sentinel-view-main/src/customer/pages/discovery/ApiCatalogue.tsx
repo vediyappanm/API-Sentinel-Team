@@ -9,7 +9,6 @@ import TableSkeleton from '@/components/shared/TableSkeleton';
 import QueryError from '@/components/shared/QueryError';
 import MetricWidget from '@/components/ui/MetricWidget';
 import GlassCard from '@/components/ui/GlassCard';
-import SparklineChart from '@/components/ui/SparklineChart';
 import { useApiCollections, useApiInfos, useSeverityCounts } from '@/hooks/use-discovery';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
@@ -407,7 +406,6 @@ const ApiCatalogue: React.FC = () => {
                   <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-28 text-center">Last Seen</th>
                   <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Auth</th>
                   <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Risk</th>
-                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-16 text-center">Volume</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle">
@@ -483,16 +481,6 @@ const ApiCatalogue: React.FC = () => {
                           color: riskColor(risk),
                           background: `${riskColor(risk)}12`,
                         }}>{risk}</span>
-                      </td>
-                      <td className="px-4 py-3 flex justify-center">
-                        <SparklineChart
-                          data={Array.from({ length: 7 }, () => Math.floor(Math.random() * 50 + 10))}
-                          color="#9D9DAF"
-                          width={48}
-                          height={16}
-                          showDot={false}
-                          strokeWidth={1}
-                        />
                       </td>
                     </tr>
                   );
