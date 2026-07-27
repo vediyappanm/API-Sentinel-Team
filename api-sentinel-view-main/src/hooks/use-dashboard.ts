@@ -4,7 +4,6 @@ import {
   fetchCriticalIssuesTrend,
   fetchIssuesTrend,
   fetchHistoricalData,
-  fetchEndpointDiscoveryData,
   fetchThreatData,
 } from '@/services/dashboard.service';
 import { fetchEndpointsCount } from '@/services/discovery.service';
@@ -79,15 +78,6 @@ export function useSeverityBreakdown(startTs?: number, endTs?: number) {
   return useQuery({
     queryKey: ['dashboard', 'severity', startTs, endTs],
     queryFn: ({ signal }) => fetchCountBySeverity(startTs, endTs, signal),
-    staleTime: 5_000,
-    refetchInterval: 5_000,
-  });
-}
-
-export function useDiscoveryData() {
-  return useQuery({
-    queryKey: ['dashboard', 'discovery'],
-    queryFn: ({ signal }) => fetchEndpointDiscoveryData(signal),
     staleTime: 5_000,
     refetchInterval: 5_000,
   });

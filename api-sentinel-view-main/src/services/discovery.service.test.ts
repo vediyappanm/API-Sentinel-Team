@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchGovernanceEvents } from './discovery.service';
+import { fetchGovernanceEvents, fetchSeverityCounts } from './discovery.service';
 
 const jsonResponse = (body: unknown) =>
   new Response(JSON.stringify(body), {
@@ -64,5 +64,52 @@ describe('discovery service — governance events', () => {
     const result = await fetchGovernanceEvents(0, 10);
 
     expect(result).toEqual({ auditDataList: [], total: 0 });
+  });
+});
+
+describe('discovery service — severity counts', () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockResolvedValue(jsonResponse({ summary: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    fetchMock.mockReset();
+  });
+
+  it('skips the network call entirely when no collections are given', async () => {
+    const result = await fetchSeverityCounts([]);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result).toEqual({ severitiesCountResponse: [] });
+  });
+
+  it('calls the real vulnerability severity summary endpoint', async () => {
+    await fetchSeverityCounts(['col-1', 'col-2']);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/api/vulnerabilities/summary/by-severity',
+      expect.objectContaining({ method: 'GET', credentials: 'include' }),
+    );
+  });
+
+  it('aggregates the backend severity/count rows into one severityCount map', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        summary: [
+          { severity: 'HIGH', count: 3 },
+          { severity: 'CRITICAL', count: 1 },
+        ],
+      }),
+    );
+
+    const result = await fetchSeverityCounts(['col-1']);
+
+    expect(result).toEqual({
+      severitiesCountResponse: [{ severityCount: { HIGH: 3, CRITICAL: 1 } }],
+    });
   });
 });

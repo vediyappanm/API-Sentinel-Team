@@ -6,11 +6,8 @@ import {
   fetchSeverityCounts,
   fetchEndpointsCount,
   fetchRecentEndpoints,
-  fetchAccessTypes,
   fetchGovernanceEvents,
-  fetchApiStats,
   fetchSensitiveParameters,
-  fetchSensitiveInfoForCollections,
 } from '@/services/discovery.service';
 
 export function useApiCollections() {
@@ -68,16 +65,6 @@ export function useRecentEndpoints(startTs: number, endTs: number) {
   });
 }
 
-export function useAccessTypes(apiCollectionId: ApiCollectionId | null) {
-  return useQuery({
-    queryKey: ['discovery', 'accessTypes', apiCollectionId],
-    queryFn: ({ signal }) => fetchAccessTypes(apiCollectionId!, signal),
-    enabled: apiCollectionId !== null,
-    staleTime: 5_000,
-    refetchInterval: 5_000,
-  });
-}
-
 export function useGovernanceEvents(
   page: number = 0,
   pageSize: number = 50,
@@ -91,28 +78,10 @@ export function useGovernanceEvents(
   });
 }
 
-export function useApiStats() {
-  return useQuery({
-    queryKey: ['discovery', 'apiStats'],
-    queryFn: ({ signal }) => fetchApiStats(signal),
-    staleTime: 5_000,
-    refetchInterval: 5_000,
-  });
-}
-
 export function useSensitiveParameters(page: number = 0, pageSize: number = 50) {
   return useQuery({
     queryKey: ['discovery', 'sensitiveParams', page, pageSize],
     queryFn: ({ signal }) => fetchSensitiveParameters(page * pageSize, pageSize, signal),
-    staleTime: 5_000,
-    refetchInterval: 5_000,
-  });
-}
-
-export function useSensitiveInfoForCollections() {
-  return useQuery({
-    queryKey: ['discovery', 'sensitiveInfo'],
-    queryFn: ({ signal }) => fetchSensitiveInfoForCollections(signal),
     staleTime: 5_000,
     refetchInterval: 5_000,
   });

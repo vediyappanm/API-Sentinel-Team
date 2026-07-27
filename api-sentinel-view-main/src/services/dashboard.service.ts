@@ -173,14 +173,6 @@ export async function fetchCriticalIssuesTrend(startTs: number, endTs: number, s
   }
 }
 
-export async function fetchEndpointDiscoveryData(signal?: AbortSignal) {
-  return { discoveryData: {} };
-}
-
-export async function fetchTestingData(signal?: AbortSignal) {
-  return { testingData: {} };
-}
-
 export async function fetchThreatData(signal?: AbortSignal) {
   try {
     const raw = await get<ThreatActorsResponse | RawThreatActor[]>('/threat-actors/?limit=500', signal);

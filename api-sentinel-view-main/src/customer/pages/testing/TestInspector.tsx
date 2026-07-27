@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Download, FileSearch, ShieldAlert, TriangleAlert } from 'lucide-react';
 
 import EmptyState from '@/components/shared/EmptyState';
+import EvidenceViewer from '@/components/shared/EvidenceViewer';
 import QueryError from '@/components/shared/QueryError';
 import GlassCard from '@/components/ui/GlassCard';
 import SkeletonLoader from '@/components/ui/SkeletonLoader';
@@ -187,11 +188,7 @@ const TestInspector: React.FC = () => {
                         </div>
                       ) : null}
 
-                      {result.evidence ? (
-                        <pre className="mt-3 max-h-40 overflow-auto rounded-xl border border-border-subtle bg-black/[0.03] px-3 py-3 text-[11px] text-text-primary font-mono whitespace-pre-wrap">
-                          {String(result.evidence)}
-                        </pre>
-                      ) : null}
+                      {result.evidence ? <EvidenceViewer evidence={result.evidence} /> : null}
                     </div>
                   ))
                 ) : (

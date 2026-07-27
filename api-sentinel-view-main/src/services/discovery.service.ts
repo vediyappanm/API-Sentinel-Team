@@ -68,6 +68,11 @@ export interface SeverityCountResponse {
   severityCount?: Record<string, number>;
 }
 
+interface SeveritySummaryEntry {
+  severity?: string;
+  count?: number;
+}
+
 export async function fetchApiCollections(signal?: AbortSignal) {
   const raw = await get<CollectionsResponse | RawCollection[]>('/collections/', signal);
   const data = Array.isArray(raw) ? raw : (raw.collections ?? []);
@@ -140,25 +145,24 @@ export async function fetchEndpointsCount(signal?: AbortSignal) {
 }
 
 export async function fetchSeverityCounts(apiCollectionIds: ApiCollectionId[], signal?: AbortSignal) {
-  return { severitiesCountResponse: [] as SeverityCountResponse[] };
+  if (apiCollectionIds.length === 0) {
+    return { severitiesCountResponse: [] as SeverityCountResponse[] };
+  }
+  // The backend aggregates OPEN vulnerability severity account-wide, not
+  // per-collection — callers (ApiCatalogue's Risk Distribution donut) already
+  // sum across the whole severitiesCountResponse array regardless of which
+  // collection each entry came from, so a single aggregate entry is exact.
+  const data = await get<{ summary: SeveritySummaryEntry[] }>('/vulnerabilities/summary/by-severity', signal);
+  const severityCount: Record<string, number> = {};
+  (data.summary || []).forEach((entry) => {
+    if (entry.severity) severityCount[entry.severity] = entry.count ?? 0;
+  });
+  return { severitiesCountResponse: [{ severityCount }] as SeverityCountResponse[] };
 }
 
 export async function fetchRecentEndpoints(startTs: number, endTs: number, signal?: AbortSignal) {
   const data = await fetchApiInfosForCollection(DEFAULT_COLLECTION_ID, 0, 10, undefined, undefined, undefined, signal);
   return { endpoints: data.apiInfoList };
-}
-
-export async function fetchAccessTypes(apiCollectionId: ApiCollectionId, signal?: AbortSignal) {
-  return { accessTypes: {} };
-}
-
-export async function fetchNewEndpointsTrend(
-  period: 'HOST' | 'NON_HOST',
-  startTs: number,
-  endTs: number,
-  signal?: AbortSignal,
-) {
-  return { trend: [] };
 }
 
 export interface GovernanceEvent {
@@ -189,14 +193,6 @@ export async function fetchGovernanceEvents(
     signal,
   );
   return { auditDataList: data.violations || [], total: data.total || 0 };
-}
-
-export async function fetchApiStats(signal?: AbortSignal) {
-  return { apiStats: {} };
-}
-
-export async function fetchCollectionWiseEndpoints(signal?: AbortSignal) {
-  return { response: {} };
 }
 
 export interface AktoSensitiveParam {
@@ -230,8 +226,4 @@ export async function fetchSensitiveParameters(
     data: { endpoints },
     total: endpoints.length,
   };
-}
-
-export async function fetchSensitiveInfoForCollections(signal?: AbortSignal) {
-  return { sensitiveInfo: {} };
 }
