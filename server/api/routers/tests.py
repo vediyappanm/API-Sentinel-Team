@@ -56,6 +56,8 @@ from server.modules.vulnerability_detector.lifecycle import (
     retest_outcome_digest,
     utc_now,
 )
+from server.modules.vulnerability_detector.store import create_or_merge_vulnerability
+from server.modules.agentic.finding_persistence import build_agentic_vulnerability_data
 from server.modules.auth.audit import log_action
 from server.modules.zap.runner import ZapRunner
 from server.modules.business_logic.active_tests import (
@@ -1577,11 +1579,18 @@ async def _run_security_tasks(
             if canceled:
                 break
 
-        # ── Agentic proposer-confirmer pass (opt-in via AGENTIC_LLM_ENABLED) ──
-        # Runs AFTER the deterministic scan, reusing the same engine, endpoints,
-        # and safety guards. The LLM only proposes which category to try on which
-        # in-scope endpoint; the deterministic engine executes and confirms. A
-        # no-op when disabled, and fully wrapped so it can never fail a scan.
+        # ── Agentic pass (opt-in via AGENTIC_LLM_ENABLED) ───────────────────────
+        # Runs AFTER the deterministic template scan, reusing the same engine,
+        # endpoints, and safety guards. run_agentic_scan_async's chain/detector
+        # sweep needs no LLM internally, but the probes issue their own httpx
+        # calls (not routed through the injectable ExecutionEngine), so this
+        # call site stays gated by AGENTIC_LLM_ENABLED rather than running
+        # unconditionally against every scanned endpoint. When enabled, all
+        # three finding categories (attack-chain, detector, LLM-confirmed) are
+        # promoted to persisted Vulnerability rows (not just a per-run
+        # TestResult) so they reach the dashboard, compliance reports, and
+        # every export the same way a template finding does. Fully wrapped so
+        # it can never fail a scan.
         if not canceled and settings.AGENTIC_LLM_ENABLED:
             try:
                 agentic_result = await _run_agentic_scan_pass(
@@ -1593,26 +1602,51 @@ async def _run_security_tasks(
                     prior_findings=deterministic_findings,
                     test_accounts=test_accounts,
                 )
-                agentic_findings = (
-                    agentic_result.get("outcome", {}).get("confirmed_findings", [])
-                )
                 endpoint_by_id = {str(ep.id): ep for ep in endpoints}
-                for finding in agentic_findings:
+
+                async def _persist_agentic_finding(finding: dict, *, source: str) -> None:
+                    nonlocal total, vuln_count
                     ep = endpoint_by_id.get(str(finding.get("endpoint_id")))
                     if ep is None:
-                        continue
+                        return
+                    ep_dict = {
+                        "id": ep.id,
+                        "method": ep.method,
+                        "url": f"{ep.protocol or 'http'}://{ep.host}{ep.path}",
+                        "path": ep.path,
+                    }
+                    vulnerability_data = build_agentic_vulnerability_data(
+                        finding=finding,
+                        endpoint=ep_dict,
+                        account_id=account_id,
+                        source=source,
+                    )
+                    vuln, created, fingerprint = await create_or_merge_vulnerability(db, vulnerability_data)
+                    if created:
+                        await ws_manager.broadcast({
+                            "type": WSEventType.VULNERABILITY_FOUND,
+                            "data": {
+                                "id": vuln.id,
+                                "template_id": vuln.template_id,
+                                "severity": vuln.severity,
+                                "url": vuln.url,
+                                "method": vuln.method,
+                                "fingerprint": fingerprint,
+                                "timestamp": vuln.created_at.isoformat() if vuln.created_at else None,
+                            },
+                        })
                     total += 1
                     vuln_count += 1
                     db.add(
                         TestResult(
                             run_id=run_id,
                             endpoint_id=ep.id,
-                            template_id=f"AGENTIC:{finding.get('type', 'UNKNOWN')}",
+                            template_id=vulnerability_data["template_id"],
                             is_vulnerable=True,
                             severity=finding.get("severity"),
                             evidence=json.dumps(
                                 {
-                                    "engine": "agentic",
+                                    "engine": f"agentic_{source}",
                                     "type": finding.get("type"),
                                     "confidence": finding.get("confidence"),
                                     "rationale": finding.get("rationale"),
@@ -1622,6 +1656,14 @@ async def _run_security_tasks(
                             skip_reason=None,
                         )
                     )
+
+                for finding in agentic_result.get("chain_findings", []) or []:
+                    await _persist_agentic_finding(finding, source="chain")
+                for finding in agentic_result.get("detector_findings", []) or []:
+                    await _persist_agentic_finding(finding, source="detector")
+                agentic_findings = agentic_result.get("outcome", {}).get("confirmed_findings", [])
+                for finding in agentic_findings:
+                    await _persist_agentic_finding(finding, source="agentic")
             except Exception as exc:  # never let the agentic pass break a scan
                 logger.warning("agentic_pass_failed run_id=%s error=%s", run_id, str(exc))
 

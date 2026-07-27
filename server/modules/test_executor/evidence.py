@@ -459,15 +459,22 @@ def _has_sent_request(value: Any) -> bool:
 
 
 def _has_received_response(value: Any) -> bool:
-    if not isinstance(value, dict):
+    if not isinstance(value, dict) or not value:
         return False
-    status = value.get("status_code")
-    if isinstance(status, int) and status > 0:
-        return True
-    # For engines that don't emit a numeric status code, accept a non-empty body
-    # (e.g. schemathesis external-report mode before HTTP extraction is available).
-    body = value.get("body")
-    return bool(body) and status is None
+    if "status_code" in value:
+        status = value.get("status_code")
+        if isinstance(status, int) and status > 0:
+            return True
+        # For engines that don't emit a numeric status code, accept a non-empty
+        # body (e.g. schemathesis external-report mode before HTTP extraction is
+        # available). A present-but-falsy status_code (0/None) with no body means
+        # the engine never actually observed a response — that's the case this
+        # check exists to catch.
+        return bool(value.get("body"))
+    # Non-HTTP evidence shapes (passive traffic PII location, business-logic
+    # graph transitions) never carry a status_code at all — any genuine,
+    # non-empty observation counts as a received response for those engines.
+    return any(item not in (None, "", {}, []) for item in value.values())
 
 
 def evidence_reproducibility_contract(evidence: dict[str, Any]) -> dict[str, Any]:

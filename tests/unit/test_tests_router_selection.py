@@ -2065,3 +2065,102 @@ async def test_linked_vulnerability_retest_reopens_source_when_still_vulnerable(
     assert audit.details["retest_hash"] == latest["retest_hash"]
     assert audit.details["retest_integrity"]["status"] == "VERIFIED"
     assert audit.details["retest_integrity"]["verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_agentic_pass_persists_chain_detector_and_confirmed_findings_as_vulnerabilities(
+    test_engine, monkeypatch
+):
+    """Chain/detector/LLM-confirmed findings from run_agentic_scan_async must each
+    become a persisted Vulnerability (not just an in-memory dict that gets
+    discarded), so they reach the dashboard/compliance/export surfaces the same
+    way a template finding does."""
+    monkeypatch.setattr(tests_router.settings, "AGENTIC_LLM_ENABLED", True)
+    monkeypatch.setattr(tests_router.WordlistManager, "get_instance", lambda *args, **kwargs: _FakeWordlistManager([]))
+
+    session_factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
+    async with session_factory() as db:
+        endpoint = models.APIEndpoint(
+            account_id=1000000,
+            method="GET",
+            protocol="http",
+            host="api.example.test",
+            path="/agentic-wiring",
+        )
+        db.add(endpoint)
+        await db.flush()
+        run = models.TestRun(
+            account_id=1000000,
+            template_ids=[],
+            endpoint_ids=[endpoint.id],
+        )
+        db.add(run)
+        await db.commit()
+        run_id = run.id
+        endpoint_id = endpoint.id
+
+    async def _fake_agentic_pass(**kwargs):
+        return {
+            "enabled": True,
+            "chain_findings": [
+                {
+                    "type": "BOLA",
+                    "endpoint_id": str(endpoint_id),
+                    "severity": "HIGH",
+                    "confidence": "HIGH",
+                    "rationale": "2-step chain: source exposes id, target consumes id",
+                    "chain": {"engine": "attack_chain", "attacker_target_status": 200},
+                }
+            ],
+            "detector_findings": [
+                {
+                    "type": "SQLI",
+                    "endpoint_id": str(endpoint_id),
+                    "severity": "HIGH",
+                    "evidence": {"engine": "sqli_probe", "sub_type": "boolean_based"},
+                }
+            ],
+            "outcome": {
+                "confirmed_findings": [
+                    {
+                        "type": "BFLA",
+                        "endpoint_id": str(endpoint_id),
+                        "severity": "HIGH",
+                        "confidence": "MEDIUM",
+                        "rationale": "low-privilege role invoked a privileged function",
+                        "evidence": {"engine": "bfla_matrix"},
+                    }
+                ]
+            },
+        }
+
+    monkeypatch.setattr(tests_router, "_run_agentic_scan_pass", _fake_agentic_pass)
+
+    await tests_router._run_security_tasks(
+        run_id,
+        [],
+        [endpoint_id],
+        1000000,
+        db_bind=test_engine,
+    )
+
+    async with session_factory() as db:
+        vulnerabilities = (
+            await db.execute(
+                select(models.Vulnerability).where(models.Vulnerability.endpoint_id == endpoint_id)
+            )
+        ).scalars().all()
+        test_results = (
+            await db.execute(select(models.TestResult).where(models.TestResult.run_id == run_id))
+        ).scalars().all()
+
+    by_type = {v.type: v for v in vulnerabilities}
+    assert set(by_type) == {"BOLA", "SQLI", "BFLA"}
+    assert by_type["BOLA"].template_id == "AGENTIC:CHAIN:BOLA"
+    assert by_type["SQLI"].template_id == "AGENTIC:DETECTOR:SQLI"
+    assert by_type["BFLA"].template_id == "AGENTIC:AGENTIC:BFLA"
+    for vuln in vulnerabilities:
+        assert vuln.status == "OPEN"
+        assert vuln.evidence["evidence_completeness"]["complete"] is True
+        assert verify_vulnerability_evidence(vuln.evidence)["verified"] is True
+    assert len(test_results) == 3
