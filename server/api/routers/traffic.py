@@ -14,9 +14,11 @@ import datetime
 from urllib.parse import urlparse, unquote
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
+from server.config import settings
 from server.modules.persistence.database import get_db
 from server.modules.traffic_capture.sample_data_writer import SampleDataWriter
+from server.modules.traffic_capture.flow_processor import persist_captured_flow
 from server.modules.parsers.postman import PostmanParser
 from server.modules.api_inventory.openapi_generator import OpenAPIGenerator
 from server.modules.cache.redis_cache import bump_cache_version
@@ -101,44 +103,15 @@ _writer = SampleDataWriter()
 _openapi_gen = OpenAPIGenerator()
 
 
-def _parse_har(har_data: dict) -> list[dict]:
-    """Extract request/response pairs from HAR log entries."""
-    entries = har_data.get("log", {}).get("entries", [])
-    pairs = []
-    for entry in entries:
-        req = entry.get("request", {})
-        resp = entry.get("response", {})
-        url = req.get("url", "")
-        method = req.get("method", "GET")
-        headers = {h["name"]: h["value"] for h in req.get("headers", [])}
-        body_text = req.get("postData", {}).get("text", "") if req.get("postData") else ""
-        try:
-            body = json.loads(body_text) if body_text else {}
-        except Exception:
-            body = {"raw": body_text}
-
-        resp_body_text = resp.get("content", {}).get("text", "")
-        try:
-            resp_body = json.loads(resp_body_text) if resp_body_text else {}
-        except Exception:
-            resp_body = {"raw": resp_body_text}
-
-        pairs.append({
-            "url": url,
-            "method": method,
-            "request": {"url": url, "method": method, "headers": headers, "body": body},
-            "response": {"status": resp.get("status", 200), "body": resp_body},
-        })
-    return pairs
-
-
 @router.post("/har/upload")
 async def upload_har(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_MANAGE)),
 ):
-    """Upload a HAR file to discover endpoints and store sample traffic."""
+    """Upload a HAR file to discover endpoints, store redacted sample traffic,
+    and scan bodies for PII — the same golden-path persistence contract the
+    mitmproxy sensor and structured api_traffic ingestion use."""
     account_id = payload["account_id"]
     content = await file.read()
     try:
@@ -146,57 +119,38 @@ async def upload_har(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid HAR JSON")
 
-    pairs = _parse_har(har)
-    discovered = 0
-    saved_samples = 0
+    entries = har.get("log", {}).get("entries", [])
+    if not isinstance(entries, list):
+        raise HTTPException(status_code=400, detail="Invalid HAR JSON: log.entries must be a list")
 
-    for pair in pairs:
-        url = pair["url"]
-        method = pair["method"]
+    before_count = await db.scalar(
+        select(func.count()).select_from(APIEndpoint).where(APIEndpoint.account_id == account_id)
+    )
 
-        # Parse host/path from URL
-        try:
-            parsed = urlparse(url)
-            host = parsed.netloc
-            path = parsed.path or "/"
-            protocol = parsed.scheme or "http"
-            port = parsed.port or (443 if protocol == "https" else 80)
-        except Exception:
+    processed = 0
+    pii_findings = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
             continue
-
-        # Find or create endpoint
-        result = await db.execute(
-            select(APIEndpoint).where(
-                APIEndpoint.host == host,
-                APIEndpoint.path == path,
-                APIEndpoint.method == method,
-                APIEndpoint.account_id == account_id,
-            )
-        )
-        ep = result.scalar_one_or_none()
-        if not ep:
-            ep = APIEndpoint(
-                id=str(uuid.uuid4()),
-                account_id=account_id,
-                method=method, path=path, host=host,
-                protocol=protocol, port=port,
-                last_response_code=pair["response"].get("status", 200),
-            )
-            db.add(ep)
-            await db.flush()
-            discovered += 1
-
-        # Save sample data
-        await _writer.save(ep.id, pair["request"], pair["response"], db, account_id=account_id)
-        saved_samples += 1
+        result = await persist_captured_flow(db, account_id=account_id, entry=entry, source="har_upload")
+        if result.get("skipped"):
+            continue
+        processed += 1
+        pii_findings += result.get("pii_findings", 0)
 
     await db.commit()
     await bump_cache_version(account_id)
+
+    after_count = await db.scalar(
+        select(func.count()).select_from(APIEndpoint).where(APIEndpoint.account_id == account_id)
+    )
+
     return {
         "status": "ok",
-        "entries_processed": len(pairs),
-        "endpoints_discovered": discovered,
-        "samples_saved": saved_samples,
+        "entries_processed": processed,
+        "endpoints_discovered": max(0, (after_count or 0) - (before_count or 0)),
+        "samples_saved": processed,
+        "pii_findings": pii_findings,
     }
 
 
@@ -309,10 +263,24 @@ async def traffic_capture_status(
     payload: dict = Depends(RBAC.require_permission(Permission.TRAFFIC_READ)),
 ):
     """Returns traffic capture status (mitmproxy / HAR ingestion mode)."""
+    mitmproxy_configured = bool((settings.MITMPROXY_SENSOR_API_KEY or "").strip())
     return {
         "mode": "har_upload",
         "account_id": payload["account_id"],
-        "mitmproxy": {"running": False, "note": "Use HAR upload or configure mitmproxy externally"},
+        "mitmproxy": {
+            # "running" reflects whether a mitmdump process is live, which this
+            # app (a separate process) cannot observe directly — it can only
+            # report whether a sensor key is configured for it to attribute
+            # captured traffic to an account when it does connect.
+            "running": False,
+            "configured": mitmproxy_configured,
+            "note": (
+                "Sensor key configured — run mitmdump -s server/modules/traffic_capture/mitmproxy_integration.py"
+                if mitmproxy_configured
+                else "Set MITMPROXY_SENSOR_API_KEY to a registered sensor key, then run "
+                "mitmdump -s server/modules/traffic_capture/mitmproxy_integration.py"
+            ),
+        },
         "har_upload_endpoint": "/api/traffic/har/upload",
         "postman_import_endpoint": "/api/traffic/import/postman",
         "openapi_export_endpoint": "/api/traffic/openapi",

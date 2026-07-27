@@ -38,3 +38,10 @@ APScheduler>=3.10,<4.0
 pytest==8.2.0
 pytest-asyncio==0.23.6
 pytest-cov>=5,<7
+
+# Optional traffic-capture sidecar: run with
+#   mitmdump -s server/modules/traffic_capture/mitmproxy_integration.py
+# Not required to run the API itself — server/modules/traffic_capture/
+# flow_processor.py (the testable logic mitmproxy_integration.py calls into)
+# has no dependency on this package.
+mitmproxy>=10,<12

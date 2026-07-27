@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     # ── mitmproxy ────────────────────────────────────────────────────
     MITMPROXY_PORT: int = 8080
     MITMPROXY_HOST: str = "127.0.0.1"
+    # Sensor API key the mitmproxy addon authenticates captured traffic with —
+    # same key model as the eBPF sensor's /v1/events and /v2/events. Register
+    # a Sensor row for this key and point it at the tenant account that owns
+    # the traffic; captured flows are dropped (not attributed) when unset.
+    MITMPROXY_SENSOR_API_KEY: str = ""
 
     # ── WAF / Coraza ─────────────────────────────────────────────────
     CORAZA_URL: str = ""
