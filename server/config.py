@@ -282,7 +282,6 @@ class Settings(BaseSettings):
     # ── Nuclei ───────────────────────────────────────────────────────────
     NUCLEI_TIMEOUT: int = 120
     NUCLEI_RATE_LIMIT: int = 150
-    PENTEST_ALLOW_NUCLEI_SIMULATION: bool = False
 
     # ── Billing / Stripe ─────────────────────────────────────────────────
     STRIPE_SECRET_KEY: str = ""
@@ -315,6 +314,15 @@ class Settings(BaseSettings):
     CONTINUOUS_TESTING_MAX_ENDPOINTS_PER_SWEEP: int = 25
     CONTINUOUS_TESTING_SWEEP_INTERVAL_SECONDS: int = 600
     STARTUP_ENABLE_CONTINUOUS_TESTING: bool = False
+
+    # ── OpenAPI Auto-Doc + Drift Detection ────────────────────────────────
+    # Periodically regenerates the OpenAPI spec from discovered endpoints and
+    # diffs it against the last stored version, raising a finding when the
+    # API surface changes in a way that matters (endpoint removed, auth
+    # requirement dropped, etc). Off by default.
+    OPENAPI_DRIFT_ENABLED: bool = False
+    OPENAPI_DRIFT_SWEEP_INTERVAL_SECONDS: int = 3600
+    STARTUP_ENABLE_OPENAPI_DRIFT: bool = False
 
     @field_validator("DEBUG", mode="before")
     @classmethod
