@@ -282,6 +282,7 @@ class Settings(BaseSettings):
     # ── Nuclei ───────────────────────────────────────────────────────────
     NUCLEI_TIMEOUT: int = 120
     NUCLEI_RATE_LIMIT: int = 150
+    PENTEST_ALLOW_NUCLEI_SIMULATION: bool = False
 
     # ── Billing / Stripe ─────────────────────────────────────────────────
     STRIPE_SECRET_KEY: str = ""
