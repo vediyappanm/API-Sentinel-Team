@@ -1,3 +1,6 @@
+# Superpowers subagent-driven-development scratch workspace
+.superpowers/
+
 # Python
 __pycache__/
 *.py[cod]
