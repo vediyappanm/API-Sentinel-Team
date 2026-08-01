@@ -87,7 +87,52 @@ class OpenAPIDriftProcessor:
         return {"status": "ok", "accounts_checked": checked, "accounts_drifted": drifted}
 
     async def _check_account(self, account_id: int) -> dict:
-        raise NotImplementedError  # implemented in Task 2
+        async with AsyncSessionLocal() as db:
+            result = await self._check_account_with_session(db, account_id)
+            await db.commit()
+            return result
+
+    async def _check_account_with_session(self, db, account_id: int) -> dict:
+        new_spec = await self._gen.generate_spec(
+            collection_name="Discovered API", account_id=account_id
+        )
+        previous = await self._get_previous_spec(db, account_id)
+
+        if previous is None:
+            await self._persist_spec_version(db, account_id, new_spec)
+            return {"status": "baseline"}
+
+        if previous.spec_json == new_spec:
+            return {"status": "unchanged"}
+
+        diff = self._diff.compare(previous.spec_json, new_spec)
+        changes = diff["breaking_changes"]
+        if not changes:
+            return {"status": "unchanged"}
+
+        await self._persist_spec_version(db, account_id, new_spec)
+        return {"status": "drifted", "change_count": len(changes), "changes": changes}
+
+    @staticmethod
+    async def _get_previous_spec(db, account_id: int):
+        from server.models.core import OpenAPISpec
+
+        result = await db.execute(
+            select(OpenAPISpec)
+            .where(OpenAPISpec.account_id == account_id)
+            .order_by(OpenAPISpec.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def _persist_spec_version(db, account_id: int, spec_json: dict):
+        from server.models.core import OpenAPISpec
+
+        record = OpenAPISpec(account_id=account_id, spec_json=spec_json)
+        db.add(record)
+        await db.flush()
+        return record
 
     @staticmethod
     async def _accounts_with_endpoints() -> list[int]:
