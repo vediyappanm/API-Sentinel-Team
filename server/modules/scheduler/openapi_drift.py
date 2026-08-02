@@ -111,6 +111,7 @@ class OpenAPIDriftProcessor:
             return {"status": "unchanged"}
 
         await self._persist_spec_version(db, account_id, new_spec)
+        await self._raise_drift_findings(db, account_id, changes)
         return {"status": "drifted", "change_count": len(changes), "changes": changes}
 
     @staticmethod
@@ -139,3 +140,79 @@ class OpenAPIDriftProcessor:
         async with AsyncSessionLocal() as db:
             result = await db.execute(select(APIEndpoint.account_id).distinct())
             return [row for row in result.scalars().all() if row is not None]
+
+    async def _raise_drift_findings(self, db, account_id: int, changes: list[dict]) -> None:
+        from server.models.core import PolicyViolation, Alert, EvidenceRecord
+
+        for change in changes:
+            endpoint_id = await self._resolve_endpoint_id(
+                db, account_id, change["path"], change["method"]
+            )
+
+            violation = PolicyViolation(
+                account_id=account_id,
+                endpoint_id=endpoint_id,
+                rule_type="DRIFT",
+                severity=change["severity"],
+                status="OPEN",
+                message=change["message"],
+                violation_metadata={
+                    "change_id": change["id"],
+                    "component": change["component"],
+                    "path": change["path"],
+                    "method": change["method"],
+                    "why_it_matters": change["why_it_matters"],
+                    "recommended_action": change["recommended_action"],
+                    "fingerprint": change["fingerprint"],
+                },
+            )
+            db.add(violation)
+
+            alert = Alert(
+                account_id=account_id,
+                title=f"API spec drift: {change['id']} on {change['path']}",
+                message=change["message"],
+                severity=change["severity"],
+                category="API_DRIFT",
+                endpoint=change["path"],
+                status="OPEN",
+            )
+            db.add(alert)
+            await db.flush()
+
+            db.add(EvidenceRecord(
+                account_id=account_id,
+                evidence_type="drift",
+                ref_id=alert.id,
+                endpoint_id=endpoint_id,
+                severity=change["severity"],
+                summary=change["message"],
+                details={
+                    "change_id": change["id"],
+                    "component": change["component"],
+                    "path": change["path"],
+                    "method": change["method"],
+                    "why_it_matters": change["why_it_matters"],
+                    "recommended_action": change["recommended_action"],
+                },
+            ))
+
+    @staticmethod
+    async def _resolve_endpoint_id(db, account_id: int, path: str, method: str | None) -> str | None:
+        from server.models.core import APIEndpoint
+
+        result = await db.execute(
+            select(APIEndpoint).where(
+                APIEndpoint.account_id == account_id,
+                APIEndpoint.path == path,
+            )
+        )
+        candidates = result.scalars().all()
+        if not candidates:
+            return None
+        if method is None:
+            return candidates[0].id
+        for endpoint in candidates:
+            if (endpoint.method or "").upper() == method.upper():
+                return endpoint.id
+        return candidates[0].id
