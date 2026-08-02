@@ -1,23 +1,14 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { get, post } from '@/lib/api-client';
+import { useLatestSpec, useSpecHistory, useSpecDiff, useSchemaViolations } from '@/hooks/use-openapi-docs';
+import EvidencePanel from '@/components/ui/EvidencePanel';
+import EvidenceSectionHead from '@/components/ui/EvidenceSectionHead';
+import { EvidenceStatLine } from '@/components/ui/EvidenceStatLine';
+import { EvidenceBadge } from '@/components/ui/EvidenceStatLine';
 import {
   FileCode2, CheckCircle2, XCircle, AlertTriangle, ChevronDown, ChevronUp,
   Filter
 } from 'lucide-react';
-
-interface SchemaViolation {
-  id: string;
-  endpoint: string;
-  method: string;
-  violation_type: string;
-  field: string;
-  expected: string;
-  actual: string;
-  severity: 'high' | 'medium' | 'low';
-  count: number;
-  last_seen: string;
-}
+import { SchemaViolation } from '@/services/openapi.service';
 
 
 
@@ -85,16 +76,78 @@ function ViolationRow({ v }: { v: SchemaViolation }) {
   );
 }
 
+function SpecAndDriftSection() {
+  const { data: latest } = useLatestSpec();
+  const { data: history } = useSpecHistory();
+  const [baseId, setBaseId] = useState<string | null>(null);
+  const [revisionId, setRevisionId] = useState<string | null>(null);
+  const { data: diff } = useSpecDiff(baseId, revisionId);
+
+  const pathCount = latest?.spec?.paths ? Object.keys(latest.spec.paths).length : 0;
+
+  return (
+    <EvidencePanel exhibit="EXH-DOC">
+      <EvidenceSectionHead code="§DOC" title="API Documentation & Drift" desc="AUTO-GENERATED FROM OBSERVED TRAFFIC" />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+        <div>
+          <EvidenceStatLine label="Current Spec Paths" value={pathCount} />
+          <EvidenceStatLine label="Versions Stored" value={history?.total ?? 0} />
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted mb-2">Version History</p>
+          <div className="space-y-1 max-h-32 overflow-auto">
+            {(history?.specs ?? []).map((spec) => (
+              <button
+                key={spec.id}
+                className="w-full flex items-center justify-between text-xs px-2 py-1 rounded hover:bg-bg-elevated"
+                onClick={() => {
+                  if (!baseId) setBaseId(spec.id);
+                  else setRevisionId(spec.id);
+                }}
+              >
+                <span className="font-mono">{spec.id.slice(0, 8)}</span>
+                <span className="text-text-muted">{spec.path_count} paths</span>
+              </button>
+            ))}
+          </div>
+          {baseId && revisionId && (
+            <button
+              className="text-[10px] text-brand mt-1"
+              onClick={() => { setBaseId(null); setRevisionId(null); }}
+            >
+              Clear selection
+            </button>
+          )}
+        </div>
+      </div>
+
+      {diff && (
+        <div className="mt-4 space-y-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">
+            Diff: {diff.breaking_changes.length} change(s)
+          </p>
+          {diff.breaking_changes.map((change) => (
+            <div key={change.fingerprint} className="flex items-start gap-2 text-xs border-t border-border-subtle pt-2">
+              <EvidenceBadge color={change.severity === 'CRITICAL' || change.severity === 'HIGH' ? '#D63D2F' : '#D4A017'}>
+                {change.severity}
+              </EvidenceBadge>
+              <div>
+                <p className="font-mono">{change.method ? `${change.method.toUpperCase()} ` : ''}{change.path}</p>
+                <p className="text-text-muted">{change.message}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </EvidencePanel>
+  );
+}
+
 export default function SchemaValidation() {
   const [severityFilter, setSeverityFilter] = useState<string>('all');
 
-  const { data } = useQuery({
-    queryKey: ['schema-violations'],
-    queryFn: () => get('/openapi/violations').catch(() => null),
-    retry: false,
-  });
-
-  const violations: SchemaViolation[] = data?.violations || [];
+  const { data } = useSchemaViolations();
+  const violations = data?.violations || [];
   const isEmpty = violations.length === 0;
 
   const filtered = severityFilter === 'all' ? violations : violations.filter(v => v.severity === severityFilter);
@@ -120,6 +173,8 @@ export default function SchemaValidation() {
           </span>
         )}
       </div>
+
+      <SpecAndDriftSection />
 
       {/* KPI row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
