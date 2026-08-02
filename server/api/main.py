@@ -27,6 +27,7 @@ from server.modules.recon.scheduler import ReconScheduler
 from server.modules.response.default_playbooks import ensure_default_playbooks
 from server.modules.scheduler.test_scheduler import TestScheduler
 from server.modules.scheduler.continuous_testing import ContinuousTestingProcessor
+from server.modules.scheduler.openapi_drift import OpenAPIDriftProcessor
 from server.modules.storage.archiver import ArchiveProcessor
 from server.modules.storage.warm_exporter import WarmStoreExporter
 from server.modules.streaming.kafka_alert_consumer import KafkaAlertConsumer
@@ -173,6 +174,14 @@ def _build_runtime_components() -> list[tuple[str, Callable[[], Awaitable[None]]
         )
         components.append(
             ("continuous_testing", continuous_testing.start, continuous_testing.stop)
+        )
+
+    if settings.STARTUP_ENABLE_OPENAPI_DRIFT and settings.OPENAPI_DRIFT_ENABLED:
+        openapi_drift = OpenAPIDriftProcessor(
+            interval_sec=settings.OPENAPI_DRIFT_SWEEP_INTERVAL_SECONDS
+        )
+        components.append(
+            ("openapi_drift", openapi_drift.start, openapi_drift.stop)
         )
 
     if settings.STARTUP_ENABLE_STREAM_PIPELINE and settings.STREAM_PROCESSING_ENABLED:

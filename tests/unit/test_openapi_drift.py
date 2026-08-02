@@ -143,3 +143,28 @@ async def test_drift_creates_violation_alert_and_evidence(db, monkeypatch):
     )).scalars().all()
     assert len(evidence) == 1
     assert evidence[0].evidence_type == "drift"
+
+
+@pytest.mark.asyncio
+async def test_sweep_continues_when_one_account_errors(monkeypatch):
+    from server.config import settings
+    from server.modules.scheduler.openapi_drift import OpenAPIDriftProcessor
+
+    monkeypatch.setattr(settings, "OPENAPI_DRIFT_ENABLED", True)
+    proc = OpenAPIDriftProcessor()
+
+    async def fake_accounts():
+        return [1, 2]
+
+    async def flaky_check(account_id):
+        if account_id == 1:
+            raise RuntimeError("boom")
+        return {"status": "unchanged"}
+
+    monkeypatch.setattr(proc, "_accounts_with_endpoints", fake_accounts)
+    monkeypatch.setattr(proc, "_check_account", flaky_check)
+
+    result = await proc.sweep()
+    assert result["status"] == "ok"
+    assert result["accounts_checked"] == 2
+    assert result["accounts_drifted"] == 0
