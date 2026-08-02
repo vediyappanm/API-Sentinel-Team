@@ -30,12 +30,18 @@ export interface OpenAPIDiffChange {
   fingerprint: string;
 }
 
+export interface OpenAPIDiffSummary {
+  total_breaking_changes: number;
+  by_change_type: Record<string, number>;
+  by_severity: Record<string, number>;
+}
+
 export interface OpenAPIDiffResponse {
   base_spec_id?: string;
   revision_spec_id?: string;
-  summary: Record<string, number>;
+  summary: OpenAPIDiffSummary;
   breaking_changes: OpenAPIDiffChange[];
-  recommendations: unknown[];
+  recommendations: string[];
 }
 
 export interface SchemaViolation {
