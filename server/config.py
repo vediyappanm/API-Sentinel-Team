@@ -323,6 +323,7 @@ class Settings(BaseSettings):
     # requirement dropped, etc). Off by default.
     OPENAPI_DRIFT_ENABLED: bool = False
     OPENAPI_DRIFT_SWEEP_INTERVAL_SECONDS: int = 3600
+    OPENAPI_DRIFT_MAX_FINDINGS_PER_SWEEP: int = 100
     STARTUP_ENABLE_OPENAPI_DRIFT: bool = False
 
     @field_validator("DEBUG", mode="before")

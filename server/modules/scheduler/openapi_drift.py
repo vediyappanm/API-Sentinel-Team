@@ -105,9 +105,23 @@ class OpenAPIDriftProcessor:
         if previous.spec_json == new_spec:
             return {"status": "unchanged"}
 
+        previous_paths = previous.spec_json.get("paths") or {}
+        new_paths = new_spec.get("paths") or {}
+        if previous_paths and not new_paths:
+            logger.warning(
+                "openapi_drift_degenerate_spec_skipped",
+                account_id=account_id,
+                previous_path_count=len(previous_paths),
+            )
+            return {"status": "skipped_degenerate"}
+
         diff = self._diff.compare(previous.spec_json, new_spec)
         changes = diff["breaking_changes"]
         if not changes:
+            # No breaking changes, but the spec did change (checked above) - e.g. a
+            # purely additive change like a new endpoint. Keep the stored spec
+            # current even though there's nothing alert-worthy to raise.
+            await self._persist_spec_version(db, account_id, new_spec)
             return {"status": "unchanged"}
 
         await self._persist_spec_version(db, account_id, new_spec)
@@ -143,6 +157,17 @@ class OpenAPIDriftProcessor:
 
     async def _raise_drift_findings(self, db, account_id: int, changes: list[dict]) -> None:
         from server.models.core import PolicyViolation, Alert, EvidenceRecord
+
+        cap = settings.OPENAPI_DRIFT_MAX_FINDINGS_PER_SWEEP
+        total_changes = len(changes)
+        if total_changes > cap:
+            logger.warning(
+                "openapi_drift_findings_capped",
+                account_id=account_id,
+                total_changes=total_changes,
+                cap=cap,
+            )
+        changes = changes[:cap]
 
         for change in changes:
             endpoint_id = await self._resolve_endpoint_id(
