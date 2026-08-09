@@ -61,7 +61,12 @@ from server.modules.pentest.worker_isolation import (
     worker_kubernetes_service_account,
     worker_resource_limits,
 )
-from server.modules.test_executor.kill_switch import KILL_SWITCH_REASON, kill_switch_enabled
+from server.modules.test_executor.kill_switch import (
+    KILL_SWITCH_REASON,
+    PentestKillSwitchError,
+    ensure_pentest_not_killed,
+    kill_switch_enabled,
+)
 from server.modules.test_executor.scan_plan import verify_scan_plan_integrity
 from server.modules.test_executor.state_change_guard import (
     StateChangeBlocked,
@@ -635,6 +640,99 @@ async def _record_dead_letter_retest_outcome(
     )
 
 
+def _worker_run_timeout_seconds(isolation_session_timeout: int | None = None) -> int:
+    """Scan-run wall clock budget; lease seconds is the authoritative upper bound."""
+    lease_budget = _lease_seconds()
+    configured = int(getattr(settings, "PENTEST_SCAN_WORKER_TIMEOUT_SECONDS", 0) or 0)
+    if configured > 0:
+        return max(1, min(configured, lease_budget))
+    isolation_budget = int(isolation_session_timeout or 0)
+    if isolation_budget > 15:
+        return max(1, min(isolation_budget, lease_budget))
+    return lease_budget
+
+
+def _redacted_worker_failure_context(
+    *,
+    run_id: str,
+    worker_id: str | None,
+    reason: str,
+    previous_status: str | None = None,
+    worker_isolation: dict[str, object] | None = None,
+    engine: str | None = None,
+    extra: dict[str, object] | None = None,
+) -> dict[str, object]:
+    details: dict[str, object] = {
+        "run_id": Redactor.redact_text(run_id),
+        "worker_id": normalize_worker_id(worker_id),
+        "reason": Redactor.redact_text(reason),
+    }
+    if previous_status:
+        details["previous_status"] = previous_status
+    if engine:
+        details["engine"] = Redactor.redact_text(engine)
+    if worker_isolation:
+        details["worker_isolation"] = Redactor.redact_json(worker_isolation)
+    if extra:
+        details.update(Redactor.redact_json(extra) if isinstance(extra, dict) else {"extra": str(extra)})
+    return details
+
+
+async def _mark_claimed_run_failed(
+    *,
+    db_bind: AsyncEngine | None,
+    run_id: str,
+    account_id: int,
+    worker_id: str | None,
+    reason: str,
+    action: str = "SCAN_RUN_FAILED",
+    worker_isolation: dict[str, object] | None = None,
+    engine: str | None = None,
+) -> None:
+    session_factory = AsyncSessionLocal if db_bind is None else async_sessionmaker(
+        bind=db_bind,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+    async with session_factory() as db:
+        run = (
+            await db.execute(
+                select(TestRun).where(
+                    TestRun.id == run_id,
+                    TestRun.account_id == account_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if run is None:
+            return
+        if run.status in {"COMPLETED", "FAILED", "CANCELED"}:
+            return
+        previous_status = run.status
+        now = _utc_now()
+        run.status = "FAILED"
+        run.completed_at = now
+        run.error_count = max(1, int(run.error_count or 0))
+        run.dispatch_lease_expires_at = None
+        db.add(
+            AuditLog(
+                account_id=int(run.account_id),
+                action=action,
+                resource_type="test_run",
+                resource_id=run.id,
+                details=_redacted_worker_failure_context(
+                    run_id=run.id,
+                    worker_id=worker_id or run.worker_id,
+                    reason=reason,
+                    previous_status=previous_status,
+                    worker_isolation=worker_isolation,
+                    engine=engine,
+                ),
+            )
+        )
+        await db.commit()
+
+
 async def _dead_letter_exhausted_claims(db, *, now: datetime.datetime, account_id: int | None) -> int:
     """Fail claimable runs that have exceeded the worker retry budget."""
     max_claims = _max_claims()
@@ -667,16 +765,19 @@ async def _dead_letter_exhausted_claims(db, *, now: datetime.datetime, account_i
                 action="SCAN_RUN_DEAD_LETTERED",
                 resource_type="test_run",
                 resource_id=run.id,
-                details={
-                    "reason": reason,
-                    "claim_count": int(run.claim_count or 0),
-                    "max_claims": max_claims,
-                    "previous_status": previous_status,
-                    "worker_id": normalize_worker_id(run.worker_id),
-                    "trigger_source": run.trigger_source,
-                    "source_vulnerability_id": run.source_vulnerability_id,
-                    "source_schedule_id": run.source_schedule_id,
-                },
+                details=_redacted_worker_failure_context(
+                    run_id=run.id,
+                    worker_id=run.worker_id,
+                    reason=reason,
+                    previous_status=previous_status,
+                    extra={
+                        "claim_count": int(run.claim_count or 0),
+                        "max_claims": max_claims,
+                        "trigger_source": run.trigger_source,
+                        "source_vulnerability_id": run.source_vulnerability_id,
+                        "source_schedule_id": run.source_schedule_id,
+                    },
+                ),
             )
         )
     await db.flush()
@@ -748,30 +849,53 @@ async def claim_next_pending_run(
             template_ids=template_ids,
             endpoint_ids=endpoint_ids,
         )
+        previous_status = run.status
+        reclaim = previous_status in {"DISPATCHED", "RUNNING"}
+        claim_details = {
+            "run_id": run.id,
+            "worker_id": worker_identity,
+            "lease_expires_at": isoformat(lease_expires),
+            "claim_count": next_claim_count,
+            "previous_status": previous_status,
+            "previous_worker_id": normalize_worker_id(run.worker_id) if reclaim else None,
+            "reclaimed": reclaim,
+            "trigger_source": run.trigger_source,
+            "source_vulnerability_id": run.source_vulnerability_id,
+            "source_schedule_id": run.source_schedule_id,
+            **auth_context,
+            "template_count": len(template_ids),
+            "endpoint_count": len(endpoint_ids),
+            "test_intensity": getattr(run, "test_intensity", None),
+            "scan_plan": _scan_plan_claim_summary(scan_plan),
+            "worker_governance": _worker_governance_policy(account_id),
+            "engine_accountability": engine_accountability,
+        }
         db.add(
             AuditLog(
                 account_id=int(run.account_id),
                 action="SCAN_RUN_CLAIMED",
                 resource_type="test_run",
                 resource_id=run.id,
-                details={
-                    "worker_id": worker_identity,
-                    "lease_expires_at": isoformat(lease_expires),
-                    "claim_count": next_claim_count,
-                    "previous_status": run.status,
-                    "trigger_source": run.trigger_source,
-                    "source_vulnerability_id": run.source_vulnerability_id,
-                    "source_schedule_id": run.source_schedule_id,
-                    **auth_context,
-                    "template_count": len(template_ids),
-                    "endpoint_count": len(endpoint_ids),
-                    "test_intensity": getattr(run, "test_intensity", None),
-                    "scan_plan": _scan_plan_claim_summary(scan_plan),
-                    "worker_governance": _worker_governance_policy(account_id),
-                    "engine_accountability": engine_accountability,
-                },
+                details=claim_details,
             )
         )
+        if reclaim:
+            db.add(
+                AuditLog(
+                    account_id=int(run.account_id),
+                    action="SCAN_RUN_WORKER_LOST",
+                    resource_type="test_run",
+                    resource_id=run.id,
+                    details={
+                        "run_id": run.id,
+                        "previous_status": previous_status,
+                        "previous_worker_id": normalize_worker_id(run.worker_id),
+                        "new_worker_id": worker_identity,
+                        "claim_count": next_claim_count,
+                        "reason": "lease_expired_or_stale_worker",
+                    },
+                )
+            )
         await db.commit()
         return ClaimedScanRun(
             run_id=run.id,
@@ -1135,6 +1259,13 @@ async def _execute_authorization_replay_claimed_run(
 
         try:
             for endpoint_id in claimed.endpoint_ids:
+                ensure_pentest_not_killed()
+                await heartbeat_claimed_run(
+                    claimed.run_id,
+                    claimed.worker_id or "",
+                    db_bind=db_bind,
+                    account_id=claimed.account_id,
+                )
                 summary = await _execute_authorization_replay_endpoint(
                     db,
                     account_id=claimed.account_id,
@@ -1149,8 +1280,9 @@ async def _execute_authorization_replay_claimed_run(
                 vulnerable += int(summary.get("vulnerable") or 0)
                 errors += int(summary.get("errors") or 0)
                 skipped += int(summary.get("skipped") or 0)
-        except Exception as exc:
+        except PentestKillSwitchError as exc:
             errors += 1
+            reason = Redactor.redact_text(str(exc))
             await _finish_authorization_replay_run(
                 db,
                 run=run,
@@ -1159,7 +1291,23 @@ async def _execute_authorization_replay_claimed_run(
                 vulnerable=vulnerable,
                 errors=errors,
                 skipped=skipped,
-                reason=Redactor.redact_text(str(exc)),
+                reason=reason,
+            )
+            db.add(
+                AuditLog(
+                    account_id=int(run.account_id),
+                    action="SCAN_RUN_FAILED",
+                    resource_type="test_run",
+                    resource_id=run.id,
+                    details=_redacted_worker_failure_context(
+                        run_id=run.id,
+                        worker_id=claimed.worker_id,
+                        reason=reason,
+                        previous_status="RUNNING",
+                        worker_isolation=worker_isolation,
+                        engine=_AUTHORIZATION_REPLAY_ENGINE,
+                    ),
+                )
             )
             await db.commit()
             return {
@@ -1169,7 +1317,46 @@ async def _execute_authorization_replay_claimed_run(
                 "vulnerable": vulnerable,
                 "errors": errors,
                 "skipped": skipped,
-                "reason": Redactor.redact_text(str(exc)),
+                "reason": reason,
+            }
+        except Exception as exc:
+            errors += 1
+            reason = Redactor.redact_text(str(exc))
+            await _finish_authorization_replay_run(
+                db,
+                run=run,
+                status="FAILED",
+                executed=executed,
+                vulnerable=vulnerable,
+                errors=errors,
+                skipped=skipped,
+                reason=reason,
+            )
+            db.add(
+                AuditLog(
+                    account_id=int(run.account_id),
+                    action="SCAN_RUN_FAILED",
+                    resource_type="test_run",
+                    resource_id=run.id,
+                    details=_redacted_worker_failure_context(
+                        run_id=run.id,
+                        worker_id=claimed.worker_id,
+                        reason=reason,
+                        previous_status="RUNNING",
+                        worker_isolation=worker_isolation,
+                        engine=_AUTHORIZATION_REPLAY_ENGINE,
+                    ),
+                )
+            )
+            await db.commit()
+            return {
+                "status": "failed",
+                "engine": _AUTHORIZATION_REPLAY_ENGINE,
+                "executed": executed,
+                "vulnerable": vulnerable,
+                "errors": errors,
+                "skipped": skipped,
+                "reason": reason,
             }
 
         await _finish_authorization_replay_run(
@@ -1270,7 +1457,17 @@ async def _execute_authorization_replay_endpoint(
     original_request["method"] = str(original_request.get("method") or endpoint.method or "GET").upper()
 
     target_guard = TargetGuard.from_settings()
-    state_guard = StateChangeGuard(allow_state_change=bool(options.get("allow_state_change")))
+    allow_state_change = bool(options.get("allow_state_change"))
+    allow_destructive_methods = bool(
+        options.get(
+            "allow_destructive_methods",
+            options.get("allow_destructive", False),
+        )
+    )
+    state_guard = StateChangeGuard(
+        allow_state_change=allow_state_change,
+        allow_destructive_methods=allow_destructive_methods,
+    )
     target_guard.validate_url(original_url)
     state_guard.validate_request(original_request)
 
@@ -1562,45 +1759,92 @@ async def run_pending_scan_once(
     if claimed is None:
         return {"status": "idle", "claimed": False}
 
+    engine_name = _claimed_execution_engine(claimed)
+    run_timeout = _worker_run_timeout_seconds()
     isolation_session = create_worker_isolation_session(
         run_id=claimed.run_id,
         worker_id=claimed.worker_id or "",
         account_id=claimed.account_id,
-        engine=_claimed_execution_engine(claimed),
+        engine=engine_name,
         claim_count=claimed.claim_count,
         lease_expires_at=claimed.lease_expires_at,
+        timeout_seconds=run_timeout,
     )
     worker_isolation_context = isolation_session.to_runtime_context()
     worker_isolation = isolation_session.to_metadata(
         runtime_context_created=True,
-        enforced_engines=[_claimed_execution_engine(claimed)],
+        enforced_engines=[engine_name],
     )
     cleanup: dict[str, object] | None = None
-    try:
+    execution: dict[str, object] = {"status": "failed", "reason": "worker_execution_not_started"}
+
+    async def _execute_claimed() -> dict[str, object]:
+        ensure_pentest_not_killed()
         if _claimed_run_requests_authorization_replay(claimed):
-            execution = await _execute_authorization_replay_claimed_run(
+            return await _execute_authorization_replay_claimed_run(
                 claimed,
                 db_bind=db_bind,
                 worker_isolation=worker_isolation,
                 worker_isolation_context=worker_isolation_context,
             )
-        else:
-            from server.api.routers.tests import _run_security_tasks
+        from server.api.routers.tests import _run_security_tasks
 
-            execution = await _run_security_tasks(
-                claimed.run_id,
-                claimed.template_ids,
-                claimed.endpoint_ids,
-                claimed.account_id,
-                claimed.pentest_profile_id,
-                worker_id=claimed.worker_id,
+        return await _run_security_tasks(
+            claimed.run_id,
+            claimed.template_ids,
+            claimed.endpoint_ids,
+            claimed.account_id,
+            claimed.pentest_profile_id,
+            worker_id=claimed.worker_id,
+            db_bind=db_bind,
+            worker_isolation=worker_isolation,
+            worker_isolation_context=worker_isolation_context,
+        ) or {"status": "completed"}
+
+    try:
+        try:
+            execution = await asyncio.wait_for(_execute_claimed(), timeout=run_timeout)
+        except asyncio.TimeoutError:
+            reason = f"worker_run_timed_out_after_{run_timeout}s"
+            await _mark_claimed_run_failed(
                 db_bind=db_bind,
+                run_id=claimed.run_id,
+                account_id=claimed.account_id,
+                worker_id=claimed.worker_id,
+                reason=reason,
+                action="SCAN_RUN_TIMED_OUT",
                 worker_isolation=worker_isolation,
-                worker_isolation_context=worker_isolation_context,
-            ) or {"status": "completed"}
+                engine=engine_name,
+            )
+            execution = {"status": "timed_out", "reason": reason}
+        except PentestKillSwitchError as exc:
+            reason = Redactor.redact_text(str(exc))
+            await _mark_claimed_run_failed(
+                db_bind=db_bind,
+                run_id=claimed.run_id,
+                account_id=claimed.account_id,
+                worker_id=claimed.worker_id,
+                reason=reason,
+                worker_isolation=worker_isolation,
+                engine=engine_name,
+            )
+            execution = {"status": "failed", "reason": reason}
+        except Exception as exc:
+            reason = Redactor.redact_text(str(exc))
+            await _mark_claimed_run_failed(
+                db_bind=db_bind,
+                run_id=claimed.run_id,
+                account_id=claimed.account_id,
+                worker_id=claimed.worker_id,
+                reason=reason,
+                worker_isolation=worker_isolation,
+                engine=engine_name,
+            )
+            execution = {"status": "failed", "reason": reason}
     finally:
         cleanup = cleanup_worker_isolation_session(isolation_session)
-    execution_status = str(execution.get("status") or "completed")
+
+    execution_status = str(execution.get("status") or "completed").lower()
     worker_status = "executed" if execution_status == "completed" else execution_status
     result = {
         "status": worker_status,

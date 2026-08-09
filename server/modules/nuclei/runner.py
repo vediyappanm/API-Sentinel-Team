@@ -1,4 +1,4 @@
-"""Nuclei vulnerability scanner integration — wraps CLI or simulates in dev mode."""
+"""Nuclei vulnerability scanner integration with fail-closed runtime handling."""
 import asyncio
 import contextlib
 import json
@@ -61,15 +61,12 @@ class NucleiRunner:
         )
 
         if not NucleiRunner.is_available():
-            if bool(getattr(settings, "PENTEST_ALLOW_NUCLEI_SIMULATION", False)):
-                simulated = NucleiRunner._simulate(target)
-                simulated["worker_isolation_enforcement"] = isolation_enforcement
-                return simulated
             return {
-                "status": "SKIPPED",
+                "status": "RUNTIME_UNAVAILABLE",
+                "reason": "nuclei_runtime_unavailable",
                 "findings": [],
                 "total_found": 0,
-                "note": "nuclei binary not installed; live scan skipped and simulated findings are disabled",
+                "note": "nuclei binary is not installed; no scan was executed",
                 "worker_isolation_enforcement": isolation_enforcement,
             }
 
@@ -184,20 +181,6 @@ class NucleiRunner:
         finally:
             if run_dir is not None:
                 shutil.rmtree(run_dir, ignore_errors=True)
-
-    @staticmethod
-    def _simulate(target: str) -> Dict[str, Any]:
-        mock = [{
-            "template-id": "CVE-2021-41773",
-            "name": "Apache Path Traversal (simulated)",
-            "severity": "critical",
-            "host": target,
-            "matched-at": f"{target}/cgi-bin/.%2e/etc/passwd",
-            "info": {"description": "Nuclei binary not installed — simulation mode"},
-        }]
-        return {"status": "COMPLETED_SIMULATED", "findings": mock, "total_found": len(mock),
-                "note": "nuclei binary not installed; install from https://github.com/projectdiscovery/nuclei"}
-
 
 def _safe_command(cmd: list[str]) -> str:
     return " ".join(Redactor.redact_url(str(item)) for item in cmd)

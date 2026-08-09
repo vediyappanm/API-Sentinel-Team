@@ -108,11 +108,13 @@ class ExecutionEngine:
         try:
             self.target_guard.validate_url(base_url, base_url=base_url)
         except TargetGuardError as guard_err:
+            safe_guard_error = Redactor.redact_text(str(guard_err))
             target_guard_policy = self._target_guard_policy_for_url(
                 url=base_url,
                 base_url=base_url,
-                reason=str(guard_err),
+                reason=safe_guard_error,
             )
+            blocked_error = f"target_guard_blocked: {safe_guard_error}"
             return {
                 "template_id": template["id"],
                 "severity": template.get("info", {}).get("severity"),
@@ -120,7 +122,7 @@ class ExecutionEngine:
                 "results": [
                     {
                         "vulnerable": False,
-                        "error": f"target_guard_blocked: {guard_err}",
+                        "error": blocked_error,
                         "target_guard_policy": target_guard_policy,
                     }
                 ],
@@ -129,7 +131,7 @@ class ExecutionEngine:
                 "received_response": None,
                 "skip_reason": "target_guard",
                 "evidence": "target_guard=blocked",
-                "error": f"target_guard_blocked: {guard_err}",
+                "error": blocked_error,
                 "target_guard_policy": target_guard_policy,
             }
         try:
@@ -279,10 +281,11 @@ class ExecutionEngine:
                         try:
                             state_guard.validate_request(mutated_req)
                         except StateChangeBlocked as guard_err:
+                            safe_guard_error = Redactor.redact_text(str(guard_err))
                             state_change_policy = self._state_change_policy_for_request(
                                 mutated_req,
                                 state_guard,
-                                reason=str(guard_err),
+                                reason=safe_guard_error,
                             )
                             last_request_sent = Redactor.redact_http_message(
                                 {
@@ -298,7 +301,7 @@ class ExecutionEngine:
                                     "node_id": node.id,
                                     "rule_idx": rule_idx,
                                     "vulnerable": False,
-                                    "error": str(guard_err),
+                                    "error": safe_guard_error,
                                     "state_change_policy": state_change_policy,
                                 }
                             )
@@ -312,10 +315,11 @@ class ExecutionEngine:
                         try:
                             self.target_guard.validate_url(mutated_req["url"], base_url=base_url)
                         except TargetGuardError as guard_err:
+                            safe_guard_error = Redactor.redact_text(str(guard_err))
                             target_guard_policy = self._target_guard_policy_for_url(
                                 url=mutated_req["url"],
                                 base_url=base_url,
-                                reason=str(guard_err),
+                                reason=safe_guard_error,
                             )
                             last_request_sent = Redactor.redact_http_message(
                                 {
@@ -331,7 +335,7 @@ class ExecutionEngine:
                                     "node_id": node.id,
                                     "rule_idx": rule_idx,
                                     "vulnerable": False,
-                                    "error": f"target_guard_blocked: {guard_err}",
+                                    "error": f"target_guard_blocked: {safe_guard_error}",
                                     "target_guard_policy": target_guard_policy,
                                 }
                             )
@@ -827,11 +831,15 @@ class ExecutionEngine:
         try:
             self.target_guard.validate_url(login_url, base_url=base_url)
         except TargetGuardError as guard_err:
-            raise AuthResolutionError(f"dynamic auth login target blocked: {guard_err}") from guard_err
+            raise AuthResolutionError(
+                f"dynamic auth login target blocked: {Redactor.redact_text(str(guard_err))}"
+            ) from guard_err
         try:
             validate_auth_profile_scope(auth_profile, login_url)
         except AuthScopeError as scope_err:
-            raise AuthResolutionError(f"dynamic auth login scope blocked: {scope_err}") from scope_err
+            raise AuthResolutionError(
+                f"dynamic auth login scope blocked: {Redactor.redact_text(str(scope_err))}"
+            ) from scope_err
 
         payload = dict(getattr(auth_profile, "login_payload", {}) or {})
         if getattr(auth_profile, "username", None) and "username" not in payload:

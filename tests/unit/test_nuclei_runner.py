@@ -6,28 +6,17 @@ from server.modules.test_executor.target_guard import TargetGuardError
 
 
 @pytest.mark.asyncio
-async def test_nuclei_runner_skips_without_binary_or_simulated_findings(monkeypatch):
+async def test_nuclei_runner_fails_closed_without_binary(monkeypatch):
     monkeypatch.setattr(NucleiRunner, "is_available", staticmethod(lambda: False))
-    monkeypatch.setattr("server.modules.nuclei.runner.settings.PENTEST_ALLOW_NUCLEI_SIMULATION", False)
 
     result = await NucleiRunner.run_scan("https://api.example.com")
 
-    assert result["status"] == "SKIPPED"
+    assert result["status"] == "RUNTIME_UNAVAILABLE"
+    assert result["reason"] == "nuclei_runtime_unavailable"
     assert result["findings"] == []
     assert result["total_found"] == 0
-    assert "simulated findings are disabled" in result["note"]
-
-
-@pytest.mark.asyncio
-async def test_nuclei_runner_simulation_requires_explicit_opt_in(monkeypatch):
-    monkeypatch.setattr(NucleiRunner, "is_available", staticmethod(lambda: False))
-    monkeypatch.setattr("server.modules.nuclei.runner.settings.PENTEST_ALLOW_NUCLEI_SIMULATION", True)
-
-    result = await NucleiRunner.run_scan("https://api.example.com")
-
-    assert result["status"] == "COMPLETED_SIMULATED"
-    assert result["total_found"] == 1
-    assert result["findings"][0]["matched-at"].startswith("https://api.example.com/")
+    assert "no scan was executed" in result["note"]
+    assert "simulat" not in str(result).lower()
 
 
 @pytest.mark.asyncio

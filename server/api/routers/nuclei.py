@@ -68,6 +68,17 @@ def _selector_exception(exc: ValueError) -> HTTPException:
     )
 
 
+def _runtime_unavailable_exception() -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={
+            "message": "Nuclei runtime is unavailable; no scan was executed.",
+            "reason": "nuclei_runtime_unavailable",
+            "install_docs": "https://github.com/projectdiscovery/nuclei",
+        },
+    )
+
+
 def _safe_custom_template_path(custom_template_dir: str, filename: str) -> str:
     root = os.path.abspath(custom_template_dir)
     path = os.path.abspath(os.path.join(root, filename))
@@ -104,8 +115,12 @@ async def nuclei_status(
     payload: dict = Depends(RBAC.require_permission(Permission.NUCLEI_READ)),
 ):
     available = NucleiRunner.is_available()
-    return {"nuclei_available": available, "mode": "live" if available else "simulation",
-            "install_docs": "https://github.com/projectdiscovery/nuclei" if not available else None}
+    return {
+        "nuclei_available": available,
+        "mode": "live" if available else "unavailable",
+        "simulation_enabled": False,
+        "install_docs": "https://github.com/projectdiscovery/nuclei" if not available else None,
+    }
 
 
 @router.post("/scan")
@@ -165,13 +180,26 @@ async def start_scan(
                     f.write(ct.yaml_content)
                 extra_template_paths.append(fpath)
 
-    result = await NucleiRunner.run_scan(
-        target,
-        template_ids=template_ids or None,
-        tags=tags or None,
-        severity=severity or None,
-        extra_template_paths=extra_template_paths or None,
-    )
+    try:
+        result = await NucleiRunner.run_scan(
+            target,
+            template_ids=template_ids or None,
+            tags=tags or None,
+            severity=severity or None,
+            extra_template_paths=extra_template_paths or None,
+        )
+    finally:
+        if custom_template_dir:
+            shutil.rmtree(custom_template_dir, ignore_errors=True)
+
+    if result["status"] == "RUNTIME_UNAVAILABLE":
+        scan.status = result["status"]
+        scan.findings = []
+        scan.total_found = 0
+        scan.completed_at = datetime.now(timezone.utc)
+        await db.commit()
+        raise _runtime_unavailable_exception()
+
     safe_findings = [
         redact_nuclei_finding(finding, target=target, account_id=account_id, include_fingerprint=True)
         for finding in result["findings"]
@@ -203,9 +231,6 @@ async def start_scan(
         finding for finding in unique_findings
         if nuclei_fingerprint(finding, target=target, account_id=account_id) not in historical_fingerprints
     ]
-
-    if custom_template_dir:
-        shutil.rmtree(custom_template_dir, ignore_errors=True)
 
     scan.status = result["status"]
     scan.findings = unique_findings

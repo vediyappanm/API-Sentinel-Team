@@ -28,6 +28,16 @@ async def reset_rate_limiter_state():
     _reset_rate_limiter_state()
 
 
+@pytest.fixture(autouse=True)
+def allow_private_targets_in_tests(monkeypatch):
+    """Suites often use localhost/127.0.0.1; production still requires explicit allow.
+
+    TargetGuard.from_settings no longer treats DEBUG as permission to scan private hosts.
+    Do not force a narrow allowlist here — many tests target public example hosts.
+    """
+    monkeypatch.setattr(settings, "PENTEST_ALLOW_PRIVATE_TARGETS", True)
+
+
 @pytest_asyncio.fixture
 async def test_engine():
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)

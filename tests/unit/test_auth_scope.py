@@ -82,6 +82,7 @@ def test_blocked_auth_profile_targets_redacts_endpoint_urls():
     assert blocked[0]["endpoint_id"] == "endpoint-1"
     assert blocked[0]["reason"].startswith("auth_profile_scope_blocked:")
     assert "raw-token" not in blocked[0]["url"]
+    assert "raw-token" not in blocked[0]["reason"]
 
 
 def test_blocked_auth_profile_targets_include_redacted_scope_policy():

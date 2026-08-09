@@ -62,10 +62,9 @@ class TargetGuard:
         allowlist = [item.strip() for item in raw_allowlist.split(",") if item.strip()]
         return cls(
             allowlist=allowlist,
-            allow_private_targets=bool(
-                getattr(source, "PENTEST_ALLOW_PRIVATE_TARGETS", False)
-                or getattr(source, "DEBUG", False)
-            ),
+            # Private/loopback targets are gated only by the explicit allow flag.
+            # DEBUG must not silently fail open for SSRF/private-host scans.
+            allow_private_targets=bool(getattr(source, "PENTEST_ALLOW_PRIVATE_TARGETS", False)),
             enforce=bool(getattr(source, "PENTEST_ENFORCE_TARGET_GUARD", True)),
             resolve_hosts=bool(getattr(source, "PENTEST_RESOLVE_TARGET_HOSTS", False)),
             fail_closed_on_dns_error=bool(

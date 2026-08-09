@@ -31,6 +31,10 @@ const backendEnv = {
   STARTUP_ENABLE_STREAM_PIPELINE: 'false',
   STARTUP_ENABLE_ANALYTICS_PROCESSOR: 'false',
   STARTUP_ENABLE_ARCHIVER: 'false',
+  // Explicit local-loopback allow for e2e prepare/launch flows.
+  // DEBUG alone must not fail-open private targets in TargetGuard.from_settings.
+  PENTEST_ALLOW_PRIVATE_TARGETS: 'true',
+  PENTEST_TARGET_ALLOWLIST: '127.0.0.1,localhost',
 };
 
 function formatEnvForShell(env: Record<string, string>) {

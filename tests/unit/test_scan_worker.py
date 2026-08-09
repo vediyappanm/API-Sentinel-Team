@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import sys
 import types
@@ -2188,3 +2189,151 @@ async def test_worker_does_not_claim_when_kill_switch_enabled(test_engine, monke
     async with session_factory() as db:
         stored = (await db.execute(select(models.TestRun).where(models.TestRun.id == run_id))).scalar_one()
     assert stored.status == "PENDING"
+
+
+@pytest.mark.asyncio
+async def test_reclaim_emits_worker_lost_audit(test_engine, monkeypatch):
+    account_id = 1000191
+    monkeypatch.setattr(settings, "PENTEST_SCAN_DISPATCH_LEASE_SECONDS", 30)
+    session_factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
+    stale_started = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=10)
+    async with session_factory() as db:
+        run = models.TestRun(
+            account_id=account_id,
+            status="RUNNING",
+            template_ids=["template-lost"],
+            endpoint_ids=["endpoint-lost"],
+            worker_id="worker-old",
+            started_at=stale_started,
+            worker_heartbeat_at=stale_started,
+            dispatch_lease_expires_at=stale_started,
+            claim_count=1,
+        )
+        db.add(run)
+        await db.commit()
+        run_id = run.id
+
+    claimed = await claim_next_pending_run(
+        db_bind=test_engine,
+        account_id=account_id,
+        worker_id="worker-new",
+    )
+    assert claimed is not None
+    assert claimed.run_id == run_id
+    assert claimed.worker_id == "worker-new"
+
+    async with session_factory() as db:
+        audits = (
+            await db.execute(
+                select(models.AuditLog)
+                .where(
+                    models.AuditLog.resource_id == run_id,
+                    models.AuditLog.action.in_(["SCAN_RUN_CLAIMED", "SCAN_RUN_WORKER_LOST"]),
+                )
+                .order_by(models.AuditLog.created_at.asc())
+            )
+        ).scalars().all()
+    actions = [audit.action for audit in audits]
+    assert "SCAN_RUN_CLAIMED" in actions
+    assert "SCAN_RUN_WORKER_LOST" in actions
+    lost = next(audit for audit in audits if audit.action == "SCAN_RUN_WORKER_LOST")
+    assert lost.details["previous_worker_id"] == "worker-old"
+    assert lost.details["new_worker_id"] == "worker-new"
+    assert lost.details["run_id"] == run_id
+
+
+@pytest.mark.asyncio
+async def test_run_pending_scan_once_times_out_and_audits(test_engine, monkeypatch):
+    account_id = 1000192
+    monkeypatch.setattr(settings, "PENTEST_SCAN_WORKER_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(settings, "PENTEST_SCAN_DISPATCH_LEASE_SECONDS", 30)
+
+    async def _slow_tasks(*args, **kwargs):
+        await asyncio.sleep(5)
+        return {"status": "completed"}
+
+    monkeypatch.setattr(
+        "server.api.routers.tests._run_security_tasks",
+        _slow_tasks,
+    )
+
+    session_factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
+    async with session_factory() as db:
+        run = models.TestRun(
+            account_id=account_id,
+            status="PENDING",
+            template_ids=["template-timeout"],
+            endpoint_ids=["endpoint-timeout"],
+        )
+        db.add(run)
+        await db.commit()
+        run_id = run.id
+
+    result = await run_pending_scan_once(
+        db_bind=test_engine,
+        account_id=account_id,
+        worker_id="worker-timeout",
+    )
+    assert result["claimed"] is True
+    assert result["status"] == "timed_out"
+    assert result["execution"]["status"] == "timed_out"
+
+    async with session_factory() as db:
+        stored = (await db.execute(select(models.TestRun).where(models.TestRun.id == run_id))).scalar_one()
+        audits = (
+            await db.execute(
+                select(models.AuditLog).where(
+                    models.AuditLog.resource_id == run_id,
+                    models.AuditLog.action == "SCAN_RUN_TIMED_OUT",
+                )
+            )
+        ).scalars().all()
+    assert stored.status == "FAILED"
+    assert len(audits) == 1
+    assert audits[0].details["run_id"] == run_id
+    assert "timed_out" in audits[0].details["reason"]
+
+
+@pytest.mark.asyncio
+async def test_run_pending_scan_once_uncaught_exception_marks_failed(test_engine, monkeypatch):
+    account_id = 1000193
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("secret=raw-worker-token exploded")
+
+    monkeypatch.setattr("server.api.routers.tests._run_security_tasks", _boom)
+
+    session_factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
+    async with session_factory() as db:
+        run = models.TestRun(
+            account_id=account_id,
+            status="PENDING",
+            template_ids=["template-boom"],
+            endpoint_ids=["endpoint-boom"],
+        )
+        db.add(run)
+        await db.commit()
+        run_id = run.id
+
+    result = await run_pending_scan_once(
+        db_bind=test_engine,
+        account_id=account_id,
+        worker_id="worker-boom",
+    )
+    assert result["claimed"] is True
+    assert result["status"] == "failed"
+    assert "raw-worker-token" not in str(result)
+
+    async with session_factory() as db:
+        stored = (await db.execute(select(models.TestRun).where(models.TestRun.id == run_id))).scalar_one()
+        audits = (
+            await db.execute(
+                select(models.AuditLog).where(
+                    models.AuditLog.resource_id == run_id,
+                    models.AuditLog.action == "SCAN_RUN_FAILED",
+                )
+            )
+        ).scalars().all()
+    assert stored.status == "FAILED"
+    assert len(audits) == 1
+    assert "raw-worker-token" not in str(audits[0].details)

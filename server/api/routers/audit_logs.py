@@ -69,6 +69,7 @@ async def list_audit_logs(
     payload: dict = Depends(RBAC.require_permission(Permission.AUDIT_READ)),
     action: str = Query(None, description="Filter by action type"),
     resource_type: str = Query(None, description="Filter by resource type"),
+    resource_id: str = Query(None, description="Filter by resource id (e.g. scan run_id)"),
     user_id: str = Query(None),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -76,6 +77,7 @@ async def list_audit_logs(
     account_id = payload.get("account_id")
     action = _validate_filter(action, "action", 100)
     resource_type = _validate_filter(resource_type, "resource_type", 50)
+    resource_id = _validate_filter(resource_id, "resource_id", 100)
     user_id = _validate_filter(user_id, "user_id", 100)
     stmt = (
         select(AuditLog)
@@ -87,6 +89,8 @@ async def list_audit_logs(
         stmt = stmt.where(AuditLog.action == action.upper())
     if resource_type:
         stmt = stmt.where(AuditLog.resource_type == resource_type.lower())
+    if resource_id:
+        stmt = stmt.where(AuditLog.resource_id == resource_id)
     if user_id:
         stmt = stmt.where(AuditLog.user_id == user_id)
 

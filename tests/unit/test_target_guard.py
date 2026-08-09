@@ -139,6 +139,32 @@ def test_target_guard_supports_owned_subdomain_allowlist():
     )
 
 
+def test_target_guard_allowlist_denies_unowned_host():
+    guard = TargetGuard(allowlist=["api.example.com"], allow_private_targets=False)
+
+    with pytest.raises(TargetGuardError, match="allowlist"):
+        guard.validate_url(
+            "https://evil.example.com/admin",
+            base_url="https://api.example.com/v1/users",
+        )
+
+
+def test_target_guard_from_settings_does_not_allow_private_when_debug_true():
+    settings_obj = SimpleNamespace(
+        PENTEST_TARGET_ALLOWLIST="api.example.com",
+        PENTEST_ALLOW_PRIVATE_TARGETS=False,
+        PENTEST_ENFORCE_TARGET_GUARD=True,
+        PENTEST_RESOLVE_TARGET_HOSTS=False,
+        PENTEST_FAIL_CLOSED_ON_TARGET_DNS_ERROR=True,
+        DEBUG=True,
+    )
+    guard = TargetGuard.from_settings(settings_obj)
+
+    assert guard.allow_private_targets is False
+    with pytest.raises(TargetGuardError, match="private"):
+        guard.validate_url("http://127.0.0.1:9999/api", base_url="http://127.0.0.1:9999/api")
+
+
 def test_target_guard_fails_closed_on_global_wildcard_allowlist():
     guard = TargetGuard(allowlist=["*"], allow_private_targets=False)
 

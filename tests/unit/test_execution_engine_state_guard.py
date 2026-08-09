@@ -2,7 +2,7 @@ import pytest
 
 from server.modules.business_logic.active_tests import build_active_business_logic_templates
 from server.modules.test_executor.execution_engine import ExecutionEngine
-from server.modules.test_executor.state_change_guard import StateChangeGuard
+from server.modules.test_executor.state_change_guard import StateChangeBlocked, StateChangeGuard
 from server.modules.test_executor.target_guard import TargetGuard
 
 
@@ -21,6 +21,20 @@ def test_destructive_methods_require_profile_and_template_opt_in():
     )
     assert fully_enabled._effective_allow_destructive_methods({"allow_destructive_methods": True}) is True
     assert fully_enabled._effective_allow_destructive_methods({"allow_destructive_methods": False}) is False
+
+
+def test_state_change_guard_blocks_delete_without_destructive_arming():
+    guard = StateChangeGuard(allow_state_change=True, allow_destructive_methods=False)
+
+    with pytest.raises(StateChangeBlocked, match="destructive_method_blocked"):
+        guard.validate_request({"method": "DELETE", "headers": {}})
+
+
+def test_state_change_guard_blocks_post_without_state_change_arming():
+    guard = StateChangeGuard(allow_state_change=False, allow_destructive_methods=False)
+
+    with pytest.raises(StateChangeBlocked, match="state_change_blocked"):
+        guard.validate_request({"method": "POST", "headers": {}})
 
 
 def test_template_request_budget_cannot_exceed_profile_budget():
