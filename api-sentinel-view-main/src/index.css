@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&family=Space+Mono:wght@400;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -310,7 +310,7 @@
 .card {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 2px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
@@ -327,7 +327,7 @@
 .metric-card {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 2px;
   transition: all 0.2s ease;
 }
 
@@ -425,3 +425,307 @@
 /* ========== Utility ========== */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ============================================================
+   Evidence / Case-File design system — the customer-workspace
+   visual language (applied via .evd-root on the customer content
+   wrapper in WorkspaceLayout.tsx). Concept: the product reads like
+   an active incident record, not a generic SaaS analytics grid.
+   Numbers are testimony. Does not apply to /admin or /platform.
+   ============================================================ */
+
+.evd-root {
+  /* Light palette — reuses the app's own existing tokens (bg-base/
+     bg-surface/text-primary/severity-*) so it sits flush with the
+     sidebar and topbar instead of reading as a different product. */
+  --evd-void: #f4f4f8;
+  --evd-panel: #ffffff;
+  --evd-panel-raised: #f9f9fc;
+  --evd-line: #e4e4ec;
+  --evd-line-strong: #d0d0dc;
+  --evd-paper: #23232f;
+  --evd-ink: #4b4b5a;
+  --evd-ink-muted: #9d9daf;
+  --evd-signal: #c2410c;
+  --evd-signal-dim: rgba(194, 65, 12, 0.08);
+  --evd-critical: #d63d2f;
+  --evd-high: #e07b2e;
+  --evd-medium: #d4a017;
+  --evd-low: #2da44e;
+  --evd-info: #3b82f6;
+
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+}
+
+.evd-root :focus-visible {
+  outline: 2px solid var(--evd-signal);
+  outline-offset: 2px;
+}
+
+/* ---------- type roles ----------
+   display  (Space Mono)  -> the analyst's own hand: headline, stamp, big values
+   data     (IBM Plex Mono) -> the system's own log: labels, codes, technical readouts
+   body     (Plus Jakarta) -> plain explanatory copy
+*/
+.evd-display {
+  font-family: 'Space Mono', 'IBM Plex Mono', monospace;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.evd-mono {
+  font-family: 'IBM Plex Mono', 'JetBrains Mono', monospace;
+}
+
+/* ---------- panel = "exhibit" ---------- */
+.evd-panel {
+  position: relative;
+  background: var(--evd-panel);
+  border: 1px solid var(--evd-line);
+  border-radius: 2px;
+  padding: 20px;
+}
+
+.evd-panel[data-exhibit]::before {
+  content: attr(data-exhibit);
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--evd-ink-muted);
+  background: var(--evd-panel-raised);
+  border-left: 1px solid var(--evd-line);
+  border-bottom: 1px solid var(--evd-line);
+  padding: 3px 8px;
+  line-height: 1;
+}
+
+/* ---------- section header: report divider, not a pill badge ---------- */
+.evd-section-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding-bottom: 10px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--evd-line);
+}
+
+.evd-section-code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--evd-signal);
+  letter-spacing: 0.05em;
+}
+
+.evd-section-title {
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--evd-paper);
+}
+
+.evd-section-desc {
+  font-size: 11px;
+  color: var(--evd-ink-muted);
+  margin-left: auto;
+}
+
+/* ---------- stamp: the signature element ---------- */
+.evd-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border: 1.5px solid var(--evd-signal);
+  color: var(--evd-signal);
+  border-radius: 2px;
+  transform: rotate(-1.5deg);
+  white-space: nowrap;
+}
+
+.evd-stamp-ok {
+  border-color: var(--evd-low);
+  color: var(--evd-low);
+}
+
+.evd-stamp-warn {
+  border-color: var(--evd-medium);
+  color: var(--evd-medium);
+}
+
+.evd-stamp-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: evd-blink 2.2s ease-in-out infinite;
+}
+
+@keyframes evd-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* ---------- ledger: KPI strip (grid-gap-as-hairline, collapses cleanly at any wrap) ---------- */
+.evd-ledger {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 1px;
+  background: var(--evd-line);
+  border: 1px solid var(--evd-line);
+}
+
+.evd-ledger-item {
+  background: var(--evd-panel);
+  padding: 14px 16px;
+}
+
+.evd-ledger-label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--evd-ink-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.evd-ledger-value {
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  font-size: 26px;
+  color: var(--evd-paper);
+  line-height: 1;
+}
+
+.evd-ledger-delta {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  margin-top: 8px;
+}
+
+/* ---------- generic helpers ---------- */
+.evd-hairline { border-color: var(--evd-line) !important; }
+
+.evd-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.evd-link {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--evd-signal);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.evd-link:hover { text-decoration: underline; }
+
+.evd-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 2px;
+  border: 1px solid var(--evd-line);
+  background: var(--evd-panel-raised);
+  color: var(--evd-ink-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.evd-btn:hover {
+  color: var(--evd-signal);
+  border-color: var(--evd-signal);
+}
+
+.evd-tab {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  color: var(--evd-ink-muted);
+  background: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.evd-tab[data-active="true"] {
+  color: var(--evd-paper);
+  border-color: var(--evd-line);
+  background: var(--evd-panel-raised);
+}
+
+/* ---------- table: evidence-styled data table (for migrated pages) ---------- */
+.evd-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.evd-table thead th {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--evd-ink-muted);
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--evd-line);
+  background: var(--evd-panel-raised);
+}
+
+.evd-table tbody td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--evd-line);
+  font-size: 12px;
+  color: var(--evd-ink);
+}
+
+.evd-table tbody tr:hover {
+  background: var(--evd-signal-dim);
+}
+
+/* ---------- badge: severity/status chip in the evidence language ---------- */
+.evd-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 2px;
+  border: 1px solid currentColor;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .evd-root * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

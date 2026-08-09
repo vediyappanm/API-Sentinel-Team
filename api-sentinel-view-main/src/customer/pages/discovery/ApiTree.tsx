@@ -4,6 +4,7 @@ import TableSkeleton from '@/components/shared/TableSkeleton';
 import QueryError from '@/components/shared/QueryError';
 import GlassCard from '@/components/ui/GlassCard';
 import { useApiCollections } from '@/hooks/use-discovery';
+import type { ApiCollectionId } from '@/services/discovery.service';
 import { useQueryClient } from '@tanstack/react-query';
 
 const methodColors: Record<string, string> = {
@@ -13,12 +14,12 @@ const methodColors: Record<string, string> = {
 const ApiTree: React.FC = () => {
   const qc = useQueryClient();
   const { data, isLoading, isError, refetch } = useApiCollections();
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [expanded, setExpanded] = useState<Set<ApiCollectionId>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
 
   const collections = data?.apiCollections ?? [];
 
-  const toggleExpand = (id: number) => {
+  const toggleExpand = (id: ApiCollectionId) => {
     setExpanded(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);

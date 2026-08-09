@@ -130,19 +130,19 @@ export default function AgenticSecurity() {
 
   const { data: idData } = useQuery({
     queryKey: ['agentic-identities'],
-    queryFn: () => get('/agentic/identities').catch(() => null),
+    queryFn: () => get<{ identities: AgentIdentity[] }>('/agentic/identities').catch(() => null),
     retry: false,
   });
 
   const { data: invData } = useQuery({
     queryKey: ['agentic-invocations'],
-    queryFn: () => get('/agentic/invocations').catch(() => null),
+    queryFn: () => get<{ invocations: Invocation[] }>('/agentic/invocations').catch(() => null),
     retry: false,
   });
 
   const { data: violData } = useQuery({
     queryKey: ['agentic-violations'],
-    queryFn: () => get('/agentic/violations').catch(() => null),
+    queryFn: () => get<{ violations: Violation[] }>('/agentic/violations').catch(() => null),
     retry: false,
   });
 

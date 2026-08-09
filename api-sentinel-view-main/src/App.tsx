@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/lib/auth-context";
+import { RealtimeProvider } from "@/lib/realtime";
 import { OnboardingProvider } from "@/lib/onboarding-context";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import AppShellFallback from "@/components/layout/AppShellFallback";
@@ -83,6 +84,7 @@ const queryClient = new QueryClient({
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
+      <RealtimeProvider>
       <OnboardingProvider>
         <TooltipProvider>
           <Toaster />
@@ -185,6 +187,7 @@ const App = () => (
           </BrowserRouter>
         </TooltipProvider>
       </OnboardingProvider>
+      </RealtimeProvider>
     </AuthProvider>
   </QueryClientProvider>
 );

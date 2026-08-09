@@ -208,15 +208,15 @@ const AlertCenter: React.FC = () => {
   const { data: alerts = [], isLoading, isError, refetch } = useQuery<Alert[]>({
     queryKey: ['alerts', 'list', queryStatus, querySeverity],
     queryFn: ({ signal }) => fetchAlerts(queryStatus, querySeverity, signal),
-    staleTime: 5_000,
-    refetchInterval: 5_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000, // resilience fallback; realtime.ts pushes invalidation on WS events
   });
 
   const { data: summary } = useQuery<AlertSummary>({
     queryKey: ['alerts', 'summary'],
     queryFn: ({ signal }) => fetchAlertSummary(signal),
-    staleTime: 5_000,
-    refetchInterval: 5_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000, // resilience fallback; realtime.ts pushes invalidation on WS events
   });
 
   const withActioning = (id: string, fn: () => void) => { setActioningIds((prev) => new Set([...prev, id])); fn(); };

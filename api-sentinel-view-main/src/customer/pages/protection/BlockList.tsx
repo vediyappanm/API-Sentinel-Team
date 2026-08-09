@@ -229,8 +229,8 @@ const BlockList: React.FC = () => {
   const { data, isLoading, isError, refetch } = useQuery<BlocklistResponse>({
     queryKey: ['blocklist'],
     queryFn: ({ signal }) => fetchBlocklist(signal),
-    staleTime: 5_000,
-    refetchInterval: 5_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000, // resilience fallback; realtime.ts pushes invalidation on WS events
   });
 
   const items = data?.items ?? [];

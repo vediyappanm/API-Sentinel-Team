@@ -20,8 +20,8 @@ export function useVulnerabilities(
     queryKey: ['testing', 'issues', page, pageSize, filters, sortKey, sortOrder],
     queryFn: ({ signal }) =>
       fetchAllIssues(page * pageSize, pageSize, filters, sortKey, sortOrder, signal),
-    staleTime: 5_000,
-    refetchInterval: 5_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000, // resilience fallback; realtime.ts pushes invalidation on WS events
   });
 }
 
@@ -29,8 +29,8 @@ export function useIssueSummary() {
   return useQuery({
     queryKey: ['testing', 'summary'],
     queryFn: ({ signal }) => fetchIssueSummary(signal),
-    staleTime: 5_000,
-    refetchInterval: 5_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000, // resilience fallback; realtime.ts pushes invalidation on WS events
   });
 }
 
@@ -38,8 +38,8 @@ export function useSeverityInfo() {
   return useQuery({
     queryKey: ['testing', 'severityInfo'],
     queryFn: ({ signal }) => fetchSeverityInfoForIssues(signal),
-    staleTime: 5_000,
-    refetchInterval: 5_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000, // resilience fallback; realtime.ts pushes invalidation on WS events
   });
 }
 
@@ -47,8 +47,8 @@ export function useIssuesTrend(startTs: number, endTs: number) {
   return useQuery({
     queryKey: ['testing', 'trend', startTs, endTs],
     queryFn: ({ signal }) => fetchIssuesByDay(startTs, endTs, signal),
-    staleTime: 5_000,
-    refetchInterval: 5_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000, // resilience fallback; realtime.ts pushes invalidation on WS events
   });
 }
 
@@ -56,8 +56,8 @@ export function useSubCategories() {
   return useQuery({
     queryKey: ['testing', 'subCategories'],
     queryFn: ({ signal }) => fetchAllSubCategories(signal),
-    staleTime: 5_000,
-    refetchInterval: 5_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000, // resilience fallback; realtime.ts pushes invalidation on WS events
   });
 }
 

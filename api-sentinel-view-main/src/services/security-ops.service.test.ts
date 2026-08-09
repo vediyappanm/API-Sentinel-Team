@@ -36,7 +36,7 @@ describe('security operations release governance service', () => {
     await evaluateCicdGate('run-123', 'strict');
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/cicd/gate/run-123?policy_pack=strict',
+      'http://localhost:3000/api/cicd/gate/run-123?policy_pack=strict',
       expect.objectContaining({ method: 'GET', credentials: 'include' }),
     );
   });
@@ -47,7 +47,7 @@ describe('security operations release governance service', () => {
     await fetchCicdTriggers(25);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/cicd/triggers?limit=25',
+      'http://localhost:3000/api/cicd/triggers?limit=25',
       expect.objectContaining({ method: 'GET', credentials: 'include' }),
     );
   });
@@ -58,7 +58,7 @@ describe('security operations release governance service', () => {
     await fetchGovernanceDashboard();
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/dashboard/governance',
+      'http://localhost:3000/api/dashboard/governance',
       expect.objectContaining({ method: 'GET', credentials: 'include' }),
     );
   });
@@ -158,6 +158,7 @@ describe('security operations release governance service', () => {
             ready_checks: ['ci_cd_gates'],
             missing_checks: ['technical_report'],
             blockers: ['technical_report'],
+            next_action: 'Publish the technical report with evidence status, endpoint risk, trend, and artifact accountability.',
           },
         ],
         capabilities: [],
@@ -208,10 +209,10 @@ describe('security operations release governance service', () => {
 
   it('builds direct CI export URLs for SARIF and JUnit artifacts', () => {
     expect(buildCicdGateExportUrl('run-123', 'sarif')).toBe(
-      'http://127.0.0.1:8000/api/cicd/gate/run-123/sarif',
+      'http://localhost:3000/api/cicd/gate/run-123/sarif',
     );
     expect(buildCicdGateExportUrl('run-123', 'junit')).toBe(
-      'http://127.0.0.1:8000/api/cicd/gate/run-123/junit',
+      'http://localhost:3000/api/cicd/gate/run-123/junit',
     );
   });
 
@@ -221,7 +222,7 @@ describe('security operations release governance service', () => {
     await fetchVulnerabilityLifecycle({ limit: 40, status: 'OPEN' });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/vulnerabilities/?limit=40&status=OPEN',
+      'http://localhost:3000/api/vulnerabilities/?limit=40&status=OPEN',
       expect.objectContaining({ method: 'GET', credentials: 'include' }),
     );
   });
@@ -234,7 +235,7 @@ describe('security operations release governance service', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/vulnerabilities/vuln-1/ticket/sync',
+      'http://localhost:3000/api/vulnerabilities/vuln-1/ticket/sync',
       expect.objectContaining({
         method: 'POST',
         credentials: 'include',
@@ -258,7 +259,7 @@ describe('security operations release governance service', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/vulnerabilities/vuln-1/retest/outcome',
+      'http://localhost:3000/api/vulnerabilities/vuln-1/retest/outcome',
       expect.objectContaining({
         method: 'POST',
         credentials: 'include',

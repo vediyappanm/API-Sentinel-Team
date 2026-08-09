@@ -2,21 +2,40 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 
 interface SkeletonLoaderProps {
-  variant?: 'card' | 'chart' | 'table' | 'metric' | 'text';
+  variant?: 'card' | 'chart' | 'table' | 'metric' | 'text' | 'list';
   className?: string;
   count?: number;
+  /** Alias for `count`, used by table/list call sites; takes precedence when set. */
+  rows?: number;
 }
 
-const SkeletonBar: React.FC<{ className?: string }> = ({ className }) => (
-  <div className={cn('animate-shimmer rounded', className)} />
+const SkeletonBar: React.FC<{ className?: string; style?: React.CSSProperties }> = ({ className, style }) => (
+  <div className={cn('animate-shimmer rounded', className)} style={style} />
 );
 
 const SkeletonLoader: React.FC<SkeletonLoaderProps> = ({
   variant = 'card',
   className,
   count = 1,
+  rows,
 }) => {
-  const items = Array.from({ length: count });
+  const items = Array.from({ length: rows ?? count });
+
+  if (variant === 'list') {
+    return (
+      <div className={cn('space-y-2', className)}>
+        {items.map((_, i) => (
+          <div key={i} className="metric-card p-3 flex items-center gap-3">
+            <SkeletonBar className="w-8 h-8 rounded-[2px] shrink-0" />
+            <div className="flex-1 space-y-2">
+              <SkeletonBar className="h-3 w-2/3 rounded-full" />
+              <SkeletonBar className="h-2.5 w-1/3 rounded-full" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   if (variant === 'text') {
     return (

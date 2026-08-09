@@ -8,6 +8,7 @@ import {
   ServerCog,
   ShieldCheck,
   Workflow,
+  type LucideIcon,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -50,7 +51,7 @@ const TRAFFIC_OPTIONS = [
   { id: 'manual', label: 'HAR / Postman Import', description: 'Seed discovery immediately while passive traffic is being wired.' },
 ] as const;
 
-const STEP_ICONS: Record<OnboardingStepId, React.FC<{ size?: number }>> = {
+const STEP_ICONS: Record<OnboardingStepId, LucideIcon> = {
   deployment: ServerCog,
   traffic: Network,
   application: Layers3,

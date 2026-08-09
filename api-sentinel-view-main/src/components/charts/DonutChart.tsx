@@ -30,8 +30,8 @@ const CustomTooltip = ({ active, payload }: DonutTooltipProps) => {
       <div className="glass-card-premium px-3 py-2 rounded-lg shadow-xl">
         <div className="flex items-center gap-2 text-[11px]">
           <span className="w-2 h-2 rounded-full" style={{ background: d.payload.color }} />
-          <span className="text-text-secondary">{d.name}:</span>
-          <span className="text-text-primary font-mono font-bold">{d.value}</span>
+          <span style={{ color: 'var(--evd-ink-muted, var(--text-secondary))' }}>{d.name}:</span>
+          <span className="font-mono font-bold" style={{ color: 'var(--evd-paper, var(--text-primary))' }}>{d.value}</span>
         </div>
       </div>
     );
@@ -110,11 +110,14 @@ const DonutChart: React.FC<DonutChartProps> = ({
         </PieChart>
         {/* Center value */}
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <span className="text-xl font-bold text-text-primary font-mono leading-none tabular-nums">
+          <span
+            className="text-xl font-bold font-mono leading-none tabular-nums"
+            style={{ color: 'var(--evd-paper, var(--text-primary))' }}
+          >
             {displayValue}
           </span>
           {centerLabel && (
-            <span className="text-[9px] text-text-muted mt-0.5">{centerLabel}</span>
+            <span className="text-[9px] mt-0.5" style={{ color: 'var(--evd-ink-muted, var(--text-muted))' }}>{centerLabel}</span>
           )}
         </div>
       </div>
@@ -125,9 +128,9 @@ const DonutChart: React.FC<DonutChartProps> = ({
             <div key={i} className="flex items-center justify-between text-xs w-full max-w-[140px]">
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-sm" style={{ background: d.color }} />
-                <span className="text-text-secondary">{d.name}</span>
+                <span style={{ color: 'var(--evd-ink-muted, var(--text-secondary))' }}>{d.name}</span>
               </div>
-              <span className="text-text-primary font-mono tabular-nums">{d.value}</span>
+              <span className="font-mono tabular-nums" style={{ color: 'var(--evd-paper, var(--text-primary))' }}>{d.value}</span>
             </div>
           ))}
         </div>

@@ -108,7 +108,7 @@ export async function fetchWithSession(path: string, init?: RequestInit): Promis
 
 async function request<T>(
   path: string,
-  body?: Record<string, unknown>,
+  body?: object,
   options?: { method?: string; signal?: AbortSignal },
 ): Promise<T> {
   const method = options?.method ?? 'POST';
@@ -143,7 +143,7 @@ async function request<T>(
 }
 
 /** POST JSON to API */
-export function post<T = unknown>(path: string, body?: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+export function post<T = unknown>(path: string, body?: object, signal?: AbortSignal): Promise<T> {
   return request<T>(path, body, { method: 'POST', signal });
 }
 
@@ -153,7 +153,7 @@ export function get<T = unknown>(path: string, signal?: AbortSignal): Promise<T>
 }
 
 /** PATCH JSON to API */
-export function patch<T = unknown>(path: string, body?: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+export function patch<T = unknown>(path: string, body?: object, signal?: AbortSignal): Promise<T> {
   return request<T>(path, body, { method: 'PATCH', signal });
 }
 

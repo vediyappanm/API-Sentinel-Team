@@ -52,7 +52,7 @@ export function useGovernanceDashboard() {
   return useQuery({
     queryKey: ['security-ops', 'governance-dashboard'],
     queryFn: ({ signal }) => fetchGovernanceDashboard(signal),
-    staleTime: 5_000,
+    staleTime: 30_000,
     refetchInterval: 10_000,
   });
 }
@@ -139,8 +139,8 @@ export function useTestRuns(limit: number = 10) {
   return useQuery({
     queryKey: ['security-ops', 'test-runs', limit],
     queryFn: ({ signal }) => fetchTestRuns(limit, signal),
-    staleTime: 5_000,
-    refetchInterval: 5_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000, // resilience fallback; realtime.ts pushes invalidation on WS events
   });
 }
 
@@ -149,8 +149,8 @@ export function useTestRunDetail(runId: string | null) {
     queryKey: ['security-ops', 'test-run-detail', runId],
     queryFn: ({ signal }) => fetchTestRunDetail(runId!, signal),
     enabled: Boolean(runId),
-    staleTime: 5_000,
-    refetchInterval: 5_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000, // resilience fallback; realtime.ts pushes invalidation on WS events
   });
 }
 
@@ -179,7 +179,7 @@ export function useCicdTriggers(limit: number = 25) {
   return useQuery({
     queryKey: ['security-ops', 'cicd-triggers', limit],
     queryFn: ({ signal }) => fetchCicdTriggers(limit, signal),
-    staleTime: 5_000,
+    staleTime: 30_000,
     refetchInterval: 10_000,
   });
 }
@@ -189,7 +189,7 @@ export function useCicdGateDecision(runId: string | null, policyPack: GatePolicy
     queryKey: ['security-ops', 'cicd-gate', runId, policyPack],
     queryFn: ({ signal }) => evaluateCicdGate(runId!, policyPack, signal),
     enabled: Boolean(runId),
-    staleTime: 5_000,
+    staleTime: 30_000,
     refetchInterval: 10_000,
   });
 }
@@ -199,7 +199,7 @@ export function useCicdTriggerGateDecision(triggerId: string | null, policyPack:
     queryKey: ['security-ops', 'cicd-trigger-gate', triggerId, policyPack],
     queryFn: ({ signal }) => evaluateCicdTriggerGate(triggerId!, policyPack, signal),
     enabled: Boolean(triggerId),
-    staleTime: 5_000,
+    staleTime: 30_000,
     refetchInterval: 10_000,
   });
 }
@@ -208,7 +208,7 @@ export function useVulnerabilityLifecycle(options: VulnerabilityLifecycleOptions
   return useQuery({
     queryKey: ['security-ops', 'vulnerability-lifecycle', options],
     queryFn: ({ signal }) => fetchVulnerabilityLifecycle(options, signal),
-    staleTime: 5_000,
+    staleTime: 30_000,
     refetchInterval: 10_000,
   });
 }

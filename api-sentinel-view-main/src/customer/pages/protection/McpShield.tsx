@@ -56,7 +56,7 @@ export default function McpShield() {
 
   const { data: shieldData } = useQuery({
     queryKey: ['mcp-shield'],
-    queryFn: () => get('/mcp-shield/servers').catch(() => null),
+    queryFn: () => get<{ servers: McpServer[]; alerts: McpAlert[] }>('/mcp-shield/servers').catch(() => null),
     retry: false,
   });
 

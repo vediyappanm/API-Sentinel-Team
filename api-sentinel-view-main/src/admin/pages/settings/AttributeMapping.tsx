@@ -114,19 +114,21 @@ const AttributeMapping: React.FC = () => {
           </div>
 
           <div className="mt-4 grid gap-4 md:grid-cols-2">
-            {[
-              ['Authorization header', authHeader, setAuthHeader, 'authorization'],
-              ['Session key', sessionKey, setSessionKey, 'x-session-id'],
-              ['User identifier', userIdKey, setUserIdKey, 'x-user-id'],
-              ['User role attribute', userRoleKey, setUserRoleKey, 'x-user-role'],
-              ['Tenant key', tenantKey, setTenantKey, 'x-tenant-id'],
-            ].map(([label, value, setter, placeholder]) => (
-              <div key={String(label)} className="space-y-1.5">
+            {(
+              [
+                ['Authorization header', authHeader, setAuthHeader, 'authorization'],
+                ['Session key', sessionKey, setSessionKey, 'x-session-id'],
+                ['User identifier', userIdKey, setUserIdKey, 'x-user-id'],
+                ['User role attribute', userRoleKey, setUserRoleKey, 'x-user-role'],
+                ['Tenant key', tenantKey, setTenantKey, 'x-tenant-id'],
+              ] as [string, string, React.Dispatch<React.SetStateAction<string>>, string][]
+            ).map(([label, value, setter, placeholder]) => (
+              <div key={label} className="space-y-1.5">
                 <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">{label}</label>
                 <input
-                  value={String(value)}
-                  onChange={(event) => (setter as React.Dispatch<React.SetStateAction<string>>)(event.target.value)}
-                  placeholder={String(placeholder)}
+                  value={value}
+                  onChange={(event) => setter(event.target.value)}
+                  placeholder={placeholder}
                   className="w-full rounded-xl border border-border-subtle bg-bg-base px-4 py-3 text-sm text-text-primary outline-none transition-all focus:border-brand/30 focus:ring-1 focus:ring-brand/20"
                 />
               </div>

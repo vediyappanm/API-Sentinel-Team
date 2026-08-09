@@ -5,6 +5,7 @@ import { LayoutProvider, useLayout } from '@/components/layout/layout-context';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { TopBar } from '@/components/layout/TopBar';
 import type { WorkspaceConfig } from '@/components/layout/workspaces';
+import { cn } from '@/lib/utils';
 
 const WorkspaceShellInner: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace }) => {
   const location = useLocation();
@@ -24,7 +25,10 @@ const WorkspaceShellInner: React.FC<{ workspace: WorkspaceConfig }> = ({ workspa
         <div
           ref={contentRef}
           id="app-content"
-          className="flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-5"
+          className={cn(
+            'flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-5',
+            workspace.key === 'customer' && 'evd-root',
+          )}
         >
           <Outlet />
         </div>

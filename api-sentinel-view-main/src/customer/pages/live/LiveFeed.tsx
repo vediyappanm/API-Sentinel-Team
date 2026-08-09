@@ -111,7 +111,7 @@ const LiveFeed: React.FC = () => {
 
   const { data: sensorsData } = useQuery({
     queryKey: ['live-feed', 'sensors'],
-    queryFn: () => get('/sensors/').catch(() => ({ sensors: [] })),
+    queryFn: () => get<{ sensors: { status: string }[] }>('/sensors/').catch(() => ({ sensors: [] })),
     refetchInterval: 30_000,
   });
   const activeSensors: number = (sensorsData?.sensors ?? []).filter((s: { status: string }) => s.status === 'ONLINE').length;

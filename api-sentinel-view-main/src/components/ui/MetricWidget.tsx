@@ -56,7 +56,7 @@ const MetricWidget: React.FC<MetricWidgetProps> = ({
       >
         {Icon && (
           <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+            className="w-8 h-8 rounded-[2px] flex items-center justify-center shrink-0"
             style={{ background: iconBg }}
           >
             <Icon size={16} style={{ color: iconColor }} />
@@ -69,7 +69,7 @@ const MetricWidget: React.FC<MetricWidgetProps> = ({
             prefix={prefix}
             suffix={suffix}
             decimals={decimals}
-            className="text-lg font-bold text-text-primary"
+            className="text-lg font-bold font-mono text-text-primary"
           />
         </div>
         {sparkData && sparkData.length > 1 && (
@@ -93,7 +93,7 @@ const MetricWidget: React.FC<MetricWidgetProps> = ({
         <div className="flex items-center gap-2.5">
           {Icon && (
             <div
-              className="w-9 h-9 rounded-lg flex items-center justify-center"
+              className="w-9 h-9 rounded-[2px] flex items-center justify-center"
               style={{ background: iconBg }}
             >
               <Icon size={18} style={{ color: iconColor }} />
@@ -118,7 +118,7 @@ const MetricWidget: React.FC<MetricWidgetProps> = ({
           prefix={prefix}
           suffix={suffix}
           decimals={decimals}
-          className="text-2xl font-bold text-text-primary leading-none"
+          className="text-2xl font-bold font-mono text-text-primary leading-none"
         />
         {sparkData && sparkData.length > 1 && (
           <SparklineChart

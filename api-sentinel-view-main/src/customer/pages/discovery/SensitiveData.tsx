@@ -44,7 +44,7 @@ export default function SensitiveData() {
 
   const { data } = useQuery({
     queryKey: ['sensitive-data'],
-    queryFn: () => get('/pii/findings').catch(() => null),
+    queryFn: () => get<{ findings: SensitiveDataFinding[] }>('/pii/findings').catch(() => null),
     retry: false,
   });
 

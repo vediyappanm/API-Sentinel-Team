@@ -33,12 +33,12 @@ const CustomTooltip = ({ active, payload, label }: ChartTooltipProps) => {
   if (active && payload && payload.length) {
     return (
       <div className="glass-card-premium p-3 rounded-lg shadow-xl min-w-[140px]">
-        <p className="text-text-primary text-xs mb-2 font-medium">{label}</p>
+        <p className="text-xs mb-2 font-medium" style={{ color: 'var(--evd-paper, var(--text-primary))' }}>{label}</p>
         {payload.map((entry, index) => (
           <div key={index} className="flex gap-2 items-center text-[11px] mb-1">
             <span className="w-2 h-2 rounded-full shrink-0" style={{ background: entry.color }} />
-            <span className="text-text-secondary">{entry.name}:</span>
-            <span className="text-text-primary font-mono font-medium">{entry.value?.toLocaleString()}</span>
+            <span style={{ color: 'var(--evd-ink-muted, var(--text-secondary))' }}>{entry.name}:</span>
+            <span className="font-mono font-medium" style={{ color: 'var(--evd-paper, var(--text-primary))' }}>{entry.value?.toLocaleString()}</span>
           </div>
         ))}
       </div>

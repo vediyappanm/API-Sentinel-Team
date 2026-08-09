@@ -1,38 +1,34 @@
 import React, { useState, useMemo } from 'react';
 import {
   RefreshCw, Shield, Activity, Users, TrendingUp, Lock, ShieldAlert,
-  Calendar, ArrowRight, Zap, AlertTriangle, Eye, Database, FileCheck,
-  GitBranch, Bot,
+  Eye, Database, FileCheck, GitBranch, Bot, Clock,
 } from 'lucide-react';
 import DonutChart from '@/components/charts/DonutChart';
 import GeoMap from '@/components/charts/GeoMap';
-import LineChart from '@/components/charts/LineChart';
-import AreaChartComponent from '@/components/charts/AreaChart';
 import TimeFilter from '@/components/shared/TimeFilter';
 import QueryError from '@/components/shared/QueryError';
-import MetricWidget from '@/components/ui/MetricWidget';
-import ProgressRing from '@/components/ui/ProgressRing';
-import GlassCard from '@/components/ui/GlassCard';
-import StatusPulse from '@/components/ui/StatusPulse';
-import AnimatedCounter from '@/components/ui/AnimatedCounter';
-import OWASPCoverageWidget from '@/components/widgets/OWASPCoverageWidget';
 import { useDashboardKPIs, useIssuesTrend, useThreatTrend, useSeverityBreakdown } from '@/hooks/use-dashboard';
 import { useThreatCategoryCount, useActorsGeoCount } from '@/hooks/use-protection';
 import { centroidForCountryCode } from '@/lib/country-centroids';
+import { OWASP_TOP_10 } from '@/lib/owasp';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/auth-context';
 import type { DashboardThreatData } from '@/services/dashboard.service';
+import EvidencePanel from '@/components/ui/EvidencePanel';
+import EvidenceSectionHead from '@/components/ui/EvidenceSectionHead';
+import EvidenceStamp from '@/components/ui/EvidenceStamp';
+import EvidenceLedgerItem from '@/components/ui/EvidenceLedger';
+import { EvidenceStatLine, EvidenceBarLine } from '@/components/ui/EvidenceStatLine';
+import EvidenceTrace from '@/components/ui/EvidenceTrace';
+import { useRealtimeStatus } from '@/lib/realtime';
 
 function daysAgoTs(days: number) {
   return Math.floor((Date.now() - days * 86400_000) / 1000);
 }
 
-function getGreeting(): string {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  return 'Good evening';
+function nowStamp(): string {
+  return new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 const Dashboard: React.FC = () => {
@@ -41,6 +37,7 @@ const Dashboard: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const realtime = useRealtimeStatus();
 
   const days = timeRange === '24h' ? 1 : 7;
   const startTs = useMemo(() => daysAgoTs(days), [days]);
@@ -80,19 +77,6 @@ const Dashboard: React.FC = () => {
     whitelisted: threatDataResult.whitelistedActors,
   };
 
-  // Real 7-day sparkline data from timeline
-  const sparkFromTimeline = (metric: string) => {
-    if (timelineData && timelineData.length > 0) {
-      return timelineData.map((d) => {
-        if (metric === 'events') return d.total || 0;
-        if (metric === 'blocked') return d.blocked || 0;
-        return d.total || 0;
-      });
-    }
-    // Fallback to last 7 days of zeros if no data
-    return [0, 0, 0, 0, 0, 0, 0];
-  };
-
   // Security posture score (0-100 based on severity distribution)
   const totalIssues = (issueKpis?.criticalIssues ?? 0) + (issueKpis?.highIssues ?? 0) + (issueKpis?.mediumIssues ?? 0) + (issueKpis?.lowIssues ?? 0);
   const resolvedRatio = totalIssues > 0 ? (kpi.resolved / (totalIssues + kpi.resolved)) * 100 : 85;
@@ -103,9 +87,9 @@ const Dashboard: React.FC = () => {
   const mcpSessions = threatDataResult.mcpSessions ?? 0;
 
   const threatData = [
-    { name: 'High', value: threatDataResult.highActors, color: '#EF4444' },
-    { name: 'Medium', value: threatDataResult.mediumActors, color: '#F97316' },
-    { name: 'Low', value: threatDataResult.lowActors, color: '#EAB308' },
+    { name: 'High', value: threatDataResult.highActors, color: 'var(--evd-high)' },
+    { name: 'Medium', value: threatDataResult.mediumActors, color: 'var(--evd-medium)' },
+    { name: 'Low', value: threatDataResult.lowActors, color: 'var(--evd-low)' },
   ];
 
   const timelineData = useMemo<TimelineEntry[]>(() => {
@@ -135,9 +119,6 @@ const Dashboard: React.FC = () => {
         const coords = centroidForCountryCode(country);
         if (!coords) return null;
         return {
-          // Small deterministic-looking jitter so markers for the same
-          // country don't all stack on one pixel — purely visual spread,
-          // not a substitute for real per-event coordinates.
           lat: coords.lat + (Math.random() - 0.5) * 4,
           lng: coords.lng + (Math.random() - 0.5) * 4,
           severity: count > 100 ? ('critical' as const) : count > 50 ? ('high' as const) : ('medium' as const),
@@ -152,22 +133,27 @@ const Dashboard: React.FC = () => {
   const displayName = user?.name || user?.login?.split('@')[0] || 'User';
 
   return (
-    <div className="space-y-6 w-full pb-10">
-      {/* Header */}
-      <div className="flex items-center justify-between animate-fade-in">
+    <div className="space-y-6 w-full p-4 pb-10">
+      {/* Case header */}
+      <div className="flex items-center justify-between flex-wrap gap-3 animate-fade-in">
         <div>
-          <h1 className="text-xl font-bold text-text-primary">
-            {getGreeting()}, <span className="text-gradient-brand">{displayName}</span>
+          <h1 className="evd-display text-xl" style={{ color: 'var(--evd-paper)' }}>
+            {displayName.toUpperCase()} — LIVE POSTURE
           </h1>
-          <div className="flex items-center gap-3 mt-1">
-            <p className="text-xs text-text-muted">Security posture and threat intelligence overview</p>
-            <StatusPulse variant="online" size="sm" label="All systems operational" />
+          <div className="flex items-center gap-3 mt-2 flex-wrap">
+            <EvidenceStamp tone={realtime.connected ? 'ok' : 'warn'} pulse>
+              {realtime.connected ? 'NOMINAL' : 'RECONNECTING'}
+            </EvidenceStamp>
+            <span className="evd-mono text-[11px]" style={{ color: 'var(--evd-ink-muted)' }}>
+              SYNC {nowStamp()}
+            </span>
           </div>
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => qc.invalidateQueries({ queryKey: ['dashboard'] })}
-            className={`w-8 h-8 rounded-lg border border-border-subtle bg-bg-surface flex items-center justify-center text-muted-foreground hover:text-brand hover:border-brand/20 transition-all outline-none ${isLoading ? 'animate-spin' : ''}`}
+            className={`evd-btn ${isLoading ? 'animate-spin' : ''}`}
+            aria-label="Refresh dashboard data"
           >
             <RefreshCw size={14} />
           </button>
@@ -182,383 +168,228 @@ const Dashboard: React.FC = () => {
         />
       )}
 
-      {/* KPI Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-        {[
-          { label: 'Threat Actors', value: kpi.threatActors, icon: Users, color: '#EF4444', bg: 'rgba(239,68,68,0.1)', change: -12, spark: sparkFromTimeline('actors') },
-          { label: 'Blocked', value: kpi.blocked, icon: Shield, color: '#632CA6', bg: 'rgba(99,44,175,0.1)', change: 8, spark: sparkFromTimeline('blocked') },
-          { label: 'Security Events', value: kpi.securityEvents, icon: Activity, color: '#3B82F6', bg: 'rgba(59,130,246,0.1)', change: 5, spark: sparkFromTimeline('events') },
-          { label: 'Critical', value: kpi.critical, icon: ShieldAlert, color: '#EF4444', bg: 'rgba(239,68,68,0.1)', change: -3, spark: sparkFromTimeline('critical') },
-          { label: 'Resolved', value: kpi.resolved, icon: TrendingUp, color: '#22C55E', bg: 'rgba(34,197,94,0.1)', change: 15, spark: sparkFromTimeline('resolved') },
-          { label: 'Unauthenticated', value: kpi.unauth, icon: Lock, color: '#EAB308', bg: 'rgba(234,179,8,0.1)', change: -2, spark: sparkFromTimeline('unauth') },
-        ].map((item, i) => (
-          <div key={item.label} className={`animate-stagger-${i + 1}`}>
-            <MetricWidget
-              label={item.label}
-              value={typeof item.value === 'number' ? item.value : 0}
-              icon={item.icon}
-              iconColor={item.color}
-              iconBg={item.bg}
-              change={item.change}
-              sparkData={item.spark}
-              sparkColor={item.color}
-            />
-          </div>
-        ))}
+      {/* KPI ledger */}
+      <div className="evd-ledger animate-fade-in">
+        <EvidenceLedgerItem icon={Users} color="var(--evd-critical)" label="Threat Actors" value={typeof kpi.threatActors === 'number' ? kpi.threatActors : 0} delta={-12} />
+        <EvidenceLedgerItem icon={Shield} color="var(--evd-signal)" label="Blocked" value={typeof kpi.blocked === 'number' ? kpi.blocked : 0} delta={8} />
+        <EvidenceLedgerItem icon={Activity} color="var(--evd-info)" label="Security Events" value={typeof kpi.securityEvents === 'number' ? kpi.securityEvents : 0} delta={5} />
+        <EvidenceLedgerItem icon={ShieldAlert} color="var(--evd-critical)" label="Critical" value={typeof kpi.critical === 'number' ? kpi.critical : 0} delta={-3} />
+        <EvidenceLedgerItem icon={TrendingUp} color="var(--evd-low)" label="Resolved" value={typeof kpi.resolved === 'number' ? kpi.resolved : 0} delta={15} />
+        <EvidenceLedgerItem icon={Lock} color="var(--evd-medium)" label="Unauthenticated" value={typeof kpi.unauth === 'number' ? kpi.unauth : 0} delta={-2} />
       </div>
 
       {/* Core Engine Signals */}
       <div>
-        <div className="flex items-center gap-3 mb-3">
-          <h2 className="text-sm font-bold text-text-primary">Core Engine Signals</h2>
-          <span className="text-[11px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-border-subtle">
-            Evidence-first - Long-window ML - MCP coverage
-          </span>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          <MetricWidget
-            label="Long-Window Memory"
-            value={behavioralDays}
-            suffix="d"
-            icon={Database}
-            iconColor="#3B82F6"
-            iconBg="rgba(59,130,246,0.1)"
-            changeLabel="Behavioral baselines retained"
-          />
-          <MetricWidget
-            label="Evidence Packages"
-            value={typeof evidencePackages === 'number' ? evidencePackages : 0}
-            icon={FileCheck}
-            iconColor="#22C55E"
-            iconBg="rgba(34,197,94,0.1)"
-            changeLabel="Redacted payloads + timeline"
-          />
-          <MetricWidget
-            label="Business Logic Coverage"
-            value={blgCoverage}
-            suffix="%"
-            icon={GitBranch}
-            iconColor="#EAB308"
-            iconBg="rgba(234,179,8,0.1)"
-            changeLabel="BLG transitions learned"
-          />
-          <MetricWidget
-            label="MCP / Agentic Sessions"
-            value={typeof mcpSessions === 'number' ? mcpSessions : 0}
-            icon={Bot}
-            iconColor="#632CA6"
-            iconBg="rgba(99,44,175,0.1)"
-            changeLabel="Tool invocation monitoring"
-          />
+        <EvidenceSectionHead code="§01" title="Core Engine Signals" desc="EVIDENCE-FIRST · LONG-WINDOW ML · MCP COVERAGE" />
+        <div className="evd-ledger">
+          <EvidenceLedgerItem icon={Database} color="var(--evd-info)" label="Long-Window Memory" value={behavioralDays} suffix="d" />
+          <EvidenceLedgerItem icon={FileCheck} color="var(--evd-low)" label="Evidence Packages" value={typeof evidencePackages === 'number' ? evidencePackages : 0} />
+          <EvidenceLedgerItem icon={GitBranch} color="var(--evd-medium)" label="Business Logic Coverage" value={blgCoverage} suffix="%" />
+          <EvidenceLedgerItem icon={Bot} color="var(--evd-signal)" label="MCP / Agentic Sessions" value={typeof mcpSessions === 'number' ? mcpSessions : 0} />
         </div>
       </div>
 
-      {/* OWASP Coverage Widget */}
+      {/* Coverage + Testing status */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <OWASPCoverageWidget coverage={[]} isLoading={false} />
-        <GlassCard variant="elevated" className="p-6">
+        <EvidencePanel exhibit="EXH-01">
+          <EvidenceSectionHead code="§02" title="OWASP API Top 10" desc="AVG COVERAGE 0%" />
+          <div className="space-y-0.5">
+            {OWASP_TOP_10.slice(0, 6).map((cat) => (
+              <EvidenceBarLine key={cat.id} label={cat.name} value={0} max={1} />
+            ))}
+          </div>
+        </EvidencePanel>
+
+        <EvidencePanel exhibit="EXH-02">
           <div className="flex items-start justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-bold text-text-primary">Security Testing Status</h3>
-              <p className="text-[11px] text-text-muted mt-0.5">Tests executed and coverage</p>
-            </div>
-            <button
-              onClick={() => navigate('/app/testing')}
-              className="text-[11px] text-brand hover:underline flex items-center gap-1"
-            >
-              View Tests <ArrowRight size={11} />
+            <EvidenceSectionHead code="§03" title="Testing Status" />
+            <button onClick={() => navigate('/app/testing')} className="evd-link">
+              VIEW TESTS →
             </button>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <p className="text-[11px] text-text-muted">Tests Run</p>
-              <p className="text-2xl font-bold text-text-primary">0</p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-[11px] text-text-muted">Vulnerabilities</p>
-              <p className="text-2xl font-bold text-sev-critical">{kpi.critical}</p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-[11px] text-text-muted">Test Suites</p>
-              <p className="text-2xl font-bold text-text-primary">0</p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-[11px] text-text-muted">Last Run</p>
-              <p className="text-xs text-text-muted">Never</p>
-            </div>
+          <div className="grid grid-cols-2 gap-6" style={{ marginTop: -16 }}>
+            <StatBlock label="Tests Run" value={0} />
+            <StatBlock label="Vulnerabilities" value={kpi.critical} tone="var(--evd-critical)" />
+            <StatBlock label="Test Suites" value={0} />
+            <StatBlock label="Last Run" value="NEVER" mono />
           </div>
-        </GlassCard>
+        </EvidencePanel>
       </div>
 
-      {/* Threat Overview: Posture Score + Threat Donut */}
+      {/* Posture + Threat distribution */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Security Posture Score */}
-        <GlassCard variant="elevated" className="p-6 animate-stagger-1">
+        <EvidencePanel exhibit="EXH-03">
           <div className="flex items-start justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-bold text-text-primary">Security Posture</h3>
-              <p className="text-[11px] text-text-muted mt-0.5">Overall health score based on resolved issues</p>
-            </div>
-            <button
-              onClick={() => navigate('/app/reports')}
-              className="text-[11px] text-brand hover:underline flex items-center gap-1"
-            >
-              View Report <ArrowRight size={11} />
+            <EvidenceSectionHead code="§04" title="Security Posture" />
+            <button onClick={() => navigate('/app/reports')} className="evd-link">
+              REPORT →
             </button>
           </div>
-          <div className="flex items-center gap-8">
-            <ProgressRing value={postureScore} size={140} strokeWidth={10} label="Score" />
-            <div className="flex-1 space-y-3">
-              {[
-                { label: 'Critical Issues', value: kpi.critical, color: '#EF4444' },
-                { label: 'Resolved', value: kpi.resolved, color: '#22C55E' },
-                { label: 'Blocked Actors', value: kpi.blocked, color: '#632CA6' },
-                { label: 'Unauthenticated APIs', value: kpi.unauth, color: '#EAB308' },
-              ].map((item) => (
-                <div key={item.label} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full" style={{ background: item.color }} />
-                    <span className="text-xs text-text-secondary">{item.label}</span>
-                  </div>
-                  <AnimatedCounter
-                    value={typeof item.value === 'number' ? item.value : 0}
-                    className="text-sm font-bold text-text-primary"
-                  />
-                </div>
-              ))}
+          <div className="flex items-center gap-8" style={{ marginTop: -16 }}>
+            <div className="relative inline-flex items-center justify-center shrink-0">
+              <svg width={130} height={130} className="-rotate-90">
+                <circle cx={65} cy={65} r={57} fill="none" stroke="var(--evd-line)" strokeWidth={8} />
+                <circle
+                  cx={65} cy={65} r={57} fill="none"
+                  stroke="var(--evd-signal)" strokeWidth={8} strokeLinecap="butt"
+                  strokeDasharray={2 * Math.PI * 57}
+                  strokeDashoffset={2 * Math.PI * 57 * (1 - postureScore / 100)}
+                  style={{ transition: 'stroke-dashoffset 1s ease' }}
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="evd-display text-2xl tabular-nums" style={{ color: 'var(--evd-paper)' }}>{postureScore}</span>
+                <span className="evd-mono text-[9px]" style={{ color: 'var(--evd-ink-muted)' }}>SCORE</span>
+              </div>
+            </div>
+            <div className="flex-1">
+              <EvidenceStatLine label="Critical Issues" value={kpi.critical} dot="var(--evd-critical)" />
+              <EvidenceStatLine label="Resolved" value={kpi.resolved} dot="var(--evd-low)" />
+              <EvidenceStatLine label="Blocked Actors" value={kpi.blocked} dot="var(--evd-signal)" />
+              <EvidenceStatLine label="Unauthenticated APIs" value={kpi.unauth} dot="var(--evd-medium)" />
             </div>
           </div>
-        </GlassCard>
+        </EvidencePanel>
 
-        {/* Threat Level Distribution */}
-        <GlassCard variant="elevated" className="p-6 animate-stagger-2">
+        <EvidencePanel exhibit="EXH-04">
           <div className="flex items-start justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-bold text-text-primary">Threat Distribution</h3>
-              <p className="text-[11px] text-text-muted mt-0.5">Active threat actors by severity</p>
-            </div>
-            <button
-              onClick={() => navigate('/app/protection')}
-              className="text-[11px] text-brand hover:underline flex items-center gap-1"
-            >
-              Details <ArrowRight size={11} />
+            <EvidenceSectionHead code="§05" title="Threat Distribution" />
+            <button onClick={() => navigate('/app/protection')} className="evd-link">
+              DETAILS →
             </button>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-6" style={{ marginTop: -16 }}>
             <DonutChart
               data={threatData}
               centerValue={typeof kpi.threatActors === 'number' ? kpi.threatActors : 0}
               centerLabel="Total"
-              size={140}
-              innerRadius={42}
-              outerRadius={64}
+              size={130}
+              innerRadius={40}
+              outerRadius={60}
             />
-            <div className="flex-1 space-y-2.5">
-              {threatData.map((d) => {
-                const total = threatData.reduce((s, x) => s + x.value, 0) || 1;
-                const pct = Math.round((d.value / total) * 100);
-                return (
-                  <div key={d.name} className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2.5 h-2.5 rounded-sm" style={{ background: d.color }} />
-                        <span className="text-xs text-text-secondary">{d.name}</span>
-                      </div>
-                      <span className="text-xs font-bold text-text-primary tabular-nums">{d.value}</span>
-                    </div>
-                    <div className="h-1.5 bg-black/[0.04] rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all duration-1000 ease-out"
-                        style={{ width: `${pct}%`, background: d.color }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-              <div className="pt-2 flex items-center gap-3 text-[11px] text-text-muted">
-                <div className="flex items-center gap-1">
-                  <Eye size={10} /> <span>Whitelisted: {kpi.whitelisted}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Shield size={10} /> <span>Blocked: {kpi.blocked}</span>
-                </div>
+            <div className="flex-1">
+              {threatData.map((d) => (
+                <EvidenceStatLine key={d.name} label={d.name} value={d.value} dot={d.color} />
+              ))}
+              <div className="pt-3 flex items-center gap-4 evd-mono text-[10px]" style={{ color: 'var(--evd-ink-muted)' }}>
+                <div className="flex items-center gap-1"><Eye size={10} /> WHITELISTED {kpi.whitelisted}</div>
+                <div className="flex items-center gap-1"><Shield size={10} /> BLOCKED {kpi.blocked}</div>
               </div>
             </div>
           </div>
-        </GlassCard>
+        </EvidencePanel>
       </div>
 
-      {/* Monitored Users Section */}
+      {/* Monitored activity */}
       <div>
-        <div className="flex items-center gap-3 mb-3">
-          <h2 className="text-sm font-bold text-text-primary">Monitored Activity</h2>
-          <span className="text-[11px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-border-subtle flex items-center gap-1">
-            <Calendar size={10} /> Last 30 Days
-          </span>
-        </div>
+        <EvidenceSectionHead code="§06" title="Monitored Activity" desc="LAST 30 DAYS" />
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Actor Summary */}
-          <GlassCard variant="default" className="p-4">
-            <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">User Summary</span>
-            <div className="mt-4 space-y-3">
-              {[
-                { label: 'Total Actors', value: kpi.threatActors, color: 'text-text-primary' },
-                { label: 'Blocked', value: kpi.blocked, color: 'text-sev-critical' },
-                { label: 'Whitelisted', value: kpi.whitelisted, color: 'text-sev-low' },
-              ].map((item) => (
-                <div key={item.label} className="flex justify-between items-center">
-                  <span className="text-xs text-text-secondary">{item.label}</span>
-                  <AnimatedCounter
-                    value={typeof item.value === 'number' ? item.value : 0}
-                    className={`text-xl font-bold ${item.color}`}
-                  />
-                </div>
-              ))}
-            </div>
-          </GlassCard>
+          <EvidencePanel exhibit="EXH-05">
+            <p className="evd-mono text-[10px] mb-3" style={{ color: 'var(--evd-ink-muted)' }}>USER SUMMARY</p>
+            <EvidenceStatLine label="Total Actors" value={kpi.threatActors} />
+            <EvidenceStatLine label="Blocked" value={kpi.blocked} dot="var(--evd-critical)" />
+            <EvidenceStatLine label="Whitelisted" value={kpi.whitelisted} dot="var(--evd-low)" />
+          </EvidencePanel>
 
-          {/* Threat Level Donut */}
-          <GlassCard variant="default" className="p-4 flex flex-col items-center">
-            <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold w-full mb-3">Threat Level</span>
-            <DonutChart data={threatData} centerValue={typeof kpi.threatActors === 'number' ? kpi.threatActors : 0} size={130} innerRadius={40} outerRadius={60} showLegend />
-          </GlassCard>
+          <EvidencePanel exhibit="EXH-06" className="flex flex-col items-center">
+            <p className="evd-mono text-[10px] mb-3 w-full" style={{ color: 'var(--evd-ink-muted)' }}>THREAT LEVEL</p>
+            <DonutChart data={threatData} centerValue={typeof kpi.threatActors === 'number' ? kpi.threatActors : 0} size={120} innerRadius={38} outerRadius={56} showLegend />
+          </EvidencePanel>
 
-          {/* Top Tactics as horizontal bars */}
-          <GlassCard variant="default" className="p-4">
-            <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Top Tactics</span>
-            <div className="mt-3 space-y-2.5">
-              {topCategories.length > 0 ? topCategories.map(([cat, cnt]) => (
-                <div key={cat} className="space-y-1">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[11px] text-text-secondary truncate max-w-[140px]">{cat}</span>
-                    <span className="text-[11px] font-bold text-brand tabular-nums">{cnt as number}</span>
-                  </div>
-                  <div className="h-1 bg-black/[0.04] rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-brand to-brand-light transition-all duration-700"
-                      style={{ width: `${((cnt as number) / maxCatVal) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              )) : (
-                <p className="text-xs text-text-muted mt-4">No data available</p>
-              )}
-            </div>
-          </GlassCard>
+          <EvidencePanel exhibit="EXH-07">
+            <p className="evd-mono text-[10px] mb-3" style={{ color: 'var(--evd-ink-muted)' }}>TOP TACTICS</p>
+            {topCategories.length > 0 ? topCategories.map(([cat, cnt]) => (
+              <EvidenceBarLine key={cat} label={cat} value={cnt as number} max={maxCatVal} />
+            )) : (
+              <p className="text-xs mt-4" style={{ color: 'var(--evd-ink-muted)' }}>No data available</p>
+            )}
+          </EvidencePanel>
 
-          {/* GeoMap */}
-          <GeoMap threats={geoThreats} height={220} />
+          <div className="evd-panel" data-exhibit="EXH-08" style={{ padding: 0, overflow: 'hidden' }}>
+            <GeoMap threats={geoThreats} height={220} />
+          </div>
         </div>
       </div>
 
-      {/* Security Events Timeline */}
+      {/* Security events timeline */}
       <div>
-        <div className="flex items-center gap-3 mb-3">
-          <h2 className="text-sm font-bold text-text-primary">Security Events</h2>
-          <span className="text-[11px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-border-subtle flex items-center gap-1">
-            <Calendar size={10} /> {timeRange === '24h' ? 'Last 24 Hours' : 'Last 7 Days'}
-          </span>
-        </div>
+        <EvidenceSectionHead code="§07" title="Security Events" desc={timeRange === '24h' ? 'LAST 24 HOURS' : 'LAST 7 DAYS'} />
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {/* Stats card */}
-          <GlassCard variant="elevated" className="p-5">
-            <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Total Events</span>
-            <div className="mt-3 mb-5">
-              <AnimatedCounter
-                value={typeof kpi.securityEvents === 'number' ? kpi.securityEvents : 0}
-                className="text-4xl font-bold text-text-primary"
-              />
+          <EvidencePanel exhibit="EXH-09">
+            <p className="evd-mono text-[10px] mb-2" style={{ color: 'var(--evd-ink-muted)' }}>TOTAL EVENTS</p>
+            <div className="evd-display text-4xl tabular-nums mb-5" style={{ color: 'var(--evd-paper)' }}>
+              {typeof kpi.securityEvents === 'number' ? kpi.securityEvents.toLocaleString() : 0}
             </div>
             <div className="grid grid-cols-2 gap-y-4">
-              {[
-                { label: 'Blocked', value: historicalData?.blockedThreats ?? 0, color: '#EF4444', icon: AlertTriangle },
-                { label: 'High', value: sevBreakdown.data?.severityCount?.HIGH ?? 0, color: '#F97316', icon: Zap },
-                { label: 'Medium', value: sevBreakdown.data?.severityCount?.MEDIUM ?? 0, color: '#EAB308', icon: Activity },
-                { label: 'Low', value: sevBreakdown.data?.severityCount?.LOW ?? 0, color: '#3B82F6', icon: Shield },
-              ].map((item) => (
-                <div key={item.label} className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: `${item.color}15` }}>
-                    <item.icon size={12} style={{ color: item.color }} />
-                  </div>
-                  <div>
-                    <p className="text-[11px] text-text-muted">{item.label}</p>
-                    <p className="text-sm font-bold tabular-nums" style={{ color: item.color }}>
-                      {typeof item.value === 'number' ? item.value.toLocaleString() : item.value}
-                    </p>
-                  </div>
-                </div>
-              ))}
+              <StatBlock label="Blocked" value={historicalData?.blockedThreats ?? 0} tone="var(--evd-critical)" small />
+              <StatBlock label="High" value={sevBreakdown.data?.severityCount?.HIGH ?? 0} tone="var(--evd-high)" small />
+              <StatBlock label="Medium" value={sevBreakdown.data?.severityCount?.MEDIUM ?? 0} tone="var(--evd-medium)" small />
+              <StatBlock label="Low" value={sevBreakdown.data?.severityCount?.LOW ?? 0} tone="var(--evd-info)" small />
             </div>
-          </GlassCard>
+          </EvidencePanel>
 
-          {/* Chart */}
-          <GlassCard variant="default" className="p-4 lg:col-span-2">
-            {/* Tab selector */}
-            <div className="flex gap-1 mb-4 bg-bg-base rounded-lg p-0.5 w-fit">
-              {[
-                { key: 'total' as const, label: 'Total', color: '#632CA6' },
-                { key: 'blocked' as const, label: 'Blocked', color: '#EF4444' },
-                { key: 'successful' as const, label: 'Successful', color: '#22C55E' },
-              ].map(({ key, label, color }) => (
-                <button
-                  key={key}
-                  onClick={() => setActiveTab(key)}
-                  className={`text-[11px] font-semibold outline-none px-3 py-1.5 rounded-md transition-all duration-200 ${
-                    activeTab === key
-                      ? 'bg-bg-elevated text-text-primary shadow-sm'
-                      : 'text-text-muted hover:text-text-secondary'
-                  }`}
-                >
-                  <span className="inline-block w-1.5 h-1.5 rounded-full mr-1.5" style={{ background: activeTab === key ? color : 'transparent' }} />
-                  {label}
+          <div className="lg:col-span-2 evd-panel">
+            <div className="flex gap-1 mb-4">
+              {(['total', 'blocked', 'successful'] as const).map((key) => (
+                <button key={key} onClick={() => setActiveTab(key)} className="evd-tab" data-active={activeTab === key}>
+                  {key}
                 </button>
               ))}
             </div>
-            <AreaChartComponent
-              data={timelineData}
-              xKey="date"
-              areas={[{
-                key: activeTab,
-                label: activeTab,
-                color: activeTab === 'total' ? '#632CA6' : activeTab === 'blocked' ? '#EF4444' : '#22C55E',
-              }]}
-              height={200}
+            <EvidenceTrace
+              data={timelineData.map((d) => ({ date: d.date, value: d[activeTab] }))}
+              color={activeTab === 'total' ? 'var(--evd-signal)' : activeTab === 'blocked' ? 'var(--evd-critical)' : 'var(--evd-low)'}
+              height={190}
             />
-          </GlassCard>
+          </div>
         </div>
       </div>
 
-      {/* Recent Activity Feed */}
-      <GlassCard variant="default" className="p-4 animate-stagger-3">
+      {/* Recent activity log */}
+      <EvidencePanel exhibit="EXH-10">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-bold text-text-primary">Recent Activity</h3>
-          <button
-            onClick={() => navigate('/app/live')}
-            className="text-[11px] text-brand hover:underline flex items-center gap-1"
-          >
-            View Live Feed <ArrowRight size={11} />
+          <EvidenceSectionHead code="§08" title="Recent Activity" />
+          <button onClick={() => navigate('/app/live')} className="evd-link">
+            LIVE FEED →
           </button>
         </div>
-        <div className="space-y-1">
+        <div style={{ marginTop: -16 }}>
           {timelineData.length > 0 ? timelineData.slice(-5).reverse().map((entry, i) => (
-            <div
-              key={i}
-              className="flex items-center gap-3 py-2 px-3 rounded-lg data-row-interactive"
-            >
-              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${entry.blocked > 0 ? 'bg-sev-critical' : 'bg-sev-low'}`} />
-              <span className="text-[11px] text-text-muted tabular-nums w-20 shrink-0">{entry.date}</span>
-              <span className="text-xs text-text-secondary flex-1">
-                {entry.total} events ({entry.blocked} blocked, {entry.successful} successful)
-              </span>
-              <span className="text-[11px] text-text-muted">API Traffic</span>
+            <div key={i} className="evd-row" style={{ padding: '8px 0', borderBottom: i < 4 ? '1px solid var(--evd-line)' : 'none' }}>
+              <div className="flex items-center gap-3">
+                <Clock size={11} style={{ color: 'var(--evd-ink-muted)' }} />
+                <span className="evd-mono text-[11px] tabular-nums" style={{ color: 'var(--evd-ink-muted)' }}>{entry.date}</span>
+                <span className="text-xs" style={{ color: 'var(--evd-ink)' }}>
+                  {entry.total} events ({entry.blocked} blocked, {entry.successful} successful)
+                </span>
+              </div>
+              <span className="evd-mono text-[10px]" style={{ color: 'var(--evd-ink-muted)' }}>API TRAFFIC</span>
             </div>
           )) : (
-            <p className="text-xs text-text-muted py-4 text-center">No recent activity data</p>
+            <p className="text-xs py-4 text-center" style={{ color: 'var(--evd-ink-muted)' }}>No recent activity data</p>
           )}
         </div>
-      </GlassCard>
+      </EvidencePanel>
     </div>
   );
 };
+
+const StatBlock: React.FC<{ label: string; value: React.ReactNode; tone?: string; mono?: boolean; small?: boolean }> = ({
+  label,
+  value,
+  tone,
+  mono,
+  small,
+}) => (
+  <div>
+    <p className="text-[11px] mb-1" style={{ color: 'var(--evd-ink-muted)' }}>{label}</p>
+    <p
+      className={`${mono ? 'evd-mono' : 'evd-display'} tabular-nums ${small ? 'text-sm' : 'text-2xl'}`}
+      style={{ color: tone || 'var(--evd-paper)' }}
+    >
+      {value}
+    </p>
+  </div>
+);
 
 export default Dashboard;
