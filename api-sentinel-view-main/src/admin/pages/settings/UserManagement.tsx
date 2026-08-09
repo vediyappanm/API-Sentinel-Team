@@ -126,7 +126,8 @@ const UserManagement: React.FC = () => {
 
   const handleCopyCredentials = async () => {
     if (!tempPassword || !createdEmail) return;
-    await navigator.clipboard.writeText(`Email: ${createdEmail}\nTemporary password: ${tempPassword}\nLogin: http://127.0.0.1:5173/login`);
+    const loginUrl = `${window.location.origin}/login`;
+    await navigator.clipboard.writeText(`Email: ${createdEmail}\nTemporary password: ${tempPassword}\nLogin: ${loginUrl}`);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -292,7 +293,7 @@ const UserManagement: React.FC = () => {
                 </div>
                 <div className="rounded-xl border border-border-subtle bg-bg-base px-4 py-4">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">Login</div>
-                  <div className="mt-2 text-sm text-text-primary">http://127.0.0.1:5173/login</div>
+                  <div className="mt-2 text-sm text-text-primary">{`${window.location.origin}/login`}</div>
                 </div>
                 <div className="flex gap-2">
                   <button

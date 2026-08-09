@@ -171,11 +171,6 @@ const LiveFeed: React.FC = () => {
 
   const stats = useMemo(() => computeStats(entries, activeSensors), [entries, activeSensors]);
 
-  const sparkReqPerMin = useMemo(() => Array.from({ length: 7 }, (_, i) => Math.max(0, stats.reqPerMin - (6 - i))), [stats.reqPerMin]);
-  const sparkThreats = useMemo(() => Array.from({ length: 7 }, (_, i) => Math.max(0, stats.threats - (6 - i))), [stats.threats]);
-  const sparkBlocked = useMemo(() => Array.from({ length: 7 }, (_, i) => Math.max(0, stats.blockedIps - (6 - i))), [stats.blockedIps]);
-  const sparkSensors = useMemo(() => Array.from({ length: 7 }, () => stats.sensors), [stats.sensors]);
-
   return (
     <div className="space-y-5 animate-fade-in w-full pb-10">
       {/* Header */}
@@ -195,10 +190,10 @@ const LiveFeed: React.FC = () => {
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <MetricWidget label="Requests / min" value={stats.reqPerMin} icon={Activity} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" sparkData={sparkReqPerMin} sparkColor="#F97316" />
-        <MetricWidget label="Threats Detected" value={stats.threats} icon={Shield} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" sparkData={sparkThreats} sparkColor="#EF4444" />
-        <MetricWidget label="Blocked IPs" value={stats.blockedIps} icon={Ban} iconColor="#EAB308" iconBg="rgba(234,179,8,0.1)" sparkData={sparkBlocked} sparkColor="#EAB308" />
-        <MetricWidget label="Active Sensors" value={stats.sensors} icon={Zap} iconColor="#22C55E" iconBg="rgba(34,197,94,0.1)" sparkData={sparkSensors} sparkColor="#22C55E" />
+        <MetricWidget label="Requests / min" value={stats.reqPerMin} icon={Activity} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" />
+        <MetricWidget label="Threats Detected" value={stats.threats} icon={Shield} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" />
+        <MetricWidget label="Blocked IPs" value={stats.blockedIps} icon={Ban} iconColor="#EAB308" iconBg="rgba(234,179,8,0.1)" />
+        <MetricWidget label="Active Sensors" value={stats.sensors} icon={Zap} iconColor="#22C55E" iconBg="rgba(34,197,94,0.1)" />
       </div>
 
       {/* Filter bar */}

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import {
   RefreshCw, Shield, Activity, Users, TrendingUp, Lock, ShieldAlert,
-  Eye, Database, FileCheck, GitBranch, Bot, Clock,
+  Eye, Database, FileCheck, Globe, Bot, Clock,
 } from 'lucide-react';
 import DonutChart from '@/components/charts/DonutChart';
 import GeoMap from '@/components/charts/GeoMap';
@@ -9,8 +9,8 @@ import TimeFilter from '@/components/shared/TimeFilter';
 import QueryError from '@/components/shared/QueryError';
 import { useDashboardKPIs, useIssuesTrend, useThreatTrend, useSeverityBreakdown } from '@/hooks/use-dashboard';
 import { useThreatCategoryCount, useActorsGeoCount } from '@/hooks/use-protection';
+import { useTestRuns } from '@/hooks/use-security-ops';
 import { centroidForCountryCode } from '@/lib/country-centroids';
-import { OWASP_TOP_10 } from '@/lib/owasp';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/auth-context';
@@ -49,6 +49,7 @@ const Dashboard: React.FC = () => {
   const sevBreakdown = useSeverityBreakdown();
   const categoryCount = useThreatCategoryCount();
   const geoCount = useActorsGeoCount();
+  const testRuns = useTestRuns(25);
 
   type IssueKpis = NonNullable<typeof issues.data> & {
     highIssues?: number;
@@ -77,14 +78,25 @@ const Dashboard: React.FC = () => {
     whitelisted: threatDataResult.whitelistedActors,
   };
 
-  // Security posture score (0-100 based on severity distribution)
+  // Posture score from open vs resolved issues only — no invented defaults.
   const totalIssues = (issueKpis?.criticalIssues ?? 0) + (issueKpis?.highIssues ?? 0) + (issueKpis?.mediumIssues ?? 0) + (issueKpis?.lowIssues ?? 0);
-  const resolvedRatio = totalIssues > 0 ? (kpi.resolved / (totalIssues + kpi.resolved)) * 100 : 85;
-  const postureScore = Math.min(Math.round(resolvedRatio), 100) || 72;
+  const postureDenom = totalIssues + kpi.resolved;
+  const postureScore = postureDenom > 0 ? Math.min(100, Math.round((kpi.resolved / postureDenom) * 100)) : 0;
+  const endpointCount = Number(endpoints.data?.endpointsCount ?? 0);
   const evidencePackages = historicalData?.totalThreats ?? 0;
-  const behavioralDays = 90;
-  const blgCoverage = Math.min(100, Math.max(0, postureScore));
   const mcpSessions = threatDataResult.mcpSessions ?? 0;
+
+  const runs = testRuns.data?.runs ?? [];
+  const testsRun = runs.reduce((sum, run) => sum + Number(run.total_tests || 0), 0);
+  const vulnsFound = runs.reduce((sum, run) => sum + Number(run.vulnerable_count || 0), 0);
+  const lastRunAt = runs
+    .map((run) => run.completed_at || run.started_at || run.created_at)
+    .filter(Boolean)
+    .sort()
+    .at(-1);
+  const lastRunLabel = lastRunAt
+    ? new Date(lastRunAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : '—';
 
   const threatData = [
     { name: 'High', value: threatDataResult.highActors, color: 'var(--evd-high)' },
@@ -119,8 +131,8 @@ const Dashboard: React.FC = () => {
         const coords = centroidForCountryCode(country);
         if (!coords) return null;
         return {
-          lat: coords.lat + (Math.random() - 0.5) * 4,
-          lng: coords.lng + (Math.random() - 0.5) * 4,
+          lat: coords.lat,
+          lng: coords.lng,
           severity: count > 100 ? ('critical' as const) : count > 50 ? ('high' as const) : ('medium' as const),
           count,
           country,
@@ -168,50 +180,60 @@ const Dashboard: React.FC = () => {
         />
       )}
 
-      {/* KPI ledger */}
+      {/* KPI ledger — live API counts only (no fabricated period deltas) */}
       <div className="evd-ledger animate-fade-in">
-        <EvidenceLedgerItem icon={Users} color="var(--evd-critical)" label="Threat Actors" value={typeof kpi.threatActors === 'number' ? kpi.threatActors : 0} delta={-12} />
-        <EvidenceLedgerItem icon={Shield} color="var(--evd-signal)" label="Blocked" value={typeof kpi.blocked === 'number' ? kpi.blocked : 0} delta={8} />
-        <EvidenceLedgerItem icon={Activity} color="var(--evd-info)" label="Security Events" value={typeof kpi.securityEvents === 'number' ? kpi.securityEvents : 0} delta={5} />
-        <EvidenceLedgerItem icon={ShieldAlert} color="var(--evd-critical)" label="Critical" value={typeof kpi.critical === 'number' ? kpi.critical : 0} delta={-3} />
-        <EvidenceLedgerItem icon={TrendingUp} color="var(--evd-low)" label="Resolved" value={typeof kpi.resolved === 'number' ? kpi.resolved : 0} delta={15} />
-        <EvidenceLedgerItem icon={Lock} color="var(--evd-medium)" label="Unauthenticated" value={typeof kpi.unauth === 'number' ? kpi.unauth : 0} delta={-2} />
+        <EvidenceLedgerItem icon={Users} color="var(--evd-critical)" label="Threat Actors" value={typeof kpi.threatActors === 'number' ? kpi.threatActors : 0} />
+        <EvidenceLedgerItem icon={Shield} color="var(--evd-signal)" label="Blocked" value={typeof kpi.blocked === 'number' ? kpi.blocked : 0} />
+        <EvidenceLedgerItem icon={Activity} color="var(--evd-info)" label="Security Events" value={typeof kpi.securityEvents === 'number' ? kpi.securityEvents : 0} />
+        <EvidenceLedgerItem icon={ShieldAlert} color="var(--evd-critical)" label="Critical" value={typeof kpi.critical === 'number' ? kpi.critical : 0} />
+        <EvidenceLedgerItem icon={TrendingUp} color="var(--evd-low)" label="Resolved" value={typeof kpi.resolved === 'number' ? kpi.resolved : 0} />
+        <EvidenceLedgerItem icon={Lock} color="var(--evd-medium)" label="Unauthenticated" value={typeof kpi.unauth === 'number' ? kpi.unauth : 0} />
       </div>
 
-      {/* Core Engine Signals */}
+      {/* Inventory + runtime signals from live APIs */}
       <div>
-        <EvidenceSectionHead code="§01" title="Core Engine Signals" desc="EVIDENCE-FIRST · LONG-WINDOW ML · MCP COVERAGE" />
+        <EvidenceSectionHead code="§01" title="Inventory Signals" desc="LIVE COUNTS FROM DISCOVERY · DETECTION · MCP" />
         <div className="evd-ledger">
-          <EvidenceLedgerItem icon={Database} color="var(--evd-info)" label="Long-Window Memory" value={behavioralDays} suffix="d" />
-          <EvidenceLedgerItem icon={FileCheck} color="var(--evd-low)" label="Evidence Packages" value={typeof evidencePackages === 'number' ? evidencePackages : 0} />
-          <EvidenceLedgerItem icon={GitBranch} color="var(--evd-medium)" label="Business Logic Coverage" value={blgCoverage} suffix="%" />
+          <EvidenceLedgerItem icon={Globe} color="var(--evd-info)" label="Discovered Endpoints" value={endpointCount} />
+          <EvidenceLedgerItem icon={FileCheck} color="var(--evd-low)" label="Security Events" value={typeof evidencePackages === 'number' ? evidencePackages : 0} />
+          <EvidenceLedgerItem icon={Database} color="var(--evd-medium)" label="Open Issues" value={totalIssues} />
           <EvidenceLedgerItem icon={Bot} color="var(--evd-signal)" label="MCP / Agentic Sessions" value={typeof mcpSessions === 'number' ? mcpSessions : 0} />
         </div>
       </div>
 
-      {/* Coverage + Testing status */}
+      {/* Detection mix + Testing status */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <EvidencePanel exhibit="EXH-01">
-          <EvidenceSectionHead code="§02" title="OWASP API Top 10" desc="AVG COVERAGE 0%" />
+          <EvidenceSectionHead
+            code="§02"
+            title="Detection Categories"
+            desc={topCategories.length ? `${topCategories.length} ACTIVE` : 'NO DETECTIONS YET'}
+          />
           <div className="space-y-0.5">
-            {OWASP_TOP_10.slice(0, 6).map((cat) => (
-              <EvidenceBarLine key={cat.id} label={cat.name} value={0} max={1} />
-            ))}
+            {topCategories.length > 0 ? (
+              topCategories.map(([name, count]) => (
+                <EvidenceBarLine key={String(name)} label={String(name)} value={Number(count)} max={maxCatVal} />
+              ))
+            ) : (
+              <p className="evd-mono text-[11px] py-4" style={{ color: 'var(--evd-ink-muted)' }}>
+                No category counts yet. Detections appear here once traffic or scans produce findings.
+              </p>
+            )}
           </div>
         </EvidencePanel>
 
         <EvidencePanel exhibit="EXH-02">
           <div className="flex items-start justify-between mb-4">
-            <EvidenceSectionHead code="§03" title="Testing Status" />
+            <EvidenceSectionHead code="§03" title="Testing Status" desc="FROM /tests/runs" />
             <button onClick={() => navigate('/app/testing')} className="evd-link">
               VIEW TESTS →
             </button>
           </div>
           <div className="grid grid-cols-2 gap-6" style={{ marginTop: -16 }}>
-            <StatBlock label="Tests Run" value={0} />
-            <StatBlock label="Vulnerabilities" value={kpi.critical} tone="var(--evd-critical)" />
-            <StatBlock label="Test Suites" value={0} />
-            <StatBlock label="Last Run" value="NEVER" mono />
+            <StatBlock label="Tests Run" value={testsRun} />
+            <StatBlock label="Vulnerabilities" value={vulnsFound} tone="var(--evd-critical)" />
+            <StatBlock label="Recent Runs" value={runs.length} />
+            <StatBlock label="Last Run" value={lastRunLabel} mono />
           </div>
         </EvidencePanel>
       </div>

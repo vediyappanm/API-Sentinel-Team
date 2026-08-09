@@ -29,19 +29,6 @@ export const API_BASE_URL = `${API_ORIGIN}/api`;
  */
 let _sessionToken: string | null = null;
 
-// Session expiry handling
-const _isRefreshing = false;
-let _refreshSubscribers: ((token: string | null) => void)[] = [];
-
-function subscribeTokenRefresh(cb: (token: string | null) => void) {
-  _refreshSubscribers.push(cb);
-}
-
-function onRefreshed(token: string | null) {
-  _refreshSubscribers.forEach(cb => cb(token));
-  _refreshSubscribers = [];
-}
-
 export function setToken(token: string | null) {
   _sessionToken = token;
 }

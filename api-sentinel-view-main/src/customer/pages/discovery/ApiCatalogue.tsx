@@ -269,8 +269,6 @@ const ApiCatalogue: React.FC = () => {
           icon={Globe}
           iconColor="#3B82F6"
           iconBg="rgba(59,130,246,0.1)"
-          sparkData={[totalApis * 0.6, totalApis * 0.7, totalApis * 0.8, totalApis * 0.85, totalApis * 0.9, totalApis * 0.95, totalApis]}
-          sparkColor="#3B82F6"
           changeLabel={`${authCounts.unauth} unauthenticated, ${authCounts.auth} authenticated`}
         />
 
@@ -323,8 +321,6 @@ const ApiCatalogue: React.FC = () => {
           icon={Eye}
           iconColor="#632CA6"
           iconBg="rgba(99,44,175,0.1)"
-          sparkData={[specCoverage - 8, specCoverage - 5, specCoverage - 3, specCoverage - 2, specCoverage]}
-          sparkColor="#632CA6"
           changeLabel="Traffic-based OpenAPI inference"
         />
         <MetricWidget
@@ -333,8 +329,6 @@ const ApiCatalogue: React.FC = () => {
           icon={ShieldOff}
           iconColor="#EF4444"
           iconBg="rgba(239,68,68,0.1)"
-          sparkData={[shadowCandidates, shadowCandidates, shadowCandidates + 1, shadowCandidates]}
-          sparkColor="#EF4444"
           changeLabel="Unregistered endpoints detected"
         />
         <MetricWidget
@@ -343,8 +337,6 @@ const ApiCatalogue: React.FC = () => {
           icon={Globe}
           iconColor="#EAB308"
           iconBg="rgba(234,179,8,0.1)"
-          sparkData={[mcpEndpoints, mcpEndpoints + 1, mcpEndpoints]}
-          sparkColor="#EAB308"
           changeLabel="Agentic tool surfaces"
         />
       </div>

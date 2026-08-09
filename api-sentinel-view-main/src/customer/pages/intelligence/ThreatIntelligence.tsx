@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
-import { RefreshCw, Brain, Zap, Eye, Shield, TrendingUp, AlertTriangle, Activity, Target } from 'lucide-react';
+import { RefreshCw, Zap, Eye, Shield, TrendingUp, AlertTriangle, Activity, Target } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useThreatCategoryCount, useSeverityCount, useThreatTopN, useActorsGeoCount } from '@/hooks/use-protection';
+import { centroidForCountryCode } from '@/lib/country-centroids';
 import GeoMap from '@/components/charts/GeoMap';
 import DonutChart from '@/components/charts/DonutChart';
 import GlassCard from '@/components/ui/GlassCard';
@@ -13,15 +14,6 @@ function computeRiskScore(crit: number, high: number, med: number): number {
   return Math.min(100, crit * 20 + high * 10 + med * 3);
 }
 
-const MODEL_EXPERTS = [
-  { id: 'injection', name: 'Injection Detector', description: 'SQL, command, code injection patterns', color: '#EF4444' },
-  { id: 'auth', name: 'Auth Analyzer', description: 'Broken auth, JWT forgery, session attacks', color: '#632CA6' },
-  { id: 'traversal', name: 'Path Analyzer', description: 'Directory traversal, file access patterns', color: '#EAB308' },
-  { id: 'scanner', name: 'Scanner Detector', description: 'Automated scanning tools, bots', color: '#3B82F6' },
-  { id: 'xss', name: 'XSS Engine', description: 'Cross-site scripting payloads', color: '#7C3AED' },
-  { id: 'anomaly', name: 'Anomaly Engine', description: 'Behavioral deviations, unusual patterns', color: '#22C55E' },
-];
-
 const ThreatIntelligence: React.FC = () => {
   const qc = useQueryClient();
 
@@ -32,27 +24,14 @@ const ThreatIntelligence: React.FC = () => {
 
   const cats: Record<string, number> = catCount.data?.categoryCount ?? {};
   const sev: Record<string, number> = sevCount.data?.severityCount ?? {};
-  const crit = sev['CRITICAL'] ?? sev['HIGH'] ?? 0;
+  const crit = sev['CRITICAL'] ?? 0;
   const high = sev['HIGH'] ?? 0;
   const med = sev['MEDIUM'] ?? 0;
   const riskScore = computeRiskScore(crit, high, med);
 
   const totalEvents = Object.values(cats).reduce((a, b) => a + b, 0);
   const topAttack = Object.entries(cats).sort((a, b) => b[1] - a[1])[0];
-
-  const expertVotes = useMemo(() => {
-    const catLower = Object.fromEntries(Object.entries(cats).map(([k, v]) => [k.toLowerCase(), v as number]));
-    return MODEL_EXPERTS.map(e => {
-      let conf = 0;
-      if (e.id === 'injection') conf = Math.min(100, ((catLower['sql injection'] ?? catLower['sql_injection'] ?? 0) / Math.max(1, totalEvents)) * 300);
-      if (e.id === 'auth') conf = Math.min(100, ((catLower['broken auth'] ?? catLower['broken_auth'] ?? catLower['jwt forgery'] ?? 0) / Math.max(1, totalEvents)) * 300);
-      if (e.id === 'traversal') conf = Math.min(100, ((catLower['path traversal'] ?? catLower['path_traversal'] ?? 0) / Math.max(1, totalEvents)) * 300);
-      if (e.id === 'scanner') conf = Math.min(100, ((catLower['scanning tool'] ?? catLower['scanner'] ?? 0) / Math.max(1, totalEvents)) * 300);
-      if (e.id === 'xss') conf = Math.min(100, ((catLower['xss'] ?? 0) / Math.max(1, totalEvents)) * 300);
-      if (e.id === 'anomaly') conf = Math.min(100, ((catLower['anomaly'] ?? catLower['behavioral anomaly'] ?? 0) / Math.max(1, totalEvents)) * 300);
-      return { id: e.id, confidence: Math.round(conf), active: conf > 10 };
-    });
-  }, [cats, totalEvents]);
+  const activeCategories = Object.entries(cats).filter(([, count]) => Number(count) > 0).length;
 
   const agenticSignals = useMemo(() => {
     const catLower = Object.fromEntries(Object.entries(cats).map(([k, v]) => [k.toLowerCase(), v as number]));
@@ -65,28 +44,21 @@ const ThreatIntelligence: React.FC = () => {
     };
   }, [cats]);
 
-  const geoThreats = Object.entries(geo.data?.countPerCountry ?? {}).map(([code, count]) => {
-    const countryCoords: Record<string, { lat: number; lng: number }> = {
-      US: { lat: 37.0902, lng: -95.7129 },
-      CN: { lat: 35.8617, lng: 104.1954 },
-      RU: { lat: 61.5240, lng: 105.3188 },
-      DE: { lat: 51.1657, lng: 10.4515 },
-      GB: { lat: 55.3781, lng: -3.4360 },
-      FR: { lat: 46.2276, lng: 2.2137 },
-      IN: { lat: 20.5937, lng: 78.9629 },
-      BR: { lat: -14.2350, lng: -51.9253 },
-      JP: { lat: 36.2048, lng: 138.2529 },
-      AU: { lat: -25.2744, lng: 133.7751 },
-    };
-    const coords = countryCoords[code] || countryCoords.US;
-    return {
-      lat: coords.lat,
-      lng: coords.lng,
-      severity: count > 100 ? 'critical' as const : count > 50 ? 'high' as const : 'medium' as const,
-      country: code,
-      count,
-    };
-  });
+  const geoThreats = useMemo(() => {
+    return Object.entries(geo.data?.countPerCountry ?? {})
+      .map(([code, count]) => {
+        const coords = centroidForCountryCode(code);
+        if (!coords) return null;
+        return {
+          lat: coords.lat,
+          lng: coords.lng,
+          severity: count > 100 ? ('critical' as const) : count > 50 ? ('high' as const) : ('medium' as const),
+          country: code,
+          count,
+        };
+      })
+      .filter((marker): marker is NonNullable<typeof marker> => marker !== null);
+  }, [geo.data]);
 
   const severityData = [
     { name: 'Critical', value: sev['CRITICAL'] ?? 0, color: '#EF4444' },
@@ -102,19 +74,16 @@ const ThreatIntelligence: React.FC = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-[#7C3AED]/10 flex items-center justify-center">
-            <Brain size={18} className="text-[#7C3AED]" />
+          <div className="w-9 h-9 rounded-lg bg-brand/10 flex items-center justify-center">
+            <Shield size={18} className="text-brand" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-text-primary">AI Threat Intelligence</h2>
-              <span className="text-[11px] bg-[#7C3AED]/10 border border-[#7C3AED]/30 text-[#7C3AED] px-2 py-0.5 rounded-full font-semibold">6-Expert Ensemble</span>
-            </div>
-            <p className="text-[11px] text-text-muted">Real-time swarm scoring of live API traffic using ensemble AI models</p>
+            <h2 className="text-sm font-bold text-text-primary">Threat Intelligence</h2>
+            <p className="text-[11px] text-text-muted">Detection category mix from live API traffic and scans</p>
           </div>
         </div>
         <button onClick={() => { qc.invalidateQueries({ queryKey: ['protection'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); }}
-          className="w-7 h-7 rounded-lg border border-border-subtle bg-bg-surface flex items-center justify-center text-muted-foreground hover:text-[#7C3AED] transition-all outline-none">
+          className="w-7 h-7 rounded-lg border border-border-subtle bg-bg-surface flex items-center justify-center text-muted-foreground hover:text-brand transition-all outline-none">
           <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
         </button>
       </div>
@@ -126,7 +95,7 @@ const ThreatIntelligence: React.FC = () => {
           <div>
             <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Risk Score</span>
             <p className="text-2xl font-bold text-text-primary tabular-nums"><AnimatedCounter value={riskScore} /></p>
-            <span className="text-[11px] text-text-muted">out of 100</span>
+            <span className="text-[11px] text-text-muted">from severity mix</span>
           </div>
         </GlassCard>
 
@@ -139,86 +108,52 @@ const ThreatIntelligence: React.FC = () => {
         </GlassCard>
 
         <GlassCard variant="default" className="p-4 flex flex-col gap-2">
-          <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5"><Shield size={10} /> Expert Models</span>
-          <span className="text-2xl font-bold text-[#7C3AED] tabular-nums"><AnimatedCounter value={expertVotes.filter(e => e.active).length} /></span>
-          <span className="text-[11px] text-text-muted">of 6 active</span>
+          <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5"><Zap size={10} /> Active Categories</span>
+          <span className="text-2xl font-bold text-brand tabular-nums"><AnimatedCounter value={activeCategories} /></span>
+          <span className="text-[11px] text-text-muted">with detections</span>
         </GlassCard>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Expert Model Consensus */}
-        <GlassCard variant="elevated" className="p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <Brain size={16} className="text-[#7C3AED]" />
-            <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Expert Model Reasoning</span>
+      <GlassCard variant="elevated" className="p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Zap size={16} className="text-brand" />
+          <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Attack Category Mix</span>
+        </div>
+        {(Object.keys(cats).length === 0 || !Object.entries(cats).some(e => Number(e[1]) > 0)) ? (
+          <div className="flex flex-col items-center justify-center h-48 text-text-muted">
+            <Eye size={32} className="mb-3 opacity-30" />
+            <p className="text-xs">No attack patterns detected yet.</p>
           </div>
-          <div className="space-y-3">
-            {MODEL_EXPERTS.map((expert, i) => {
-              const vote = expertVotes[i];
+        ) : (
+          <div className="space-y-2.5">
+            {Object.entries(cats).sort((a, b) => b[1] - a[1]).filter(([, cnt]) => cnt > 0).slice(0, 10).map(([cat, cnt], idx) => {
+              const pct = totalEvents > 0 ? (cnt / totalEvents) * 100 : 0;
+              const colors = ['#EF4444', '#632CA6', '#EAB308', '#3B82F6', '#7C3AED', '#22C55E', '#632CA6', '#EF4444'];
+              const col = colors[idx % colors.length];
               return (
-                <div key={expert.id} className="flex items-center gap-3">
-                  <div className="w-2 h-2 rounded-full shrink-0" style={{ background: vote.active ? expert.color : '#E4E4EC', boxShadow: vote.active ? `0 0 6px ${expert.color}80` : 'none' }} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[11px] font-semibold text-text-primary">{expert.name}</span>
-                      <span className="text-[11px] font-mono font-bold" style={{ color: vote.active ? expert.color : '#9D9DAF' }}>{vote.confidence}%</span>
+                <div key={cat}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] text-text-secondary truncate max-w-[220px]">{cat}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-text-muted">{pct.toFixed(1)}%</span>
+                      <span className="text-[11px] font-bold font-mono tabular-nums" style={{ color: col }}>{cnt}</span>
                     </div>
-                    <div className="h-1.5 bg-black/[0.04] rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${vote.confidence}%`, background: vote.active ? `linear-gradient(90deg, ${expert.color}88, ${expert.color})` : '#F9F9FC' }} />
-                    </div>
-                    <span className="text-[9px] text-text-muted mt-0.5 block">{expert.description}</span>
+                  </div>
+                  <div className="h-1.5 bg-black/[0.04] rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: col }} />
                   </div>
                 </div>
               );
             })}
           </div>
-          <p className="text-[11px] text-text-muted mt-4 pt-3 border-t border-border-subtle">
-            Confidence derived from event category distribution. Bars represent model activation relative to total traffic volume.
-          </p>
-        </GlassCard>
+        )}
+      </GlassCard>
 
-        {/* Attack Category Breakdown */}
-        <GlassCard variant="elevated" className="p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <Zap size={16} className="text-brand" />
-            <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Attack Pattern Analysis</span>
-          </div>
-          {(Object.keys(cats).length === 0 || !Object.entries(cats).some(e => Number(e[1]) > 0)) ? (
-            <div className="flex flex-col items-center justify-center h-48 text-text-muted">
-              <Eye size={32} className="mb-3 opacity-30" />
-              <p className="text-xs">No attack patterns detected yet.</p>
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {Object.entries(cats).sort((a, b) => b[1] - a[1]).filter(([, cnt]) => cnt > 0).slice(0, 8).map(([cat, cnt], idx) => {
-                const pct = totalEvents > 0 ? (cnt / totalEvents) * 100 : 0;
-                const colors = ['#EF4444', '#632CA6', '#EAB308', '#3B82F6', '#7C3AED', '#22C55E', '#632CA6', '#EF4444'];
-                const col = colors[idx % colors.length];
-                return (
-                  <div key={cat}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[11px] text-text-secondary truncate max-w-[160px]">{cat}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] text-text-muted">{pct.toFixed(1)}%</span>
-                        <span className="text-[11px] font-bold font-mono tabular-nums" style={{ color: col }}>{cnt}</span>
-                      </div>
-                    </div>
-                    <div className="h-1.5 bg-black/[0.04] rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${col}88, ${col})` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </GlassCard>
-      </div>
-
-      {/* Agentic / MCP Intelligence */}
+      {/* Agentic / MCP category counts (honest: from category labels only) */}
       <GlassCard variant="default" className="p-5">
         <div className="flex items-center gap-2 mb-4">
           <Shield size={14} className="text-brand" />
-          <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Agentic & MCP Signals</span>
+          <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Agentic & MCP Categories</span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
@@ -230,14 +165,11 @@ const ThreatIntelligence: React.FC = () => {
             <div key={item.label} className="metric-card p-3">
               <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">{item.label}</p>
               <p className="text-xl font-bold tabular-nums" style={{ color: item.color }}>{item.value}</p>
-              <div className="h-1.5 bg-black/[0.04] rounded-full overflow-hidden mt-2">
-                <div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, item.value * 5)}%`, background: item.color }} />
-              </div>
             </div>
           ))}
         </div>
         <p className="text-[11px] text-text-muted mt-3">
-          Signals are derived from MCP tool invocation patterns, prompt injection classifiers, and delegation-chain analysis.
+          Counts are summed from matching detection category labels — not a separate ML ensemble.
         </p>
       </GlassCard>
 

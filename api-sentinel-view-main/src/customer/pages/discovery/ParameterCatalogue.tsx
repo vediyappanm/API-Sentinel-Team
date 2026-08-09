@@ -32,8 +32,6 @@ const ParameterCatalogue: React.FC = () => {
           icon={Key}
           iconColor="#EAB308"
           iconBg="rgba(234,179,8,0.1)"
-          sparkData={[total * 0.5, total * 0.6, total * 0.7, total * 0.8, total * 0.9, total]}
-          sparkColor="#EAB308"
           compact
         />
         <MetricWidget

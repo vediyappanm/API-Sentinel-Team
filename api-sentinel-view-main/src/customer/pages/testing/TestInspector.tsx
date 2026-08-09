@@ -7,8 +7,7 @@ import QueryError from '@/components/shared/QueryError';
 import GlassCard from '@/components/ui/GlassCard';
 import SkeletonLoader from '@/components/ui/SkeletonLoader';
 import { useTestRunDetail, useTestRuns } from '@/hooks/use-security-ops';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? (typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:8000');
+import { buildApiUrl } from '@/lib/api-client';
 
 function formatTimestamp(timestamp?: string | null) {
   if (!timestamp || timestamp === 'None') return 'Pending';
@@ -53,7 +52,7 @@ const TestInspector: React.FC = () => {
 
   const openFindingExport = (format: 'sarif' | 'junit') => {
     if (!selectedRunId) return;
-    window.open(`${API_BASE_URL}/api/tests/runs/${selectedRunId}/findings?format=${format}`, '_blank', 'noopener,noreferrer');
+    window.open(buildApiUrl(`/tests/runs/${selectedRunId}/findings?format=${format}`), '_blank', 'noopener,noreferrer');
   };
 
   return (

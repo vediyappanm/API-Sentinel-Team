@@ -83,20 +83,15 @@ const ApiTree: React.FC = () => {
                         <span className="text-[11px] tabular-nums font-semibold text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-border-subtle">
                           {urlCount} endpoints
                         </span>
-                        {/* Risk indicator */}
-                        <div className="w-2 h-2 rounded-full bg-sev-low" title="Low risk" />
                       </button>
 
-                      {/* Expanded content - mock endpoints */}
                       {isOpen && (
                         <div className="ml-10 pl-3 border-l border-border-subtle space-y-0.5 pb-2 animate-fade-in">
-                          {urlCount > 0 ? (
-                            <p className="text-[11px] text-text-muted py-2 px-2">
-                              {urlCount} endpoints in this collection. View details in API Catalogue.
-                            </p>
-                          ) : (
-                            <p className="text-[11px] text-text-muted py-2 px-2">No endpoints discovered yet.</p>
-                          )}
+                          <p className="text-[11px] text-text-muted py-2 px-2">
+                            {urlCount > 0
+                              ? `${urlCount} endpoints recorded. Open API Catalogue for method/path detail.`
+                              : 'No endpoints discovered yet.'}
+                          </p>
                         </div>
                       )}
                     </div>

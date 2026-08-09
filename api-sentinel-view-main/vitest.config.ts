@@ -9,6 +9,10 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    // Keep service URL assertions stable regardless of developer .env overrides.
+    env: {
+      VITE_API_BASE_URL: "http://localhost:3000",
+    },
   },
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
