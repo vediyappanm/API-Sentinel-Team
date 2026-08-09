@@ -43,6 +43,37 @@ services:
         condition: service_started
     command: /bin/sh -c "alembic upgrade head && uvicorn server.api.main:app --host 0.0.0.0 --port 8000"
 
+  # Isolated scan worker with Schemathesis / Nuclei / ZAP CLIs.
+  # Start with: docker compose --profile scan-worker up --build
+  scan-worker:
+    profiles: ["scan-worker"]
+    build:
+      context: .
+      dockerfile: Dockerfile.scan-worker
+    image: api-sentinel/scan-worker:local
+    container_name: soc-scan-worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app_user:generated_secure_password_here@postgres:5432/api_security
+      REDIS_URL: redis://redis:6379/0
+      DEBUG: "false"
+      PENTEST_ALLOW_PRIVATE_TARGETS: "false"
+      PENTEST_ENFORCE_TARGET_GUARD: "true"
+      PENTEST_TARGET_ALLOWLIST: "${PENTEST_TARGET_ALLOWLIST:-api.example.com}"
+      PENTEST_SCAN_WORK_DIR: /tmp/api-sentinel-scan
+      PENTEST_SCAN_WORKER_ISOLATION_MODE: process
+      PENTEST_KILL_SWITCH_ENABLED: "false"
+      TESTS_LIBRARY_PATH: /app/tests-library
+      API_SENTINEL_WORKER_ID: compose-scan-worker-1
+    volumes:
+      - scan-worker-sandbox:/tmp/api-sentinel-scan
+    depends_on:
+      postgres:
+        condition: service_healthy
+      fastapi:
+        condition: service_healthy
+    command: ["worker"]
+
   postgres:
     image: postgres:16-alpine
     container_name: soc-postgres
@@ -96,3 +127,4 @@ services:
 volumes:
   soc-postgres-data:
   soc-redis-data:
+  scan-worker-sandbox:

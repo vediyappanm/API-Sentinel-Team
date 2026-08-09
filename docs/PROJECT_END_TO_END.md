@@ -202,12 +202,13 @@ Captures HTTP metadata via kernel TLS uprobes; not full bodies; needs real Linux
 
 | Layer | Location |
 |-------|----------|
-| Local | `docker compose up --build` |
+| Local | `docker compose up --build` (+ `--profile scan-worker` for engines) |
+| Production deploy | [`docs/DEPLOY_PRODUCTION.md`](./DEPLOY_PRODUCTION.md) |
 | Edge TLS | `infra/nginx/` + compose overlay |
 | K8s app | `infra/helm/api-sentinel/` (migrate Job, HPA, optional Bitnami deps) |
 | AWS | `infra/terraform/aws/` (EKS, RDS, MSK, ElastiCache, S3) |
 | Stream job | `infra/flink/` |
-| Isolated scans | `infra/k8s/scan-worker-job.example.yaml` |
+| Isolated scans | `Dockerfile.scan-worker` + `infra/scripts/build-and-push-scan-worker.sh` + `infra/k8s/scan-worker-job.example.yaml` |
 
 ---
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import copy
 import datetime
 import json
+import os
 import re
 import socket
 import uuid
@@ -1987,3 +1989,67 @@ async def run_worker_loop(
         "canceled": canceled,
         "idle_cycles": idle_cycles,
     }
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    """CLI for the dedicated scan-worker container / process."""
+    parser = argparse.ArgumentParser(
+        prog="api-sentinel-scan-worker",
+        description="Poll and execute queued API Sentinel scan runs in an isolated worker process.",
+    )
+    parser.add_argument(
+        "--account-id",
+        type=int,
+        default=_env_int("API_SENTINEL_ACCOUNT_ID"),
+        help="Optional account scope for claim selection (or API_SENTINEL_ACCOUNT_ID).",
+    )
+    parser.add_argument(
+        "--worker-id",
+        default=os.environ.get("API_SENTINEL_WORKER_ID") or None,
+        help="Stable worker identity for leases/heartbeats (or API_SENTINEL_WORKER_ID).",
+    )
+    parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=_env_float("PENTEST_SCAN_WORKER_POLL_INTERVAL", 2.0),
+        help="Seconds to sleep when the queue is idle (default 2).",
+    )
+    parser.add_argument(
+        "--max-runs",
+        type=int,
+        default=_env_int("PENTEST_SCAN_WORKER_MAX_RUNS"),
+        help="Stop after N claimed runs; omit for continuous polling.",
+    )
+    return parser
+
+
+def _env_int(name: str) -> int | None:
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return None
+    return int(raw)
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    return float(raw)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_arg_parser().parse_args(argv)
+    summary = asyncio.run(
+        run_worker_loop(
+            account_id=args.account_id,
+            worker_id=args.worker_id,
+            poll_interval_seconds=max(0.1, float(args.poll_interval)),
+            max_runs=args.max_runs,
+        )
+    )
+    print(json.dumps({"status": "stopped", **summary}, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

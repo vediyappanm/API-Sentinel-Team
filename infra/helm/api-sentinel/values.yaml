@@ -39,6 +39,22 @@ env:
   STARTUP_ENSURE_DEFAULT_PLAYBOOKS: "false"
   STARTUP_ENABLE_ANALYTICS_PROCESSOR: "false"
   STARTUP_ENABLE_ARCHIVER: "false"
+  # Active scan safety — fail closed in production
+  PENTEST_REQUIRE_AUTH_PROFILE_FOR_ACTIVE_SCANS: "true"
+  PENTEST_ENFORCE_TARGET_GUARD: "true"
+  PENTEST_ALLOW_PRIVATE_TARGETS: "false"
+  PENTEST_RESOLVE_TARGET_HOSTS: "true"
+  PENTEST_FAIL_CLOSED_ON_TARGET_DNS_ERROR: "true"
+  PENTEST_TARGET_ALLOWLIST: "api.example.com,*.owned-api.example.com"
+  PENTEST_SCAN_EXECUTION_MODE: "queued"
+  PENTEST_SCAN_WORKER_ISOLATION_MODE: "kubernetes_job"
+  PENTEST_SCAN_WORKER_IMAGE: "registry.example.com/api-sentinel/scan-worker:latest"
+  PENTEST_SCAN_WORKER_KUBERNETES_NAMESPACE: "api-sentinel"
+  PENTEST_SCAN_WORKER_KUBERNETES_SERVICE_ACCOUNT: "api-sentinel-scan-worker"
+  PENTEST_SCAN_WORKER_RESOURCE_CPU: "2000m"
+  PENTEST_SCAN_WORKER_RESOURCE_MEMORY: "3Gi"
+  PENTEST_SCAN_WORKER_RESOURCE_EPHEMERAL_STORAGE: "4Gi"
+  PENTEST_KILL_SWITCH_ENABLED: "false"
 
 secrets:
   databaseUrl: "postgresql+asyncpg://app_user:change-me@postgres:5432/api_security"
