@@ -1,6 +1,6 @@
 # API Sentinel / API Security Engine — Project Memory
 
-Last reviewed: 2026-08-09  
+Last reviewed: 2026-08-15  
 Purpose: persistent context for humans and agents working in this repository.  
 Full E2E guide: [`docs/PROJECT_END_TO_END.md`](docs/PROJECT_END_TO_END.md)
 
@@ -29,18 +29,24 @@ North star: evidence-grade continuous API red team — see `docs/API_PENTESTING_
 
 | Field | Value |
 |-------|--------|
-| **Branch** | `codex/north-star-api-red-team-platform` (ahead of origin) |
-| **Primary docs** | `docs/PROJECT_END_TO_END.md`, this file, `AGENTS.md` |
-| **Gstack checkpoints** | `~/.gstack/projects/api-sentinel-team/checkpoints/` |
-| **WIP focus** | Evidence UI + realtime WS invalidation; Nuclei vulnerability promotion |
+| **Branch** | `main` |
+| **Primary docs** | `docs/PROJECT_END_TO_END.md`, this file, `AGENTS.md`, `k8s/README.md` |
+| **WIP focus** | Live traffic → inventory → tests on `https://sentinel.wecrew.in/` |
+| **Cluster** | kind `wecrew`, ns `api-sentinel`, Harbor `harbor.wecrew.in/finspot/api-sentinel-{backend,frontend,sensor}` |
 
-**Uncommitted themes:**
+**Live status (2026-08-16):** backend/frontend/postgres/redis Running; eBPF sensor DaemonSet `api-sentinel-sensor` Ready; LE cert Ready; `/healthz` + `/api/health/ready` OK. Sensor `wecrew-ebpf` (account_id=1) ingesting via in-cluster `POST /v1/events`. Console self-traffic (`/api/*` with blank host, `sentinel.wecrew.in`) is dropped from Live Feed.
 
-1. Frontend Evidence design system (`EvidencePanel/Stamp/Ledger/StatLine/Trace/SectionHead`), Dashboard rewrite, `.evd-root` CSS  
-2. `src/lib/realtime.ts` + App-level RealtimeProvider; hooks polling relaxed to ~60s  
-3. Nuclei runner/router + unit/integration tests for finding promotion  
+**Shipped on this branch:**
 
-**Recent commits:** OpenAPI drift processor + Schema Validation UI + fan-out caps.
+1. Production Dockerfiles (multi-stage backend + non-root nginx frontend on `:8080`)  
+2. `k8s/` manifests + secrets/build scripts + **sensor DaemonSet** (`k8s/35-sensor.yaml`)  
+3. Fix: Alembic greenfield stamp uses `version_num` varchar(128) (long revision ids)  
+4. Fix: `CICD_GATE_SIGNING_SECRET` required in prod secrets  
+5. eBPF ingest unwraps session-4 `{MsgHeader, Batch}` envelopes on `/v1/events` and **upserts `APIEndpoint` inventory**. `request_logs.host` is persisted. OCI blob digests collapse to `{digest}`.  
+6. Request-guard lookup is host-aware so duplicate catalogue rows cannot 500 every API.  
+7. Ingest skips this product's own console polls so Live Feed shows cluster apps, not `/api/stream/recent`.  
+
+**Recent commits:** OpenAPI drift processor + Schema Validation UI + fan-out caps; Evidence UI polish on main.
 
 ---
 

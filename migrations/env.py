@@ -65,10 +65,12 @@ def _bootstrap_fresh_database(connection) -> None:
 
     target_metadata.create_all(connection)
 
+    # Revision ids in this repo can exceed Alembic's historic 32-char default
+    # (e.g. 20260715_test_account_identity_matrix).
     version_table = sa.Table(
         "alembic_version",
         sa.MetaData(),
-        sa.Column("version_num", sa.String(32), nullable=False, primary_key=True),
+        sa.Column("version_num", sa.String(128), nullable=False, primary_key=True),
     )
     version_table.create(connection, checkfirst=True)
     connection.execute(sa.delete(version_table))

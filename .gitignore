@@ -11,6 +11,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+.venv-test/
 venv/
 venv311/
 
@@ -51,6 +52,9 @@ target/
 # eBPF build artifacts
 sensor/ebpf/bpf/*.o
 sensor/ebpf/bpf/vmlinux.h
+
+# Local checkout of vediyappanm/API-Sensor (own git repo)
+/API-Sensor/
 
 # OS
 .DS_Store

@@ -30,7 +30,7 @@ const EnforcerHealth: React.FC = () => {
       <div className="bg-bg-surface border border-border-subtle rounded-xl overflow-hidden flex flex-col min-h-[500px]">
         <div className="p-3 border-b border-border-subtle flex items-center justify-between">
           <span className="text-xs font-bold text-text-primary flex items-center gap-2">
-            <ShieldCheck size={14} className="text-[#7C3AED]" />
+            <ShieldCheck size={14} className="text-[#FF5B2E]" />
             Enforcers
             <span className="text-[11px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted">{enforcers.length}</span>
           </span>

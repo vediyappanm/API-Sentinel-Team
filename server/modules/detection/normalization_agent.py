@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.models.core import APICollection, APIEndpoint, RequestLog
 from server.modules.api_inventory.path_normalizer import PathNormalizer
 from server.modules.ingestion.redaction import redact_ingestion_path
+from server.modules.ingestion.sensor_time import coerce_sensor_ts_ms
 
 from .models import DetectionEnvelope, NormalizationResult
 from .state_store import state_store
@@ -143,10 +144,7 @@ class NormalizationAgent:
         path = str(request.get("path") or raw_event.get("path") or "/")
         host = str(request.get("host") or raw_event.get("host") or "unknown")
         ts_raw = raw_event.get("observed_at") or raw_event.get("ts")
-        if ts_raw is None:
-            observed_at_ms = _utc_now_ms()
-        else:
-            observed_at_ms = int(ts_raw if int(ts_raw) > 9_999_999_999 else int(ts_raw) * 1000)
+        observed_at_ms = coerce_sensor_ts_ms(ts_raw)
         actor_id = str(raw_event.get("source_ip") or raw_event.get("src_ip") or headers.get("x-forwarded-for") or "anonymous")
         envelope = DetectionEnvelope(
             source_type="sensor_flat",

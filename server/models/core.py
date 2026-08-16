@@ -271,6 +271,7 @@ class RequestLog(Base):
     source_ip: Mapped[str] = mapped_column(String(45), nullable=True)
     method: Mapped[str] = mapped_column(String(10), nullable=True)
     path: Mapped[str] = mapped_column(String, nullable=True)
+    host: Mapped[str] = mapped_column(String(255), nullable=True)
     response_code: Mapped[int] = mapped_column(Integer, nullable=True)
     response_time_ms: Mapped[int] = mapped_column(Integer, nullable=True)
     created_at = mapped_column(DateTime(timezone=True), server_default=func.now())

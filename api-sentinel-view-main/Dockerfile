@@ -1,32 +1,44 @@
-# Stage 1: Build the React application
-FROM node:20-alpine AS builder
+# syntax=docker/dockerfile:1.7
+# Production frontend for API Sentinel (Vite SPA + nginx).
+# Serves UI on :8080 as non-root; proxies /api and /v1 to the backend Service.
+
+ARG NODE_VERSION=20
+
+# ── build ────────────────────────────────────────────────────────────
+FROM node:${NODE_VERSION}-alpine AS builder
 
 WORKDIR /app
 
-# Build argument for API base URL (empty = relative paths, nginx proxies)
+# Empty = same-origin relative /api (nginx proxies to backend)
 ARG VITE_API_BASE_URL=""
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
-# Install dependencies
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 
-# Copy source and build
 COPY . .
 RUN npm run build
 
-# Stage 2: Serve with nginx
-FROM nginx:1.25-alpine
+# ── runtime ──────────────────────────────────────────────────────────
+FROM nginx:1.27-alpine AS runtime
 
-# Remove default nginx config
-RUN rm /etc/nginx/conf.d/default.conf
+LABEL org.opencontainers.image.title="api-sentinel-ui" \
+      org.opencontainers.image.description="API Security Engine frontend"
 
-# Copy built assets from builder
+# Non-root nginx on 8080
+RUN rm -f /etc/nginx/conf.d/default.conf \
+    && mkdir -p /var/cache/nginx /var/run /var/log/nginx \
+    && chown -R nginx:nginx /var/cache/nginx /var/run /var/log/nginx /usr/share/nginx/html \
+    && touch /var/run/nginx.pid \
+    && chown nginx:nginx /var/run/nginx.pid
+
 COPY --from=builder /app/dist /usr/share/nginx/html
-
-# Copy custom nginx config
 COPY nginx.conf /etc/nginx/nginx.conf
 
-EXPOSE 80
+USER nginx
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

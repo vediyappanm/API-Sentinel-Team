@@ -1,13 +1,22 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { buildWebSocketUrl, getToken } from '@/lib/api-client';
+import { buildWebSocketUrl } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 
 const WS_URL = buildWebSocketUrl('/api/stream/live');
 const RECONNECT_DELAY_MS = 3000;
+const MAX_LIVE_LOGS = 200;
+const NON_HTTP_LIVE_METHODS = new Set([
+  'TEXT',
+  'PING',
+  'PONG',
+  'BINARY',
+  'CLOSE',
+  'CONTINUATION',
+]);
 
 /** Mirrors server/api/websocket/event_types.py WSEventType. */
-type WSEventType =
+export type WSEventType =
   | 'VULNERABILITY_FOUND'
   | 'SCAN_STARTED'
   | 'SCAN_COMPLETED'
@@ -19,7 +28,30 @@ type WSEventType =
   | 'RATE_LIMITED'
   | 'INCIDENT_CREATED';
 
+export interface LiveAttackInfo {
+  category: string;
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | string;
+}
+
+/** Traffic row pushed on `log_entry` from `/api/stream/live`. */
+export interface LiveLogEntry {
+  id: string;
+  ip: string;
+  method: string;
+  path: string;
+  status: number;
+  bytes: string | number;
+  timestamp: string;
+  attacks: LiveAttackInfo[];
+  host?: string;
+  protocol?: string;
+  latencyMs?: number | null;
+  source?: string;
+}
+
 type RealtimeMessage = { type: WSEventType | 'log_entry'; data?: unknown };
+
+type LogListener = (entry: LiveLogEntry) => void;
 
 /** Which top-level React Query key namespaces go stale when a given
  * server event arrives. Keeps every page's data live without polling. */
@@ -42,23 +74,78 @@ function applyInvalidation(qc: QueryClient, type: string) {
   for (const queryKey of keys) qc.invalidateQueries({ queryKey });
 }
 
-interface RealtimeContextValue {
-  connected: boolean;
+function genId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-const RealtimeContext = createContext<RealtimeContextValue>({ connected: false });
+function normalizeLogEntry(raw: unknown): LiveLogEntry | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const d = raw as Record<string, unknown>;
+  const method = String(d.method ?? '');
+  if (NON_HTTP_LIVE_METHODS.has(method.toUpperCase())) return null;
+  const latencyRaw = d.latency_ms ?? d.latencyMs;
+  return {
+    id: typeof d.id === 'string' ? d.id : genId(),
+    ip: String(d.ip ?? ''),
+    method,
+    path: String(d.path ?? ''),
+    status: Number(d.status ?? 0),
+    bytes: (d.bytes as string | number) ?? '-',
+    timestamp: String(d.timestamp ?? new Date().toISOString()),
+    attacks: Array.isArray(d.attacks) ? (d.attacks as LiveAttackInfo[]) : [],
+    host: d.host ? String(d.host) : '',
+    protocol: d.protocol ? String(d.protocol) : '',
+    latencyMs: typeof latencyRaw === 'number' ? latencyRaw : latencyRaw != null ? Number(latencyRaw) : null,
+    source: d.source ? String(d.source) : '',
+  };
+}
+
+interface RealtimeContextValue {
+  connected: boolean;
+  /** Newest-first ring buffer of live traffic rows (shared across pages). */
+  recentLogs: LiveLogEntry[];
+  /** Subscribe to each `log_entry` as it arrives. Returns unsubscribe. */
+  subscribeLogs: (listener: LogListener) => () => void;
+  clearLogs: () => void;
+  seedLogs: (entries: LiveLogEntry[]) => void;
+}
+
+const RealtimeContext = createContext<RealtimeContextValue>({
+  connected: false,
+  recentLogs: [],
+  subscribeLogs: () => () => undefined,
+  clearLogs: () => undefined,
+  seedLogs: () => undefined,
+});
 
 /** Mounts once at the app shell: owns the single `/api/stream/live` socket
- * and turns server push events into React Query invalidations, so every
- * page reflects new data within one round trip instead of on a poll timer. */
+ * and turns server push events into React Query invalidations + a shared
+ * live traffic buffer for Live Feed / Dashboard. */
 export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [connected, setConnected] = useState(false);
+  const [recentLogs, setRecentLogs] = useState<LiveLogEntry[]>([]);
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const isAuthenticated = user !== null;
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stoppedRef = useRef(false);
+  const listenersRef = useRef(new Set<LogListener>());
+
+  const subscribeLogs = useCallback((listener: LogListener) => {
+    listenersRef.current.add(listener);
+    return () => {
+      listenersRef.current.delete(listener);
+    };
+  }, []);
+
+  const clearLogs = useCallback(() => setRecentLogs([]), []);
+
+  const seedLogs = useCallback((entries: LiveLogEntry[]) => {
+    setRecentLogs(
+      entries.filter((e) => !NON_HTTP_LIVE_METHODS.has(e.method.toUpperCase())).slice(0, MAX_LIVE_LOGS),
+    );
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -69,9 +156,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const connect = () => {
       if (stoppedRef.current) return;
-      const token = getToken();
-      const url = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
-      const ws = new WebSocket(url);
+      // Auth is the httpOnly `access_token` cookie (same-origin). Query-param
+      // tokens are rejected by the server and leak into access logs — never use them.
+      const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
 
       ws.onopen = () => setConnected(true);
@@ -79,6 +166,12 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         try {
           const msg: RealtimeMessage = JSON.parse(ev.data);
           applyInvalidation(queryClient, msg.type);
+          if (msg.type === 'log_entry') {
+            const entry = normalizeLogEntry(msg.data);
+            if (!entry) return;
+            setRecentLogs((prev) => [entry, ...prev].slice(0, MAX_LIVE_LOGS));
+            listenersRef.current.forEach((fn) => fn(entry));
+          }
         } catch {
           /* ignore malformed frame */
         }
@@ -99,10 +192,21 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
   }, [isAuthenticated, queryClient]);
 
-  return React.createElement(RealtimeContext.Provider, { value: { connected } }, children);
+  return React.createElement(
+    RealtimeContext.Provider,
+    { value: { connected, recentLogs, subscribeLogs, clearLogs, seedLogs } },
+    children,
+  );
 };
 
 /** Live-connection status for status badges (e.g. the Dashboard's stamp). */
-export function useRealtimeStatus(): RealtimeContextValue {
+export function useRealtimeStatus(): Pick<RealtimeContextValue, 'connected'> {
+  const { connected } = useContext(RealtimeContext);
+  return { connected };
+}
+
+/** Shared live traffic buffer + connection — prefer this over opening a
+ * second WebSocket on Live Feed or Dashboard. */
+export function useLiveTraffic(): RealtimeContextValue {
   return useContext(RealtimeContext);
 }

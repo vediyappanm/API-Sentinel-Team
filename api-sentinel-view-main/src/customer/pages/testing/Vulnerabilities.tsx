@@ -123,7 +123,7 @@ const Vulnerabilities: React.FC = () => {
       {/* Metrics row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {([
-          { label: 'Total Issues', value: totalIssues, icon: AlertTriangle, color: '#632CA6', bg: 'rgba(99,44,175,0.1)' },
+          { label: 'Total Issues', value: totalIssues, icon: AlertTriangle, color: '#FF5B2E', bg: 'rgba(255,91,46,0.1)' },
           { label: 'Critical Open', value: sev.CRITICAL ?? 0, icon: XCircle, color: '#EF4444', bg: 'rgba(239,68,68,0.1)' },
           { label: 'Resolved', value: fixedIssues, icon: CheckCircle2, color: '#22C55E', bg: 'rgba(34,197,94,0.1)' },
           { label: 'Open', value: openIssues, icon: Info, color: '#3B82F6', bg: 'rgba(59,130,246,0.1)' },

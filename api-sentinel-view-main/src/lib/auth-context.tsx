@@ -140,10 +140,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, password: string) => {
     try {
-      const res = await post<{ access_token?: string; role?: string }>('/auth/login', { email, password });
-      if (res.access_token) {
-        setToken(res.access_token);
-      }
+      // Session is the httpOnly cookie — never store JWT in JS memory.
+      await post<{ role?: string }>('/auth/login', { email, password });
+      setToken(null);
       const profile = await get<{ email?: string; role?: string; account_id?: number }>('/auth/me');
       const nextUser = buildUserFromProfile(profile, 'My Org');
       if (nextUser) {
@@ -157,10 +156,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signup = async (email: string, password: string) => {
     try {
       const accountName = email.split('@')[0] || 'My Org';
-      const res = await post<{ access_token?: string; role?: string }>('/auth/signup', { email, password, account_name: accountName });
-      if (res.access_token) {
-        setToken(res.access_token);
-      }
+      await post<{ role?: string }>('/auth/signup', { email, password, account_name: accountName });
+      setToken(null);
       const profile = await get<{ email?: string; role?: string; account_id?: number }>('/auth/me');
       const nextUser = buildUserFromProfile(profile, accountName);
       if (nextUser) {

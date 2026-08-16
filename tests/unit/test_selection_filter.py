@@ -752,3 +752,37 @@ def test_context_aware_selection_reports_historical_finding_reason_without_findi
     rendered_summary = repr(summary)
     assert "raw-secret-account-12345" not in rendered_summary
     assert "/accounts/12345" not in rendered_summary
+
+
+def test_response_payload_filter_handles_null_last_response_body():
+    """Endpoints imported from an OpenAPI spec have last_response_body = None.
+
+    The key is present but null, so dict.get(key, "") returns None rather than
+    the default, and the payload filter must not blow up on it.
+    """
+    engine = SelectionFilterEngine()
+    template = {
+        "api_selection_filters": {
+            "response_payload": {"contains": ["password"]}
+        }
+    }
+    endpoint = {"method": "GET", "path": "/api/users", "last_response_body": None}
+
+    decision = engine.evaluate(template, endpoint)
+
+    assert decision.should_run is False
+    assert decision.reason == "response_payload_filter_mismatch"
+
+
+def test_response_payload_not_contains_matches_when_body_is_null():
+    engine = SelectionFilterEngine()
+    template = {
+        "api_selection_filters": {
+            "response_payload": {"not_contains": ["secret"]}
+        }
+    }
+    endpoint = {"method": "GET", "path": "/api/users", "last_response_body": None}
+
+    decision = engine.evaluate(template, endpoint)
+
+    assert decision.should_run is True

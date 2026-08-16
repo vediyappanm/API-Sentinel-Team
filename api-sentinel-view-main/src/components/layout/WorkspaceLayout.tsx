@@ -18,7 +18,7 @@ const WorkspaceShellInner: React.FC<{ workspace: WorkspaceConfig }> = ({ workspa
   }, [closeMobileSidebar, location.pathname]);
 
   return (
-    <div className="flex min-h-screen w-full overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(99,44,175,0.06),transparent_22%),linear-gradient(180deg,#faf9fd,#f2f2f7)] text-text-primary">
+    <div className="flex min-h-screen w-full overflow-hidden bg-bg-base text-text-primary">
       <Sidebar workspace={workspace} />
       <main className="relative flex flex-1 flex-col overflow-hidden">
         <TopBar workspace={workspace} />

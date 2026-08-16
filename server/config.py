@@ -169,6 +169,9 @@ class Settings(BaseSettings):
     INGESTION_MAX_EVENTS: int = 2000
     INGESTION_MIN_QUALITY_SCORE: float = 0.6
     INGESTION_DROP_LOW_QUALITY: bool = True
+    # Comma-separated hosts whose traffic is this product (not a monitored API).
+    # CORS_ORIGINS_OVERRIDE hosts are also excluded automatically.
+    INGEST_EXCLUDE_HOSTS: str = ""
     DETECTION_WINDOW_SECONDS: int = 60
     DETECTION_BURST_THRESHOLD: int = 45
     DETECTION_ALERT_COOLDOWN_SECONDS: int = 120

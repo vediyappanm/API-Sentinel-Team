@@ -100,7 +100,7 @@ const Organization: React.FC = () => {
       {/* KPI Row */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {([
-          { label: 'Total APIs', value: totalApis, icon: Cpu, color: '#632CA6', bg: 'rgba(99,44,175,0.1)' },
+          { label: 'Total APIs', value: totalApis, icon: Cpu, color: '#FF5B2E', bg: 'rgba(255,91,46,0.1)' },
           { label: 'Critical Risk', value: criticalCount, icon: ShieldAlert, color: '#EF4444', bg: 'rgba(239,68,68,0.1)' },
           { label: 'High Risk', value: highCount, icon: ShieldAlert, color: '#F97316', bg: 'rgba(99,44,175,0.1)' },
           { label: 'Applications', value: collections.length, icon: Eye, color: '#3B82F6', bg: 'rgba(59,130,246,0.1)' },

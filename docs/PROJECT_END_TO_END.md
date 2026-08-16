@@ -90,6 +90,7 @@ Demo bootstrap only when `DEBUG` + `STARTUP_ENABLE_DEMO_BOOTSTRAP` — never ena
 
 ```text
 Sensor → /v1/events → resolve_sensor_by_key
+  → upsert APIEndpoint inventory (Default Inventory; host + path_pattern)
   → UNIFIED_PIPELINE_MODE:
        active  → unified detection pipeline (normalize/rules/correlate/enforce)
        shadow  → pipeline side-by-side; legacy path may still write alerts
@@ -190,7 +191,7 @@ Key hooks: `use-dashboard`, `use-discovery`, `use-testing`, `use-protection`, `u
 | External source | Separate API-Sensor repo (see `infra/sensor-external/`) |
 | Build/push | `infra/sensor-external/build-and-push-sensor.sh` |
 | Runbooks | `infra/SENSOR-RUNBOOK.md`, `docs/eBPF_Sensor_Architecture.md` |
-| Ingest | `POST /v1/events` with `events[]`, Bearer = sensor key |
+| Ingest | `POST /v1/events` with `events[]`, Bearer = sensor key; upserts catalogue + `request_logs` |
 | Fleet | `infra/k8s/sensor-daemonset.example.yaml` |
 | Local helpers | `infra/scripts/run-sensor.sh` / `.ps1` |
 

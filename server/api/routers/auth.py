@@ -15,6 +15,7 @@ from server.modules.auth.jwt_issuer import JWTIssuer
 from server.modules.auth.rbac import RBAC, require_admin
 from server.modules.auth.audit import log_action
 from server.modules.auth.auth_rate_limiter import AuthRateLimiter
+from server.modules.auth.client_ip import get_client_ip
 from server.modules.validation.input_validator import InputValidator, ValidationError
 from server.api.rate_limiter import limiter
 
@@ -123,6 +124,8 @@ async def signup(
         "status": "created",
         "account_id": new_account.id,
         "user_id": user.id,
+        "token_type": "bearer",
+        "role": user.role,
         "message": "User registered successfully."
     }
 
@@ -142,8 +145,8 @@ async def login(
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Extract client IP for rate limiting
-    client_ip = request.client.host if request.client else "unknown"
+    # Extract client IP for rate limiting (trusted proxy headers only)
+    client_ip = get_client_ip(request)
 
     # Check brute-force rate limit
     is_allowed, rate_limit_context = await AuthRateLimiter.check_rate_limit(client_ip)
@@ -190,7 +193,11 @@ async def login(
         max_age=settings.JWT_EXPIRE_MINUTES * 60
     )
 
-    return {"status": "authenticated", "role": user.role}
+    return {
+        "status": "authenticated",
+        "token_type": "bearer",
+        "role": user.role,
+    }
 
 
 @router.get("/me")
@@ -205,13 +212,24 @@ async def get_me(payload: dict = Depends(RBAC.require_auth)):
 
 
 @router.post("/refresh")
-async def refresh_token(payload: dict = Depends(RBAC.require_auth)):
-    """Issue a fresh token for an authenticated user."""
+async def refresh_token(
+    response: Response,
+    payload: dict = Depends(RBAC.require_auth),
+):
+    """Issue a fresh token for an authenticated user (httpOnly cookie)."""
     new_token = JWTIssuer.create_access_token({
         "sub": payload["sub"], "email": payload["email"],
         "account_id": payload["account_id"], "role": payload["role"],
     })
-    return {"access_token": new_token, "token_type": "bearer"}
+    response.set_cookie(
+        key="access_token",
+        value=new_token,
+        httponly=True,
+        secure=not settings.DEBUG,
+        samesite="lax",
+        max_age=settings.JWT_EXPIRE_MINUTES * 60,
+    )
+    return {"status": "refreshed", "token_type": "bearer"}
 
 
 @router.post("/logout")

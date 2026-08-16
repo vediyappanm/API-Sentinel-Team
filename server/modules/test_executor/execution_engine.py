@@ -792,9 +792,12 @@ class ExecutionEngine:
                 cookies[str(auth_profile.cookie_name).strip()] = str(auth_profile.cookie_value).strip()
             if not cookies:
                 raise AuthResolutionError("cookie auth profile has no cookies")
-        elif mode == "oauth" and _credential_value_has_material(
+        elif mode in {"oauth", "bearer"} and _credential_value_has_material(
             getattr(auth_profile, "token", None) or getattr(auth_profile, "header_value", None)
         ):
+            # "bearer" shares oauth's scheme-prefixing: RBAC.require_auth only
+            # accepts an Authorization header starting with "bearer ", so a raw
+            # token here would make every scan silently unauthenticated.
             token_value = getattr(auth_profile, "token", None) or getattr(auth_profile, "header_value", None)
             token_text = str(token_value).strip()
             headers[auth_header] = (

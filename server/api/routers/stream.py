@@ -16,11 +16,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.api.websocket.manager import ws_manager
 from server.config import settings
 from server.models.core import Alert, IngestionJob, MaliciousEventRecord, RequestLog, Sensor, ThreatActor
+from server.modules.api_inventory.endpoint_discovery import EndpointDiscovery, inventory_path
 from server.modules.auth.audit import log_action
 from server.modules.auth.rbac import RBAC
+from server.modules.cache.redis_cache import bump_cache_version
 from server.modules.detection.pipeline import unified_detection_pipeline
 from server.modules.ingestion.queue import IngestionJobItem, ingestion_queue
 from server.modules.ingestion.redaction import redact_ingestion_path
+from server.modules.ingestion.self_traffic import excluded_hosts, is_self_traffic
+from server.modules.ingestion.sensor_time import clamp_sensor_ts_ms, coerce_sensor_ts_ms
 from server.modules.persistence.database import AsyncSessionLocal, get_db
 from server.modules.quotas.tenant_quota import check_ingest_quota
 from server.modules.sensors.keys import resolve_sensor_by_key
@@ -28,17 +32,77 @@ from server.modules.utils.redactor import Redactor
 
 router = APIRouter()
 
+# WebSocket opcodes the eBPF sensor used to emit as fake HTTP (TEXT /ws).
+_NON_HTTP_LIVE_METHODS = frozenset({
+    "TEXT", "PING", "PONG", "BINARY", "CLOSE", "CONTINUATION",
+})
+
 
 def _utc_now() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
 
 
 def _datetime_from_sensor_ts(ts_raw: object | None) -> datetime.datetime:
-    if ts_raw is None:
-        return _utc_now()
-    ts_int = int(ts_raw)
-    seconds = ts_int / 1000 if ts_int > 9_999_999_999 else ts_int
-    return datetime.datetime.fromtimestamp(seconds, tz=datetime.timezone.utc)
+    ms = clamp_sensor_ts_ms(coerce_sensor_ts_ms(ts_raw))
+    return datetime.datetime.fromtimestamp(ms / 1000, tz=datetime.timezone.utc)
+
+
+def _is_http_live_method(method: str) -> bool:
+    return method.upper() not in _NON_HTTP_LIVE_METHODS
+
+
+def normalize_sensor_events(data: dict) -> list:
+    """Accept v1 `{events:[...]}` and session-4 `{MsgHeader, Batch}` envelopes."""
+    events = data.get("events")
+    if isinstance(events, list) and events:
+        return events
+    batch = data.get("Batch") or data.get("batch")
+    if not isinstance(batch, list):
+        return []
+    normalized: list[dict] = []
+    for item in batch:
+        if not isinstance(item, dict):
+            continue
+        if "request" in item or "method" in item or "path" in item:
+            normalized.append(item)
+            continue
+        method = item.get("HTTPReq.Method") or "GET"
+        path = item.get("HTTPReq.Uri") or "/"
+        query = item.get("HTTPReq.Query") or ""
+        if query and "?" not in str(path):
+            path = f"{path}?{query}"
+        host = item.get("Req.Header.host") or ""
+        headers = {}
+        for key, value in item.items():
+            if key.startswith("Req.Header.") and key != "Req.Header.extra":
+                headers[key.split(".", 2)[-1].lower()] = value
+        status = int(item.get("HTTPResp.ResponseCode") or 0)
+        source_ip = (
+            item.get("DownstreamL3L4.SourceIP")
+            or item.get("SrcInfo.RemoteAddress")
+            or ""
+        )
+        protocol = item.get("L7Protocol") or "HTTP/1.1"
+        latency_ms = int(item.get("SessionStats.TimeToLastDownstreamTxByte") or 0)
+        normalized.append(
+            {
+                "method": method,
+                "path": path,
+                "host": host,
+                "source_ip": source_ip,
+                "protocol": protocol,
+                "latency_ms": latency_ms or None,
+                "observed_at": clamp_sensor_ts_ms(coerce_sensor_ts_ms(item.get("SessionStats.StartTime"))),
+                "request": {
+                    "method": method,
+                    "path": path,
+                    "host": host,
+                    "headers": headers,
+                },
+                "response": {"status": status, "status_code": status, "latency_ms": latency_ms or None},
+            }
+        )
+    return normalized
 
 
 _ATTACK_SIGS = [
@@ -49,10 +113,43 @@ _ATTACK_SIGS = [
     (re.compile(r"[;&|`]\s*\+?(cat|id|whoami|bash|sh|wget|curl)[\s+]", re.I), "Command Injection", "CRITICAL"),
     (re.compile(r"\beval\s*\(|base64_decode|system\s*\(|exec\s*\(", re.I), "Code Injection", "CRITICAL"),
     (re.compile(r"nikto|sqlmap|nmap|dirbuster|masscan|nuclei|burpsuite", re.I), "Scanning Tool", "MEDIUM"),
-    (re.compile(r"\.env\b|\.git/config|phpMyAdmin|wp-admin|\.htaccess", re.I), "Sensitive File Access", "HIGH"),
+    (re.compile(r"(?:^|/)\.env(?:/|$)|(?:^|/)\.git/config|phpMyAdmin|wp-admin|\.htaccess", re.I), "Sensitive File Access", "HIGH"),
     (re.compile(r"ldap://|CN=|DC=|ou=", re.I), "LDAP Injection", "HIGH"),
     (re.compile(r"file://|gopher://|ftp://|dict://|sftp://", re.I), "SSRF", "CRITICAL"),
 ]
+
+
+def _malicious_record_path(record: MaliciousEventRecord) -> str:
+    url = record.url or ""
+    host = record.host or ""
+    if url.startswith("/"):
+        return url.split("?", 1)[0] or "/"
+    if host and url.startswith(host):
+        rest = url[len(host):]
+        return (rest or "/").split("?", 1)[0]
+    return url.split("?", 1)[0] or "/"
+
+
+def _threat_overlay(events: list[MaliciousEventRecord]) -> dict[tuple[str, str], dict[str, str]]:
+    """Map (ip, path) → threat. Never paint a whole ingress IP with one hit."""
+    overlay: dict[tuple[str, str], dict[str, str]] = {}
+    for event in events:
+        if not event.ip or not event.category:
+            continue
+        overlay[(event.ip, _malicious_record_path(event))] = {
+            "category": event.category,
+            "severity": event.severity or "MEDIUM",
+        }
+    return overlay
+
+
+def _attacks_for_log(
+    overlay: dict[tuple[str, str], dict[str, str]],
+    log: RequestLog,
+) -> list[dict[str, str]]:
+    path = redact_ingestion_path(log.path or "/").split("?", 1)[0]
+    hit = overlay.get((log.source_ip or "", path))
+    return [hit] if hit else []
 
 
 def _detect_attacks(path: str, headers: dict) -> list[dict]:
@@ -170,7 +267,7 @@ async def handle_ebpf_ingest_request(request: Request, db: AsyncSession) -> dict
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
 
-    events = data.get("events", [])
+    events = normalize_sensor_events(data)
     if not events:
         return {"status": "ok", "events_processed": 0, "threats_detected": 0}
 
@@ -192,20 +289,53 @@ async def handle_ebpf_ingest_request(request: Request, db: AsyncSession) -> dict
     threats_detected = 0
     ws_batch = []
     new_actors: dict[str, ThreatActor] = {}
+    discovery = EndpointDiscovery(db)
+    inventoried = 0
+    self_hosts = excluded_hosts()
 
     for ev in events:
         req = ev.get("request") or {}
         resp = ev.get("response") or {}
         method = (req.get("method") or ev.get("method") or "GET").upper()
+        if not _is_http_live_method(method):
+            continue
         path = req.get("path") or ev.get("path") or "/"
+        host = (req.get("host") or ev.get("host") or "").strip()
+        if is_self_traffic(host, path, self_hosts=self_hosts):
+            continue
         safe_path = redact_ingestion_path(path)
-        host = req.get("host") or ev.get("host") or ""
         headers = req.get("headers") or ev.get("headers") or {}
         status = int(resp.get("status") or ev.get("status") or 0)
         source_ip = ev.get("source_ip") or ev.get("src_ip") or ""
         protocol = ev.get("protocol") or "HTTP/1.1"
+        latency_raw = resp.get("latency_ms") or ev.get("latency_ms")
+        try:
+            latency_ms = int(latency_raw) if latency_raw not in (None, "") else None
+        except (TypeError, ValueError):
+            latency_ms = None
         ts_raw = ev.get("observed_at") or ev.get("ts")
         ts = _datetime_from_sensor_ts(ts_raw)
+
+        endpoint_id = None
+        catalogue_path = inventory_path(path)
+        if catalogue_path:
+            query = path.split("?", 1)[1] if "?" in path else None
+            endpoint = await discovery.discover(
+                {
+                    "account_id": account_id,
+                    "source": "ebpf",
+                    "method": method,
+                    "host": host or "unknown",
+                    "path": catalogue_path,
+                    "scheme": "https",
+                    "status": status,
+                    "last_seen": ts,
+                    "query_string": query,
+                },
+                commit=False,
+            )
+            endpoint_id = endpoint.id
+            inventoried += 1
 
         if pipeline_mode == "active":
             result = await unified_detection_pipeline.process(
@@ -214,6 +344,7 @@ async def handle_ebpf_ingest_request(request: Request, db: AsyncSession) -> dict
                 source_type="stream_ebpf",
                 raw_event=ev,
                 persist_request_log=True,
+                existing_endpoint_id=endpoint_id,
                 context_source="EBPF_SENSOR",
             )
             attacks = [
@@ -229,16 +360,20 @@ async def handle_ebpf_ingest_request(request: Request, db: AsyncSession) -> dict
                     source_type="stream_ebpf",
                     raw_event=ev,
                     persist_request_log=False,
+                    existing_endpoint_id=endpoint_id,
                     context_source="EBPF_SENSOR",
                     shadow=True,
                 )
 
             db.add(RequestLog(
                 account_id=account_id,
+                endpoint_id=endpoint_id,
                 source_ip=source_ip,
                 method=method,
                 path=safe_path,
+                host=host or None,
                 response_code=status,
+                response_time_ms=latency_ms,
                 created_at=ts,
             ))
 
@@ -308,6 +443,7 @@ async def handle_ebpf_ingest_request(request: Request, db: AsyncSession) -> dict
             "host": host,
             "status": status,
             "protocol": protocol,
+            "latency_ms": latency_ms,
             "timestamp": ts.isoformat(),
             "attacks": attacks,
             "blocked": False,
@@ -315,9 +451,16 @@ async def handle_ebpf_ingest_request(request: Request, db: AsyncSession) -> dict
         })
 
     await db.commit()
+    if inventoried:
+        await bump_cache_version(account_id)
 
     for entry in ws_batch:
         await ws_manager.broadcast({"type": "log_entry", "data": entry}, account_id=account_id)
+    if inventoried:
+        await ws_manager.broadcast(
+            {"type": "TRAFFIC_INGESTED", "data": {"endpoints": inventoried}},
+            account_id=account_id,
+        )
 
     return {
         "status": "ok",
@@ -345,11 +488,17 @@ async def recent_events(
     account_id = payload.get("account_id")
     logs_result = await db.execute(
         select(RequestLog)
-        .where(RequestLog.account_id == account_id)
+        .where(
+            RequestLog.account_id == account_id,
+            RequestLog.method.notin_(_NON_HTTP_LIVE_METHODS),
+        )
         .order_by(RequestLog.created_at.desc())
-        .limit(limit)
+        .limit(min(max(limit * 4, limit), 400))
     )
-    logs = logs_result.scalars().all()
+    logs = [
+        row for row in logs_result.scalars().all()
+        if not is_self_traffic(row.host, row.path)
+    ][:limit]
 
     evt_result = await db.execute(
         select(MaliciousEventRecord)
@@ -357,17 +506,19 @@ async def recent_events(
         .order_by(MaliciousEventRecord.created_at.desc())
         .limit(200)
     )
-    events = evt_result.scalars().all()
-    threat_ips = {e.ip: {"category": e.category, "severity": e.severity} for e in events if e.ip}
+    overlay = _threat_overlay(evt_result.scalars().all())
 
     return [
         {
+            "id": r.id,
             "ip": r.source_ip,
             "method": r.method,
             "path": redact_ingestion_path(r.path),
+            "host": r.host or "",
             "status": r.response_code,
+            "latency_ms": r.response_time_ms,
             "timestamp": r.created_at.isoformat() if r.created_at else None,
-            "attacks": [threat_ips[r.source_ip]] if r.source_ip in threat_ips else [],
+            "attacks": _attacks_for_log(overlay, r),
         }
         for r in logs
     ]
@@ -392,26 +543,36 @@ async def websocket_live(websocket: WebSocket):
         metadata = ws_manager.active_connections.get(websocket, {})
         account_id = metadata.get("account_id")
         async with AsyncSessionLocal() as db:
-            logs_stmt = select(RequestLog).order_by(RequestLog.created_at.desc()).limit(20)
+            logs_stmt = select(RequestLog).order_by(RequestLog.created_at.desc()).limit(80)
             events_stmt = select(MaliciousEventRecord).order_by(MaliciousEventRecord.created_at.desc()).limit(100)
             if account_id is not None:
-                logs_stmt = logs_stmt.where(RequestLog.account_id == account_id)
+                logs_stmt = logs_stmt.where(
+                    RequestLog.account_id == account_id,
+                    RequestLog.method.notin_(_NON_HTTP_LIVE_METHODS),
+                )
                 events_stmt = events_stmt.where(MaliciousEventRecord.account_id == account_id)
+            else:
+                logs_stmt = logs_stmt.where(RequestLog.method.notin_(_NON_HTTP_LIVE_METHODS))
 
-            recent = (await db.execute(logs_stmt)).scalars().all()
-            events = (await db.execute(events_stmt)).scalars().all()
-            threat_ips = {e.ip: {"category": e.category, "severity": e.severity} for e in events if e.ip}
+            recent = [
+                row for row in (await db.execute(logs_stmt)).scalars().all()
+                if not is_self_traffic(row.host, row.path)
+            ][:20]
+            overlay = _threat_overlay((await db.execute(events_stmt)).scalars().all())
 
         for request_log in reversed(recent):
             await websocket.send_json({
                 "type": "log_entry",
                 "data": {
+                    "id": request_log.id,
                     "ip": request_log.source_ip,
                     "method": request_log.method,
                     "path": redact_ingestion_path(request_log.path),
+                    "host": request_log.host or "",
                     "status": request_log.response_code,
+                    "latency_ms": request_log.response_time_ms,
                     "timestamp": request_log.created_at.isoformat() if request_log.created_at else None,
-                    "attacks": [threat_ips[request_log.source_ip]] if request_log.source_ip in threat_ips else [],
+                    "attacks": _attacks_for_log(overlay, request_log),
                     "blocked": False,
                 },
             })

@@ -35,13 +35,9 @@ export default defineConfig(({ mode }) => ({
             return;
           }
 
-          if (id.includes("recharts")) {
-            return "charts-vendor";
-          }
-
-          if (id.includes("react-simple-maps")) {
-            return "maps-vendor";
-          }
+          // Do not force-split recharts / d3 / react-simple-maps: their
+          // circular graphs become TDZ errors across chunk boundaries
+          // ("Cannot access 'S' before initialization").
 
           if (
             id.includes("@radix-ui") ||

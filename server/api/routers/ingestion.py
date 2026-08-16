@@ -440,7 +440,7 @@ async def ingest_events_v2(
 
         await db.commit()
         for entry in ws_batch:
-            await ws_manager.broadcast({"type": "log_entry", "data": entry})
+            await ws_manager.broadcast({"type": "log_entry", "data": entry}, account_id=account_id)
 
         return {
             "status": "ok",

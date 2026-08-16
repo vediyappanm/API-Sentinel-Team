@@ -5,10 +5,23 @@ from urllib.parse import urlparse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.models.core import APIEndpoint
+from server.models.core import APICollection, APIEndpoint
 from .path_normalizer import PathNormalizer
 
+_DEFAULT_COLLECTION_NAME = "Default Inventory"
+
 _OPENAPI_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE"}
+_UNSAFE_PATH_CHARS = ("<", ">", "'", '"', "..")
+
+
+def inventory_path(path: str | None) -> str | None:
+    """Return a catalogue path, or None when the raw path is attack/noise."""
+    clean = (path or "/").split("?", 1)[0] or "/"
+    if not clean.startswith("/"):
+        clean = f"/{clean}"
+    if any(token in clean for token in _UNSAFE_PATH_CHARS):
+        return None
+    return clean
 
 
 def _utc_now() -> datetime.datetime:
@@ -52,10 +65,15 @@ class EndpointDiscovery:
             endpoint.tags = tags
             endpoint.is_sensitive = bool(endpoint.is_sensitive or normalized["is_sensitive"])
             endpoint.status = self._merged_status(endpoint.status, tags)
+            if not endpoint.collection_id:
+                endpoint.collection_id = await self._default_collection_id(normalized["account_id"])
         else:
+            collection_id = normalized["collection_id"] or await self._default_collection_id(
+                normalized["account_id"]
+            )
             endpoint = APIEndpoint(
                 account_id=normalized["account_id"],
-                collection_id=normalized["collection_id"],
+                collection_id=collection_id,
                 method=normalized["method"],
                 host=normalized["host"],
                 port=normalized["port"],
@@ -80,6 +98,25 @@ class EndpointDiscovery:
         else:
             await self.db.flush()
         return endpoint
+
+    async def _default_collection_id(self, account_id: int) -> str:
+        result = await self.db.execute(
+            select(APICollection).where(
+                APICollection.account_id == account_id,
+                APICollection.name == _DEFAULT_COLLECTION_NAME,
+            )
+        )
+        collection = result.scalar_one_or_none()
+        if collection is None:
+            collection = APICollection(
+                account_id=account_id,
+                name=_DEFAULT_COLLECTION_NAME,
+                host="all-hosts",
+                type="MIRRORING",
+            )
+            self.db.add(collection)
+            await self.db.flush()
+        return collection.id
 
     def _normalize_entry(self, entry: dict[str, Any]) -> dict[str, Any]:
         request = entry.get("request") if isinstance(entry.get("request"), dict) else {}

@@ -387,7 +387,7 @@ async def process_stream_lines(job_id: str, account_id: int, payload: Dict[str, 
 
         for event_msg in events_for_ws:
             try:
-                await ws_manager.broadcast(event_msg)
+                await ws_manager.broadcast(event_msg, account_id=account_id)
             except Exception:
                 break
 

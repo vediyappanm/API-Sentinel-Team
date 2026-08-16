@@ -11,6 +11,10 @@ class PathNormalizer:
         self.rules = [
             # Standard UUID: 550e8400-e29b-41d4-a716-446655440000
             (r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', '{uuid}'),
+            # OCI / git digest: sha256:<64 hex>
+            (r'^sha256:[0-9a-f]{64}$', '{digest}'),
+            # Bare 64-char hex digest (Harbor blobs, git SHAs)
+            (r'^[0-9a-f]{64}$', '{sha256}'),
             # MongoDB ObjectID
             (r'^[0-9a-f]{24}$', '{oid}'),
             # Integer IDs

@@ -45,6 +45,7 @@ interface RawEndpoint {
   api_collection_id?: ApiCollectionId;
   path?: string;
   url?: string;
+  host?: string;
   method?: string;
   auth_types?: string[];
   last_seen?: string;
@@ -115,23 +116,28 @@ export async function fetchApiInfosForCollection(
 ) {
   const data = await get<{ total: number; endpoints: RawEndpoint[] }>('/endpoints/', signal);
 
-  const apiInfoList: AktoApiInfo[] = (data.endpoints || []).map((endpoint) => ({
-    id: {
-      apiCollectionId: endpoint.collection_id ?? endpoint.api_collection_id ?? apiCollectionId,
-      url: endpoint.path ?? endpoint.url ?? '/',
-      method: endpoint.method ?? 'GET',
-    },
-    allAuthTypesFound: endpoint.auth_types ?? [],
-    lastSeen: endpoint.last_seen ? new Date(endpoint.last_seen).getTime() : Date.now(),
-    discoveredAt: endpoint.created_at
-      ? new Date(endpoint.created_at).getTime()
-      : endpoint.last_seen
-        ? new Date(endpoint.last_seen).getTime()
-        : Date.now(),
-    riskScore: endpoint.risk_score ?? 0,
-    apiAccessTypes: endpoint.access_types ?? [],
-    deprecated: endpoint.deprecated ?? false,
-  }));
+  const apiInfoList: AktoApiInfo[] = (data.endpoints || []).map((endpoint) => {
+    const path = endpoint.path ?? endpoint.url ?? '/';
+    const host = (endpoint.host || '').trim();
+    const url = host && host !== 'unknown' && !path.startsWith(host) ? `${host}${path}` : path;
+    return {
+      id: {
+        apiCollectionId: endpoint.collection_id ?? endpoint.api_collection_id ?? apiCollectionId,
+        url,
+        method: endpoint.method ?? 'GET',
+      },
+      allAuthTypesFound: endpoint.auth_types ?? [],
+      lastSeen: endpoint.last_seen ? new Date(endpoint.last_seen).getTime() : Date.now(),
+      discoveredAt: endpoint.created_at
+        ? new Date(endpoint.created_at).getTime()
+        : endpoint.last_seen
+          ? new Date(endpoint.last_seen).getTime()
+          : Date.now(),
+      riskScore: endpoint.risk_score ?? 0,
+      apiAccessTypes: endpoint.access_types ?? [],
+      deprecated: endpoint.deprecated ?? false,
+    };
+  });
 
   return {
     apiInfoList,

@@ -1,8 +1,37 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { Loader2, Eye, EyeOff, Lock, Mail } from 'lucide-react';
+import {
+  Loader2, Eye, EyeOff, Lock, Mail, ShieldCheck, Radar, FileSearch,
+  Boxes, Activity, ScrollText, ChevronRight, BadgeCheck,
+} from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { validateEmail, validatePassword } from '@/lib/validations';
+
+const FEATURES = [
+  {
+    icon: FileSearch,
+    title: 'API Discovery',
+    desc: 'Inventory every endpoint, parameter, and auth surface from live traffic.',
+  },
+  {
+    icon: Radar,
+    title: 'Active Testing',
+    desc: 'OWASP-aligned templates, pentest runs, and evidence-backed findings.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Runtime Protection',
+    desc: 'Detect, correlate, and enforce — with human-gated remediation paths.',
+  },
+] as const;
+
+const FLOW = [
+  { title: 'Discover', sub: 'Live inventory' },
+  { title: 'Test', sub: 'Evidence runs' },
+  { title: 'Detect', sub: 'Correlate signals' },
+  { title: 'Enforce', sub: 'Controlled apply' },
+  { title: 'Verify', sub: 'Post-change' },
+] as const;
 
 function getPasswordValidationError(password: string, isSignup: boolean): string | null {
   if (!password) {
@@ -28,6 +57,48 @@ function getPasswordValidationError(password: string, isSignup: boolean): string
   return null;
 }
 
+const BrandMark: React.FC<{ size?: 'sm' | 'md' }> = ({ size = 'md' }) => (
+  <div className="flex items-center gap-3">
+    <div
+      className={`flex items-center justify-center rounded-md font-bold tracking-tight text-white ${
+        size === 'md' ? 'h-10 w-10 text-[15px]' : 'h-9 w-9 text-[13px]'
+      }`}
+      style={{
+        background: 'linear-gradient(135deg, #FF5B2E 0%, #D94418 55%, #2B4CFF 120%)',
+        boxShadow: '0 0 0 1px rgba(255,255,255,0.08), 0 8px 20px rgba(255,91,46,0.25)',
+      }}
+    >
+      S
+    </div>
+    <div>
+      <div
+        className="font-semibold tracking-tight"
+        style={{
+          fontFamily: "'Fraunces', 'Plus Jakarta Sans', Georgia, serif",
+          color: '#F4F1EA',
+          fontSize: size === 'md' ? 15 : 14,
+        }}
+      >
+        API Sentinel{' '}
+        <span className="font-medium italic opacity-80" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 12 }}>
+          Security
+        </span>
+      </div>
+      <div
+        className="font-medium uppercase"
+        style={{
+          fontSize: 10.5,
+          letterSpacing: '0.14em',
+          color: 'rgba(200,196,188,0.6)',
+          fontFamily: "'IBM Plex Mono', 'JetBrains Mono', monospace",
+        }}
+      >
+        sentinel · command
+      </div>
+    </div>
+  </div>
+);
+
 const Login: React.FC = () => {
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
@@ -41,19 +112,20 @@ const Login: React.FC = () => {
   const [passwordError, setPasswordError] = React.useState<string | null>(null);
   const { user, login, signup, error: authError } = useAuth();
   const location = useLocation();
-  const from = (location.state as { from?: { pathname: string } })?.from?.pathname
-    || '/';
+  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/';
 
   if (user) return <Navigate to={from} replace />;
 
+  const triggerShake = () => {
+    setShakeError(true);
+    setTimeout(() => setShakeError(false), 500);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Clear field errors
     setEmailError(null);
     setPasswordError(null);
-    
-    // Validate email
+
     const emailResult = validateEmail(email);
     if (!emailResult.valid) {
       setEmailError(emailResult.error || 'Invalid email');
@@ -61,8 +133,15 @@ const Login: React.FC = () => {
       triggerShake();
       return;
     }
-    
-    // Validate password
+
+    const passwordPolicy = getPasswordValidationError(password, isSignup);
+    if (passwordPolicy) {
+      setPasswordError(passwordPolicy);
+      setLocalError(passwordPolicy);
+      triggerShake();
+      return;
+    }
+
     const passwordResult = validatePassword(password);
     if (!passwordResult.valid) {
       setPasswordError(passwordResult.error || 'Invalid password');
@@ -70,15 +149,7 @@ const Login: React.FC = () => {
       triggerShake();
       return;
     }
-    
-    // Additional signup validation
-    if (isSignup && password.length < 12) {
-      setPasswordError('Password must be at least 12 characters');
-      setLocalError('Password must be at least 12 characters for signup');
-      triggerShake();
-      return;
-    }
-    
+
     setLocalError(null);
     setSubmitting(true);
     try {
@@ -88,7 +159,12 @@ const Login: React.FC = () => {
         await login(email, password);
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Something went wrong. Please try again.';
+      const msg =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'string'
+            ? err
+            : 'Something went wrong. Please try again.';
       setLocalError(msg);
       triggerShake();
     } finally {
@@ -96,386 +172,463 @@ const Login: React.FC = () => {
     }
   };
 
-  const handleEmailBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    let hasError = false;
-    if (email.trim()) {
-      const result = validateEmail(email);
-      setEmailError(result.valid ? null : result.error);
-      hasError = !result.valid;
-    }
-    e.target.style.borderColor = hasError ? '#ef4444' : '#e2e8f0';
-    e.target.style.boxShadow = hasError ? '0 0 0 3px rgba(239, 68, 68, 0.1)' : 'none';
-  };
-
-  const handlePasswordBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    let hasError = false;
-    if (password) {
-      const result = validatePassword(password);
-      setPasswordError(result.valid ? null : result.error);
-      hasError = !result.valid;
-    }
-    e.target.style.borderColor = hasError ? '#ef4444' : '#e2e8f0';
-    e.target.style.boxShadow = hasError ? '0 0 0 3px rgba(239, 68, 68, 0.1)' : 'none';
-  };
-
-  const triggerShake = () => {
-    setShakeError(true);
-    setTimeout(() => setShakeError(false), 500);
-  };
-
   const displayError = localError || authError;
 
   return (
-    <div className="relative flex min-h-screen font-sans overflow-x-hidden overflow-y-auto" style={{ background: '#fafbff' }}>
-      {/* Animated mesh gradient background */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div
-          className="absolute rounded-full blur-[100px] opacity-30 w-[80vw] max-w-[600px] aspect-square"
-          style={{
-            top: '-10%', left: '-5%',
-            background: 'radial-gradient(circle, #818cf8 0%, #6366f1 50%, transparent 70%)',
-            animation: 'mesh-float-1 20s ease-in-out infinite',
-          }}
-        />
-        <div
-          className="absolute rounded-full blur-[120px] opacity-20 w-[70vw] max-w-[500px] aspect-square"
-          style={{
-            top: '40%', right: '-10%',
-            background: 'radial-gradient(circle, #f472b6 0%, #ec4899 50%, transparent 70%)',
-            animation: 'mesh-float-2 25s ease-in-out infinite',
-          }}
-        />
-        <div
-          className="absolute rounded-full blur-[90px] opacity-20 w-[60vw] max-w-[400px] aspect-square"
-          style={{
-            bottom: '-5%', left: '30%',
-            background: 'radial-gradient(circle, #fbbf24 0%, #f59e0b 50%, transparent 70%)',
-            animation: 'mesh-float-3 18s ease-in-out infinite',
-          }}
-        />
-        <div
-          className="absolute rounded-full blur-[80px] opacity-15 w-[55vw] max-w-[350px] aspect-square"
-          style={{
-            top: '20%', left: '50%',
-            background: 'radial-gradient(circle, #34d399 0%, #10b981 50%, transparent 70%)',
-            animation: 'mesh-float-4 22s ease-in-out infinite',
-          }}
-        />
-      </div>
-
-      {/* Left Panel - Brand Showcase */}
-      <div className="hidden lg:flex flex-1 flex-col items-center justify-center relative z-10 px-12">
-        <div className="max-w-lg text-center">
-          {/* Logo */}
-          <div className="mx-auto mb-8 w-20 h-20 rounded-2xl flex items-center justify-center shadow-lg"
-            style={{
-              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-              boxShadow: '0 8px 32px rgba(99, 102, 241, 0.3)',
-            }}
-          >
-            <svg width="44" height="44" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L21 6.5V13C21 17.4 17 21.2 12 22C7 21.2 3 17.4 3 13V6.5L12 2Z" fill="rgba(255,255,255,0.9)" />
-              <path d="M12 6L17 8.5V13C17 15.5 14.8 17.7 12 18.5C9.2 17.7 7 15.5 7 13V8.5L12 6Z" fill="#7c3aed" />
-            </svg>
-          </div>
-
-          {/* Gradient title */}
-          <h1
-            className="text-5xl font-extrabold mb-4 leading-tight"
-            style={{
-              background: 'linear-gradient(135deg, #6366f1 0%, #ec4899 50%, #f59e0b 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-            }}
-          >
-            API Sentinel
-          </h1>
-          <p className="text-lg mb-8" style={{ color: '#64748b' }}>
-            Enterprise-grade API security platform.
-            <br />
-            Discover, test, protect, and monitor your APIs in real-time.
-          </p>
-
-          {/* Feature cards */}
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { icon: '🔍', title: 'API Discovery', desc: 'Auto-discover all endpoints' },
-              { icon: '🧪', title: 'Security Testing', desc: 'OWASP Top 10 coverage' },
-              { icon: '🛡️', title: 'Real-time Protection', desc: 'WAF & threat blocking' },
-              { icon: '📊', title: 'Compliance Reports', desc: 'PCI-DSS, HIPAA, SOC2' },
-            ].map((feat) => (
-              <div
-                key={feat.title}
-                className="rounded-xl p-4 text-left transition-all duration-200 hover:-translate-y-0.5"
-                style={{
-                  background: 'rgba(255, 255, 255, 0.7)',
-                  backdropFilter: 'blur(12px)',
-                  border: '1px solid rgba(228, 231, 238, 0.8)',
-                  boxShadow: '0 1px 4px rgba(15, 23, 42, 0.06)',
-                }}
-              >
-                <div className="text-xl mb-1.5">{feat.icon}</div>
-                <div className="text-sm font-semibold" style={{ color: '#0f172a' }}>{feat.title}</div>
-                <div className="text-xs mt-0.5" style={{ color: '#94a3b8' }}>{feat.desc}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Right Panel - Login Form */}
-      <div className="flex-1 flex items-center justify-center p-6 relative z-10">
-        <form
-          onSubmit={handleSubmit}
-          className={`w-full max-w-[440px] px-4 sm:px-0 space-y-6 rounded-2xl p-8 md:p-10 ${shakeError ? 'animate-[shake_0.5s_ease-in-out]' : ''}`}
-          style={{
-            background: 'rgba(255, 255, 255, 0.85)',
-            backdropFilter: 'blur(20px)',
-            border: '1px solid #e4e7ee',
-            boxShadow: '0 4px 24px rgba(15, 23, 42, 0.08), 0 1px 4px rgba(15, 23, 42, 0.04)',
-            animationName: shakeError ? 'shake' : 'none',
-          }}
+    <div
+      className="min-h-screen"
+      style={{
+        background: '#F4F1EA',
+        color: '#0E1116',
+        fontFamily: "'Plus Jakarta Sans', 'IBM Plex Sans', system-ui, sans-serif",
+      }}
+    >
+      <div className="grid min-h-screen lg:grid-cols-[1.2fr_minmax(400px,480px)]">
+        {/* Left — AgentOS-style dark brand panel */}
+        <section
+          className="relative hidden overflow-hidden lg:flex lg:flex-col"
+          style={{ background: '#0E1116', color: '#C8C4BC', borderRight: '1px solid #252B36' }}
         >
-          {/* Header */}
-          <div className="flex flex-col items-center gap-3">
-            {/* Mobile logo */}
-            <div
-              className="lg:hidden w-14 h-14 rounded-xl flex items-center justify-center mb-1"
-              style={{
-                background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                boxShadow: '0 4px 16px rgba(99, 102, 241, 0.3)',
-              }}
-            >
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2L21 6.5V13C21 17.4 17 21.2 12 22C7 21.2 3 17.4 3 13V6.5L12 2Z" fill="rgba(255,255,255,0.9)" />
-                <path d="M12 6L17 8.5V13C17 15.5 14.8 17.7 12 18.5C9.2 17.7 7 15.5 7 13V8.5L12 6Z" fill="#7c3aed" />
-              </svg>
+          <div
+            className="pointer-events-none absolute inset-0 opacity-40"
+            style={{
+              backgroundImage:
+                'radial-gradient(circle at 18% 22%, rgba(43,76,255,0.45), transparent 45%), radial-gradient(circle at 85% 8%, rgba(255,91,46,0.28), transparent 38%)',
+            }}
+          />
+          <div
+            className="pointer-events-none absolute inset-0 opacity-[0.07]"
+            style={{
+              backgroundImage:
+                'linear-gradient(rgba(244,241,234,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(244,241,234,0.15) 1px, transparent 1px)',
+              backgroundSize: '32px 32px',
+            }}
+          />
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{ background: 'linear-gradient(to bottom, transparent, transparent, rgba(14,17,22,0.8))' }}
+          />
+
+          <div className="relative flex flex-1 flex-col justify-between p-10 xl:p-14">
+            <BrandMark />
+
+            <div className="my-8 max-w-xl space-y-9 xl:my-10">
+              <div className="space-y-5">
+                <p
+                  className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
+                  style={{
+                    border: '1px solid rgba(255,91,46,0.3)',
+                    background: 'rgba(255,91,46,0.1)',
+                    color: 'rgba(244,241,234,0.9)',
+                  }}
+                >
+                  <BadgeCheck className="h-3.5 w-3.5" style={{ color: '#FF5B2E' }} />
+                  Enterprise API security platform
+                </p>
+                <h1
+                  className="text-[2.1rem] leading-[1.12] font-semibold tracking-tight xl:text-[2.5rem]"
+                  style={{
+                    fontFamily: "'Fraunces', Georgia, serif",
+                    color: '#F4F1EA',
+                  }}
+                >
+                  Evidence before action.
+                  <span
+                    className="mt-1 block bg-clip-text text-transparent"
+                    style={{
+                      backgroundImage: 'linear-gradient(90deg, #FF5B2E, #6B85FF)',
+                      WebkitBackgroundClip: 'text',
+                    }}
+                  >
+                    Protection before breach.
+                  </span>
+                </h1>
+                <p className="max-w-md text-[15px] leading-[1.65]" style={{ color: 'rgba(200,196,188,0.75)' }}>
+                  Discover, test, and protect your APIs — live inventory, correlated detections, and
+                  enforcement with audit-ready evidence for security teams.
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                {FEATURES.map(({ icon: Icon, title, desc }) => (
+                  <div
+                    key={title}
+                    className="group rounded-xl p-4 transition-colors"
+                    style={{
+                      border: '1px solid rgba(37,43,54,0.9)',
+                      background: 'rgba(26,31,40,0.45)',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = 'rgba(255,91,46,0.35)';
+                      e.currentTarget.style.background = 'rgba(26,31,40,0.7)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = 'rgba(37,43,54,0.9)';
+                      e.currentTarget.style.background = 'rgba(26,31,40,0.45)';
+                    }}
+                  >
+                    <Icon className="mb-3 h-4 w-4 transition-transform group-hover:scale-105" style={{ color: '#FF5B2E' }} />
+                    <div className="text-[13px] font-semibold" style={{ color: '#F4F1EA' }}>
+                      {title}
+                    </div>
+                    <p className="mt-1.5 text-[11.5px] leading-relaxed" style={{ color: 'rgba(200,196,188,0.65)' }}>
+                      {desc}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-xl p-4" style={{ border: '1px solid rgba(37,43,54,0.8)', background: 'rgba(14,17,22,0.4)' }}>
+                <div
+                  className="mb-3 uppercase"
+                  style={{
+                    fontSize: 10,
+                    letterSpacing: '0.08em',
+                    color: 'rgba(200,196,188,0.45)',
+                    fontFamily: "'IBM Plex Mono', monospace",
+                  }}
+                >
+                  Security capability flow
+                </div>
+                <div className="flex flex-wrap gap-x-1 gap-y-2">
+                  {FLOW.map((step, i) => (
+                    <div key={step.title} className="flex items-center gap-1">
+                      <div
+                        className="rounded-md px-2.5 py-1.5"
+                        style={{ border: '1px solid rgba(37,43,54,0.8)', background: 'rgba(26,31,40,0.5)' }}
+                      >
+                        <div className="text-[11px] font-semibold" style={{ color: '#F4F1EA' }}>
+                          {step.title}
+                        </div>
+                        <div className="text-[10px]" style={{ color: 'rgba(200,196,188,0.55)' }}>
+                          {step.sub}
+                        </div>
+                      </div>
+                      {i < FLOW.length - 1 && (
+                        <ChevronRight className="mx-0.5 h-3.5 w-3.5 shrink-0" style={{ color: 'rgba(200,196,188,0.3)' }} />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {['OWASP', 'Nuclei', 'Schemathesis', 'eBPF', 'OpenAPI', 'CI/CD Gate'].map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-full px-2.5 py-0.5 text-[10.5px] font-medium"
+                    style={{
+                      border: '1px solid rgba(37,43,54,0.7)',
+                      background: 'rgba(26,31,40,0.4)',
+                      color: 'rgba(200,196,188,0.7)',
+                    }}
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
             </div>
-            <h1 className="text-2xl font-bold" style={{ color: '#0f172a' }}>
-              {isSignup ? 'Create Account' : 'Welcome Back'}
-            </h1>
-            <p className="text-sm" style={{ color: '#64748b' }}>
-              {isSignup ? 'Set up your admin account' : 'Sign in to your security dashboard'}
+
+            <footer
+              className="flex items-start gap-2.5 pt-6 text-[11px] leading-relaxed"
+              style={{ borderTop: '1px solid rgba(37,43,54,0.8)', color: 'rgba(200,196,188,0.5)' }}
+            >
+              <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: 'rgba(255,91,46,0.7)' }} />
+              <span>
+                Sessions use httpOnly cookies. Tenant data is scoped by account. Active scans require an
+                allowlisted target and authenticated profile.
+              </span>
+            </footer>
+          </div>
+        </section>
+
+        {/* Right — credential panel */}
+        <section className="relative flex flex-col justify-center px-6 py-10 sm:px-10 lg:px-12 xl:px-14" style={{ background: '#F4F1EA' }}>
+          {/* Mobile brand strip */}
+          <div
+            className="mb-8 rounded-xl p-5 lg:hidden"
+            style={{ background: '#0E1116', color: '#C8C4BC', border: '1px solid #252B36' }}
+          >
+            <BrandMark size="sm" />
+            <p className="mt-4 text-[15px] font-semibold leading-snug" style={{ color: '#F4F1EA' }}>
+              Evidence before action. Protection before breach.
+            </p>
+            <p className="mt-2 text-[12px] leading-relaxed" style={{ color: 'rgba(200,196,188,0.7)' }}>
+              Live API discovery, testing, and runtime protection.
             </p>
           </div>
 
-          {/* Mobile feature cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 lg:hidden">
-            {[
-              { icon: '🔍', title: 'API Discovery', desc: 'Auto-discover all endpoints' },
-              { icon: '🧪', title: 'Security Testing', desc: 'OWASP Top 10 coverage' },
-              { icon: '🛡️', title: 'Real-time Protection', desc: 'WAF & threat blocking' },
-              { icon: '📊', title: 'Compliance Reports', desc: 'PCI-DSS, HIPAA, SOC2' },
-            ].map((feat) => (
-              <div
-                key={feat.title}
-                className="rounded-lg p-3 text-left flex items-center gap-3"
-                style={{
-                  background: 'rgba(255, 255, 255, 0.5)',
-                  border: '1px solid rgba(228, 231, 238, 0.6)',
-                }}
+          <div className="mx-auto w-full max-w-[400px] space-y-7">
+            <div className="space-y-1.5 lg:pt-2">
+              <h2
+                className="text-[1.65rem] font-semibold tracking-tight"
+                style={{ fontFamily: "'Fraunces', Georgia, serif", color: '#0E1116' }}
               >
-                <div className="text-lg shrink-0">{feat.icon}</div>
-                <div>
-                  <div className="text-xs font-semibold" style={{ color: '#0f172a' }}>{feat.title}</div>
-                  <div className="text-[11px]" style={{ color: '#94a3b8' }}>{feat.desc}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Error */}
-          {displayError && (
-            <div
-              role="alert"
-              aria-live="assertive"
-              className="rounded-lg px-4 py-2.5 text-sm flex items-start gap-2 animate-fade-in leading-snug"
-              style={{
-                background: 'rgba(239, 68, 68, 0.08)',
-                border: '1px solid rgba(239, 68, 68, 0.2)',
-                color: '#dc2626',
-              }}
-            >
-              <div className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0 mt-1.5" aria-hidden />
-              <span>{displayError}</span>
-            </div>
-          )}
-
-          <div className="space-y-4">
-            {/* Email */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#64748b' }}>
-                Email
-              </label>
-              <div className="relative">
-                <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: emailError ? '#ef4444' : '#94a3b8' }} />
-                <input
-                  data-testid="auth-email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  onBlur={handleEmailBlur}
-                  className="w-full rounded-xl pl-10 pr-4 py-3 min-h-[44px] text-sm transition-all outline-none"
-                  style={{
-                    background: '#f8fafc',
-                    border: `1px solid ${emailError ? '#ef4444' : '#e2e8f0'}`,
-                    color: '#0f172a',
-                    boxShadow: emailError ? '0 0 0 3px rgba(239, 68, 68, 0.1)' : 'none',
-                  }}
-                  onFocus={(e) => {
-                    e.target.style.borderColor = emailError ? '#ef4444' : '#818cf8';
-                    e.target.style.boxShadow = emailError ? '0 0 0 3px rgba(239, 68, 68, 0.1)' : '0 0 0 3px rgba(99, 102, 241, 0.1)';
-                  }}
-                  placeholder="you@company.com"
-                  disabled={submitting}
-                  autoComplete="email"
-                />
-              </div>
-              {emailError && (
-                <p className="text-[11px] text-red-500 flex items-center gap-1 mt-1">
-                  <span className="w-1 h-1 rounded-full bg-red-500" />
-                  {emailError}
-                </p>
-              )}
-            </div>
-
-            {/* Password */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-center">
-                <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#64748b' }}>
-                  Password
-                </label>
-                {!isSignup && (
-                  <a href="#" className="text-[11px] font-medium hover:underline" style={{ color: '#6366f1' }}>
-                    Forgot?
-                  </a>
-                )}
-              </div>
-              <div className="relative">
-                <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: passwordError ? '#ef4444' : '#94a3b8' }} />
-                <input
-                  data-testid="auth-password"
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onBlur={handlePasswordBlur}
-                  className="w-full rounded-xl pl-10 pr-10 py-3 min-h-[44px] text-sm transition-all outline-none"
-                  style={{
-                    background: '#f8fafc',
-                    border: `1px solid ${passwordError ? '#ef4444' : '#e2e8f0'}`,
-                    color: '#0f172a',
-                    boxShadow: passwordError ? '0 0 0 3px rgba(239, 68, 68, 0.1)' : 'none',
-                  }}
-                  onFocus={(e) => {
-                    e.target.style.borderColor = passwordError ? '#ef4444' : '#818cf8';
-                    e.target.style.boxShadow = passwordError ? '0 0 0 3px rgba(239, 68, 68, 0.1)' : '0 0 0 3px rgba(99, 102, 241, 0.1)';
-                  }}
-                  placeholder={isSignup ? 'Min 12 chars, letter, number, symbol' : 'Password'}
-                  disabled={submitting}
-                  autoComplete={isSignup ? 'new-password' : 'current-password'}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(v => !v)}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center -mr-3.5"
-                  style={{ color: passwordError ? '#ef4444' : '#94a3b8' }}
-                >
-                  {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
-              {passwordError && (
-                <p className="text-[11px] text-red-500 flex items-center gap-1 mt-1">
-                  <span className="w-1 h-1 rounded-full bg-red-500" />
-                  {passwordError}
-                </p>
-              )}
-            </div>
-
-            {/* Remember me */}
-            {!isSignup && (
-              <label className="flex items-center gap-2 cursor-pointer min-h-[44px]">
-                <input
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                  className="w-4 h-4 rounded"
-                  style={{ accentColor: '#6366f1' }}
-                />
-                <span className="text-xs" style={{ color: '#64748b' }}>Remember me</span>
-              </label>
-            )}
-
-            {isSignup && !passwordError && (
-              <p className="text-[11px]" style={{ color: '#64748b' }}>
-                Use at least 12 characters and include a letter, number, and symbol.
+                {isSignup ? 'Create account' : 'Welcome back'}
+              </h2>
+              <p className="text-[13px] leading-relaxed" style={{ color: '#5C5A56' }}>
+                {isSignup
+                  ? 'Set up your admin account for a new tenant workspace.'
+                  : 'Sign in with your allowlisted operator credentials.'}
               </p>
-            )}
+            </div>
 
-            {/* Submit Button - Archon gradient style */}
-            <button
-              data-testid="auth-submit"
-              type="submit"
-              disabled={submitting}
-              className="w-full rounded-xl px-4 py-3.5 min-h-[44px] text-sm font-bold text-white flex justify-center items-center gap-2 mt-2 transition-all duration-200 disabled:opacity-60 hover:opacity-90 hover:-translate-y-0.5"
+            <div
+              className={`overflow-hidden rounded-xl ${shakeError ? 'animate-[shake_0.5s_ease-in-out]' : ''}`}
               style={{
-                background: 'linear-gradient(135deg, #6366f1, #7c3aed, #a855f7)',
-                boxShadow: '0 4px 20px rgba(99, 102, 241, 0.35)',
+                border: '1px solid #DDD6C8',
+                background: '#FFFCF7',
+                boxShadow: '0 1px 2px rgba(14,17,22,0.04), 0 8px 24px rgba(14,17,22,0.06)',
               }}
             >
-              {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-              {submitting
-                ? (isSignup ? 'Creating Account...' : 'Signing In...')
-                : (isSignup ? 'Create Account' : 'Sign In')}
-            </button>
-          </div>
+              <div className="px-5 py-3" style={{ borderBottom: '1px solid #DDD6C8', background: 'rgba(235,230,220,0.8)' }}>
+                <p className="text-[11px] font-medium" style={{ color: '#5C5A56' }}>
+                  {isSignup ? 'New admin credentials' : 'Operator credentials'}
+                </p>
+              </div>
 
-          {/* Toggle mode */}
-          <div className="text-center pt-4" style={{ borderTop: '1px solid #e4e7ee' }}>
-            <button
-              data-testid="auth-mode-toggle"
-              type="button"
-              onClick={() => { setIsSignup(v => !v); setLocalError(null); }}
-              className="text-xs transition-colors outline-none cursor-pointer min-h-[44px]"
-              style={{ color: '#64748b' }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = '#6366f1')}
-              onMouseLeave={(e) => (e.currentTarget.style.color = '#64748b')}
+              <form onSubmit={handleSubmit} className="space-y-4 p-5">
+                {displayError && (
+                  <div
+                    role="alert"
+                    aria-live="assertive"
+                    className="rounded-lg px-3.5 py-2.5 text-[13px] leading-snug"
+                    style={{
+                      background: 'rgba(220,38,38,0.08)',
+                      border: '1px solid rgba(220,38,38,0.22)',
+                      color: '#B42318',
+                    }}
+                  >
+                    {displayError}
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <label htmlFor="auth-email" className="text-xs font-medium" style={{ color: '#0E1116' }}>
+                    Work email
+                  </label>
+                  <div className="relative">
+                    <Mail
+                      size={15}
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"
+                      style={{ color: emailError ? '#DC2626' : '#8A867E' }}
+                    />
+                    <input
+                      id="auth-email"
+                      data-testid="auth-email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="h-11 w-full rounded-md border pl-10 pr-3 text-sm outline-none transition-shadow"
+                      style={{
+                        background: '#F4F1EA',
+                        borderColor: emailError ? '#DC2626' : '#D4CDC0',
+                        color: '#0E1116',
+                        boxShadow: emailError ? '0 0 0 3px rgba(220,38,38,0.12)' : undefined,
+                      }}
+                      onFocus={(e) => {
+                        if (!emailError) {
+                          e.target.style.borderColor = '#2B4CFF';
+                          e.target.style.boxShadow = '0 0 0 3px rgba(43,76,255,0.12)';
+                        }
+                      }}
+                      onBlur={(e) => {
+                        if (email.trim()) {
+                          const result = validateEmail(email);
+                          setEmailError(result.valid ? null : result.error || null);
+                          e.target.style.borderColor = result.valid ? '#D4CDC0' : '#DC2626';
+                          e.target.style.boxShadow = result.valid ? 'none' : '0 0 0 3px rgba(220,38,38,0.12)';
+                        } else {
+                          e.target.style.borderColor = '#D4CDC0';
+                          e.target.style.boxShadow = 'none';
+                        }
+                      }}
+                      placeholder="you@company.com"
+                      disabled={submitting}
+                      autoComplete="email"
+                      autoFocus
+                    />
+                  </div>
+                  {emailError && <p className="text-[11px]" style={{ color: '#DC2626' }}>{emailError}</p>}
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="auth-password" className="text-xs font-medium" style={{ color: '#0E1116' }}>
+                      Password
+                    </label>
+                    {!isSignup && (
+                      <a href="#" className="text-[11px] font-medium hover:underline" style={{ color: '#D94418' }}>
+                        Forgot?
+                      </a>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <Lock
+                      size={15}
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"
+                      style={{ color: passwordError ? '#DC2626' : '#8A867E' }}
+                    />
+                    <input
+                      id="auth-password"
+                      data-testid="auth-password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="h-11 w-full rounded-md border pl-10 pr-10 text-sm outline-none transition-shadow"
+                      style={{
+                        background: '#F4F1EA',
+                        borderColor: passwordError ? '#DC2626' : '#D4CDC0',
+                        color: '#0E1116',
+                        boxShadow: passwordError ? '0 0 0 3px rgba(220,38,38,0.12)' : undefined,
+                      }}
+                      onFocus={(e) => {
+                        if (!passwordError) {
+                          e.target.style.borderColor = '#2B4CFF';
+                          e.target.style.boxShadow = '0 0 0 3px rgba(43,76,255,0.12)';
+                        }
+                      }}
+                      onBlur={(e) => {
+                        if (password) {
+                          const result = validatePassword(password);
+                          const policy = getPasswordValidationError(password, isSignup);
+                          const err = !result.valid ? result.error : policy;
+                          setPasswordError(err || null);
+                          e.target.style.borderColor = err ? '#DC2626' : '#D4CDC0';
+                          e.target.style.boxShadow = err ? '0 0 0 3px rgba(220,38,38,0.12)' : 'none';
+                        } else {
+                          e.target.style.borderColor = '#D4CDC0';
+                          e.target.style.boxShadow = 'none';
+                        }
+                      }}
+                      placeholder={isSignup ? 'Min 12 chars, letter, number, symbol' : 'Password'}
+                      disabled={submitting}
+                      autoComplete={isSignup ? 'new-password' : 'current-password'}
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2"
+                      style={{ color: '#8A867E' }}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  {passwordError && <p className="text-[11px]" style={{ color: '#DC2626' }}>{passwordError}</p>}
+                </div>
+
+                {!isSignup && (
+                  <label className="flex min-h-[40px] items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                      className="h-4 w-4 rounded"
+                      style={{ accentColor: '#FF5B2E' }}
+                    />
+                    <span className="text-xs" style={{ color: '#5C5A56' }}>
+                      Remember me
+                    </span>
+                  </label>
+                )}
+
+                {isSignup && !passwordError && (
+                  <p className="text-[11px]" style={{ color: '#5C5A56' }}>
+                    Use at least 12 characters and include a letter, number, and symbol.
+                  </p>
+                )}
+
+                <button
+                  data-testid="auth-submit"
+                  type="submit"
+                  disabled={submitting}
+                  className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md px-4 text-[13px] font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ background: '#2B4CFF' }}
+                  onMouseEnter={(e) => {
+                    if (!submitting) e.currentTarget.style.background = '#FF5B2E';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#2B4CFF';
+                  }}
+                >
+                  {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {submitting
+                    ? isSignup
+                      ? 'Creating account…'
+                      : 'Signing in…'
+                    : isSignup
+                      ? 'Create admin account'
+                      : 'Sign in with credentials'}
+                </button>
+              </form>
+            </div>
+
+            <p className="text-center text-[11px] leading-relaxed" style={{ color: '#5C5A56' }}>
+              {isSignup ? (
+                <>
+                  Already have an account?{' '}
+                  <button
+                    data-testid="auth-mode-toggle"
+                    type="button"
+                    onClick={() => {
+                      setIsSignup(false);
+                      setLocalError(null);
+                    }}
+                    className="font-semibold underline-offset-2 hover:underline"
+                    style={{ color: '#D94418' }}
+                  >
+                    Sign in
+                  </button>
+                </>
+              ) : (
+                <>
+                  Access is limited to provisioned operators.
+                  <br />
+                  First time?{' '}
+                  <button
+                    data-testid="auth-mode-toggle"
+                    type="button"
+                    onClick={() => {
+                      setIsSignup(true);
+                      setLocalError(null);
+                    }}
+                    className="font-semibold underline-offset-2 hover:underline"
+                    style={{ color: '#D94418' }}
+                  >
+                    Create admin account
+                  </button>
+                </>
+              )}
+            </p>
+
+            <div
+              className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 pt-5 text-[10.5px]"
+              style={{ borderTop: '1px solid #DDD6C8', color: '#5C5A56' }}
             >
-              {isSignup ? 'Already have an account? ' : 'First time? '}
-              <span style={{ color: '#6366f1', fontWeight: 600 }}>
-                {isSignup ? 'Sign In' : 'Create Admin Account'}
+              <span className="inline-flex items-center gap-1.5">
+                <Boxes className="h-3.5 w-3.5" style={{ color: 'rgba(43,76,255,0.7)' }} />
+                Live inventory
               </span>
-            </button>
+              <span className="inline-flex items-center gap-1.5">
+                <Activity className="h-3.5 w-3.5" style={{ color: 'rgba(43,76,255,0.7)' }} />
+                Runtime detect
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <ScrollText className="h-3.5 w-3.5" style={{ color: 'rgba(43,76,255,0.7)' }} />
+                Audit evidence
+              </span>
+            </div>
           </div>
-        </form>
+        </section>
       </div>
 
-      {/* Keyframe animations */}
       <style>{`
         @keyframes shake {
           0%, 100% { transform: translateX(0); }
           10%, 50%, 90% { transform: translateX(-4px); }
           30%, 70% { transform: translateX(4px); }
-        }
-        @keyframes mesh-float-1 {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          33% { transform: translate(60px, -40px) scale(1.1); }
-          66% { transform: translate(-30px, 30px) scale(0.95); }
-        }
-        @keyframes mesh-float-2 {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          33% { transform: translate(-50px, 30px) scale(1.05); }
-          66% { transform: translate(40px, -20px) scale(0.9); }
-        }
-        @keyframes mesh-float-3 {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          33% { transform: translate(30px, -50px) scale(1.08); }
-          66% { transform: translate(-40px, 20px) scale(0.92); }
-        }
-        @keyframes mesh-float-4 {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          33% { transform: translate(-40px, -30px) scale(1.05); }
-          66% { transform: translate(50px, 40px) scale(0.95); }
         }
       `}</style>
     </div>

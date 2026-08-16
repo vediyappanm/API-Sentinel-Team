@@ -1,94 +1,65 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Wifi, WifiOff, Activity, Shield, Ban, Zap, Download, X, RefreshCw, Search, Filter } from 'lucide-react';
-import MetricWidget from '@/components/ui/MetricWidget';
-import StatusPulse from '@/components/ui/StatusPulse';
+import {
+  Activity, Shield, Ban, Zap, Download, X, RefreshCw, Search, Filter, Copy, Pause, Play,
+} from 'lucide-react';
 import QueryError from '@/components/shared/QueryError';
-import { buildWebSocketUrl, fetchWithSession, getToken, get } from '@/lib/api-client';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface AttackInfo {
-  category: string;
-  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
-}
-
-interface LogEntry {
-  id: string;
-  ip: string;
-  method: string;
-  path: string;
-  status: number;
-  bytes: string | number;
-  timestamp: string;
-  attacks: AttackInfo[];
-}
-
-interface WsMessage {
-  type: 'log_entry';
-  data: Omit<LogEntry, 'id'>;
-}
+import { fetchWithSession, get } from '@/lib/api-client';
+import { useLiveTraffic, type LiveLogEntry } from '@/lib/realtime';
+import {
+  formatAbsolute, formatClock, formatLatency, formatProtocol, formatRelative, methodTone, statusTone,
+} from '@/lib/format';
+import EvidencePanel from '@/components/ui/EvidencePanel';
+import EvidenceSectionHead from '@/components/ui/EvidenceSectionHead';
+import EvidenceStamp from '@/components/ui/EvidenceStamp';
+import EvidenceLedgerItem from '@/components/ui/EvidenceLedger';
 
 type SeverityFilter = 'ALL' | 'CRITICAL' | 'HIGH' | 'MEDIUM';
+type MethodFilter = 'ALL' | 'GET' | 'POST' | 'PUT' | 'DELETE' | 'OTHER';
 
-const MAX_ROWS = 200;
-const WS_URL = buildWebSocketUrl('/api/stream/live');
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function genId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function formatTime(iso: string): string {
-  try { return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
-  catch { return iso; }
-}
-
-function statusColor(code: number): string {
-  if (code >= 200 && code < 300) return '#22C55E';
-  if (code >= 400 && code < 500) return '#EAB308';
-  if (code >= 500) return '#EF4444';
-  return '#6B6B80';
-}
-
-function methodColors(method: string): { bg: string; text: string } {
-  const map: Record<string, { bg: string; text: string }> = {
-    GET: { bg: 'rgba(59,130,246,0.15)', text: '#60A5FA' },
-    POST: { bg: 'rgba(34,197,94,0.15)', text: '#4ADE80' },
-    PUT: { bg: 'rgba(234,179,8,0.15)', text: '#FACC15' },
-    DELETE: { bg: 'rgba(239,68,68,0.15)', text: '#F87171' },
-    PATCH: { bg: 'rgba(167,139,250,0.15)', text: '#C4B5FD' },
-  };
-  return map[method.toUpperCase()] ?? { bg: 'rgba(107,114,128,0.15)', text: '#6B6B80' };
-}
-
-function severityColor(sev: string): string {
-  const map: Record<string, string> = { CRITICAL: '#EF4444', HIGH: '#F97316', MEDIUM: '#EAB308', LOW: '#22C55E' };
-  return map[sev.toUpperCase()] ?? '#6B6B80';
-}
-
-function maxEntrySeverity(attacks: AttackInfo[]): string {
+function maxEntrySeverity(attacks: LiveLogEntry['attacks']): string {
   if (!attacks.length) return '';
   const order = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
-  for (const sev of order) { if (attacks.some((a) => a.severity === sev)) return sev; }
+  for (const sev of order) {
+    if (attacks.some((a) => a.severity === sev)) return sev;
+  }
   return attacks[0].severity;
 }
 
-function exportCsv(rows: LogEntry[]): void {
-  const header = 'Timestamp,IP,Method,Path,Status,Bytes,Threats\n';
-  const body = rows.map((r) => {
-    const threats = r.attacks.map((a) => `${a.category}(${a.severity})`).join('; ');
-    return `"${r.timestamp}","${r.ip}","${r.method}","${r.path}",${r.status},${r.bytes},"${threats}"`;
-  }).join('\n');
+function severityColor(sev: string): string {
+  const map: Record<string, string> = {
+    CRITICAL: 'var(--evd-critical)',
+    HIGH: 'var(--evd-high)',
+    MEDIUM: 'var(--evd-medium)',
+    LOW: 'var(--evd-low)',
+  };
+  return map[sev.toUpperCase()] ?? 'var(--evd-ink-muted)';
+}
+
+function methodBucket(method: string): MethodFilter {
+  const upper = method.toUpperCase();
+  if (upper === 'GET' || upper === 'POST' || upper === 'PUT' || upper === 'DELETE') return upper;
+  return 'OTHER';
+}
+
+function exportCsv(rows: LiveLogEntry[]): void {
+  const header = 'Timestamp,IP,Host,Method,Path,Status,Protocol,LatencyMs,Threats\n';
+  const body = rows
+    .map((r) => {
+      const threats = r.attacks.map((a) => `${a.category}(${a.severity})`).join('; ');
+      return `"${r.timestamp}","${r.ip}","${r.host ?? ''}","${r.method}","${r.path}",${r.status},"${r.protocol ?? ''}",${r.latencyMs ?? ''},"${threats}"`;
+    })
+    .join('\n');
   const blob = new Blob([header + body], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = `live-feed-${Date.now()}.csv`; a.click();
+  a.href = url;
+  a.download = `live-feed-${Date.now()}.csv`;
+  a.click();
   URL.revokeObjectURL(url);
 }
 
-function computeStats(rows: LogEntry[], activeSensors: number) {
+function computeStats(rows: LiveLogEntry[], activeSensors: number) {
   const now = Date.now();
   const recent = rows.filter((r) => new Date(r.timestamp).getTime() >= now - 60_000);
   const threats = rows.filter((r) => r.attacks.length > 0).length;
@@ -96,212 +67,360 @@ function computeStats(rows: LogEntry[], activeSensors: number) {
   return { reqPerMin: recent.length, threats, blockedIps, sensors: activeSensors };
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+async function copyText(value: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch {
+    /* ignore */
+  }
+}
+
+const METHOD_FILTERS: MethodFilter[] = ['ALL', 'GET', 'POST', 'PUT', 'DELETE', 'OTHER'];
 
 const LiveFeed: React.FC = () => {
-  const [entries, setEntries] = useState<LogEntry[]>([]);
-  const [connected, setConnected] = useState(false);
+  const { connected, recentLogs, clearLogs, seedLogs } = useLiveTraffic();
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('ALL');
+  const [methodFilter, setMethodFilter] = useState<MethodFilter>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
-  const [userScrolled, setUserScrolled] = useState(false);
-
-  const wsRef = useRef<WebSocket | null>(null);
+  const [paused, setPaused] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now());
   const tableBodyRef = useRef<HTMLDivElement>(null);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data: sensorsData } = useQuery({
     queryKey: ['live-feed', 'sensors'],
     queryFn: () => get<{ sensors: { status: string }[] }>('/sensors/').catch(() => ({ sensors: [] })),
     refetchInterval: 30_000,
   });
-  const activeSensors: number = (sensorsData?.sensors ?? []).filter((s: { status: string }) => s.status === 'ONLINE').length;
+  const activeSensors = (sensorsData?.sensors ?? []).filter((s) => s.status === 'ONLINE').length;
 
   const { isLoading: initialLoading, isError, refetch } = useQuery({
     queryKey: ['live-feed', 'recent'],
     queryFn: async ({ signal }) => {
-      const res = await fetchWithSession('/stream/recent', { signal });
+      const res = await fetchWithSession('/stream/recent?limit=100', { signal });
       const json = await res.json();
-      const items: LogEntry[] = (json.data ?? json ?? []).map((d: Omit<LogEntry, 'id'>) => ({ ...d, id: genId() }));
-      setEntries(items.slice(0, MAX_ROWS));
+      const rows = Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
+      const items: LiveLogEntry[] = rows.map((d: Record<string, unknown>) => ({
+        id: typeof d.id === 'string' ? d.id : `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        ip: String(d.ip ?? ''),
+        method: String(d.method ?? ''),
+        path: String(d.path ?? ''),
+        status: Number(d.status ?? 0),
+        bytes: (d.bytes as string | number) ?? '-',
+        timestamp: String(d.timestamp ?? new Date().toISOString()),
+        attacks: Array.isArray(d.attacks) ? (d.attacks as LiveLogEntry['attacks']) : [],
+        host: d.host ? String(d.host) : '',
+        protocol: d.protocol ? String(d.protocol) : '',
+        latencyMs: typeof d.latency_ms === 'number' ? d.latency_ms : null,
+        source: d.source ? String(d.source) : '',
+      }));
+      seedLogs(items);
       return items;
     },
-    staleTime: Infinity,
+    staleTime: 15_000,
+    refetchOnMount: 'always',
     retry: 1,
   });
 
-  const connect = useCallback(() => {
-    if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close(); }
-    const token = getToken();
-    const url = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
-    ws.onopen = () => setConnected(true);
-    ws.onmessage = (ev) => {
-      try {
-        const msg: WsMessage = JSON.parse(ev.data);
-        if (msg.type !== 'log_entry') return;
-        setEntries((prev) => [{ ...msg.data, id: genId() }, ...prev].slice(0, MAX_ROWS));
-      } catch { /* ignore */ }
-    };
-    ws.onerror = () => setConnected(false);
-    ws.onclose = () => { setConnected(false); reconnectTimerRef.current = setTimeout(connect, 3000); };
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
-    connect();
-    return () => { wsRef.current?.close(); if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current); };
-  }, [connect]);
-
-  useEffect(() => {
-    if (!userScrolled && tableBodyRef.current) tableBodyRef.current.scrollTop = 0;
-  }, [entries, userScrolled]);
+    if (!paused && tableBodyRef.current) tableBodyRef.current.scrollTop = 0;
+  }, [recentLogs, paused]);
 
   const handleScroll = useCallback(() => {
-    if (!tableBodyRef.current) return;
-    setUserScrolled(tableBodyRef.current.scrollTop > 50);
-  }, []);
+    if (!tableBodyRef.current || paused) return;
+    if (tableBodyRef.current.scrollTop > 50) setPaused(true);
+  }, [paused]);
 
   const filteredEntries = useMemo(() => {
-    return entries.filter((e) => {
-      if (severityFilter !== 'ALL') { const topSev = maxEntrySeverity(e.attacks); if (topSev !== severityFilter) return false; }
-      if (searchQuery) { const q = searchQuery.toLowerCase(); if (!e.ip.toLowerCase().includes(q) && !e.path.toLowerCase().includes(q)) return false; }
+    return recentLogs.filter((e) => {
+      if (severityFilter !== 'ALL') {
+        const topSev = maxEntrySeverity(e.attacks);
+        if (topSev !== severityFilter) return false;
+      }
+      if (methodFilter !== 'ALL' && methodBucket(e.method) !== methodFilter) return false;
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        const hay = `${e.ip} ${e.path} ${e.host ?? ''} ${e.method} ${e.status}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
       return true;
     });
-  }, [entries, severityFilter, searchQuery]);
+  }, [recentLogs, severityFilter, methodFilter, searchQuery]);
 
-  const stats = useMemo(() => computeStats(entries, activeSensors), [entries, activeSensors]);
+  const selected = filteredEntries.find((e) => e.id === selectedId) ?? filteredEntries[0] ?? null;
+  const stats = useMemo(() => computeStats(recentLogs, activeSensors), [recentLogs, activeSensors]);
+  const newest = recentLogs[0];
 
   return (
-    <div className="space-y-5 animate-fade-in w-full pb-10">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h2 className="text-sm font-bold text-text-primary">Live Traffic Feed</h2>
-          <div className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border"
-            style={connected
-              ? { color: '#22C55E', background: 'rgba(34,197,94,0.1)', borderColor: 'rgba(34,197,94,0.2)' }
-              : { color: '#EF4444', background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.2)' }}>
-            <StatusPulse variant={connected ? 'online' : 'critical'} size="sm" />
-            {connected ? 'Connected' : 'Disconnected'}
+    <div className="space-y-5 w-full p-4 pb-10 animate-fade-in">
+      <div className="flex items-end justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="evd-display text-xl" style={{ color: 'var(--evd-paper)' }}>
+            LIVE TRAFFIC FEED
+          </h1>
+          <div className="flex items-center gap-3 mt-2 flex-wrap">
+            <EvidenceStamp tone={connected ? 'ok' : 'warn'} pulse>
+              {connected ? 'STREAM NOMINAL' : 'RECONNECTING'}
+            </EvidenceStamp>
+            {paused && <EvidenceStamp tone="warn">PAUSED</EvidenceStamp>}
+            <span className="evd-mono text-[11px]" style={{ color: 'var(--evd-ink-muted)' }}>
+              eBPF → /v1/events · {filteredEntries.length}/{recentLogs.length} ROWS
+              {newest ? ` · last ${formatRelative(newest.timestamp, now)}` : ''}
+            </span>
           </div>
         </div>
-        {connected ? <Wifi size={16} className="text-sev-low" /> : <WifiOff size={16} className="text-sev-critical" />}
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <MetricWidget label="Requests / min" value={stats.reqPerMin} icon={Activity} iconColor="#F97316" iconBg="rgba(249,115,22,0.1)" />
-        <MetricWidget label="Threats Detected" value={stats.threats} icon={Shield} iconColor="#EF4444" iconBg="rgba(239,68,68,0.1)" />
-        <MetricWidget label="Blocked IPs" value={stats.blockedIps} icon={Ban} iconColor="#EAB308" iconBg="rgba(234,179,8,0.1)" />
-        <MetricWidget label="Active Sensors" value={stats.sensors} icon={Zap} iconColor="#22C55E" iconBg="rgba(34,197,94,0.1)" />
+      <div className="evd-ledger">
+        <EvidenceLedgerItem icon={Activity} color="var(--evd-signal)" label="Requests / min" value={stats.reqPerMin} />
+        <EvidenceLedgerItem icon={Shield} color="var(--evd-critical)" label="Threats" value={stats.threats} />
+        <EvidenceLedgerItem icon={Ban} color="var(--evd-medium)" label="Flagged IPs" value={stats.blockedIps} />
+        <EvidenceLedgerItem icon={Zap} color="var(--evd-low)" label="Active Sensors" value={stats.sensors} />
       </div>
 
-      {/* Filter bar */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-2 bg-bg-surface border border-border-subtle rounded-lg px-3 py-2">
-          <Filter size={13} className="text-text-muted" />
-          <select value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value as SeverityFilter)}
-            className="bg-transparent text-xs text-text-primary outline-none cursor-pointer">
-            <option value="ALL">All Severity</option>
-            <option value="CRITICAL">Critical</option>
-            <option value="HIGH">High</option>
-            <option value="MEDIUM">Medium</option>
-          </select>
-        </div>
-        <div className="flex items-center gap-2 bg-bg-surface border border-border-subtle rounded-lg px-3 py-2 flex-1 min-w-[180px] max-w-xs">
-          <Search size={13} className="text-text-muted" />
-          <input type="text" placeholder="Search IP or path..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-            className="bg-transparent text-xs text-text-primary outline-none placeholder:text-text-muted w-full" />
-          {searchQuery && <button onClick={() => setSearchQuery('')} className="text-text-muted hover:text-text-primary"><X size={12} /></button>}
-        </div>
-        <div className="flex items-center gap-2 ml-auto">
-          <button onClick={() => setEntries([])} className="flex items-center gap-1.5 bg-bg-surface border border-border-subtle rounded-lg px-3 py-2 text-xs text-text-secondary hover:text-text-primary hover:border-brand/20 transition-all">
-            <X size={13} /> Clear
-          </button>
-          <button onClick={() => exportCsv(filteredEntries)} className="flex items-center gap-1.5 bg-bg-surface border border-border-subtle rounded-lg px-3 py-2 text-xs text-text-secondary hover:text-text-primary hover:border-brand/20 transition-all">
-            <Download size={13} /> Export CSV
-          </button>
-        </div>
-      </div>
-
-      {isError && (
-        <QueryError message="Failed to load recent traffic" onRetry={() => refetch()} />
-      )}
-
-      {/* Table */}
-      <div className="bg-bg-surface border border-border-subtle rounded-xl flex flex-col overflow-hidden">
-        <div className="p-3 border-b border-border-subtle flex items-center justify-between">
-          <span className="text-sm font-bold text-text-primary flex items-center gap-2">
-            <Activity size={14} className="text-brand" />
-            Live Events
-            <span className="text-[11px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted">{filteredEntries.length} rows</span>
-          </span>
-          {userScrolled && (
-            <button onClick={() => { setUserScrolled(false); tableBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' }); }}
-              className="flex items-center gap-1 text-[11px] text-brand hover:text-brand-light transition-colors">
-              <RefreshCw size={10} /> Resume live scroll
+      <EvidencePanel exhibit="EXH-LIVE">
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
+          <EvidenceSectionHead code="§LF" title="Event Stream" desc="HTTP ONLY · WS FRAMES SUPPRESSED" />
+          <div className="flex items-center gap-2 flex-wrap">
+            <div
+              className="flex items-center gap-2 px-3 py-1.5"
+              style={{ border: '1px solid var(--evd-line)', background: 'var(--evd-panel-raised)' }}
+            >
+              <Filter size={12} style={{ color: 'var(--evd-ink-muted)' }} />
+              <select
+                value={severityFilter}
+                onChange={(e) => setSeverityFilter(e.target.value as SeverityFilter)}
+                className="evd-mono text-[11px] bg-transparent outline-none cursor-pointer"
+                style={{ color: 'var(--evd-paper)' }}
+              >
+                <option value="ALL">All severity</option>
+                <option value="CRITICAL">Critical</option>
+                <option value="HIGH">High</option>
+                <option value="MEDIUM">Medium</option>
+              </select>
+            </div>
+            <div
+              className="flex items-center gap-2 px-3 py-1.5 flex-1 min-w-[180px]"
+              style={{ border: '1px solid var(--evd-line)', background: 'var(--evd-panel-raised)' }}
+            >
+              <Search size={12} style={{ color: 'var(--evd-ink-muted)' }} />
+              <input
+                type="text"
+                placeholder="IP, host, path, method…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="evd-mono text-[11px] bg-transparent outline-none w-full"
+                style={{ color: 'var(--evd-paper)' }}
+              />
+              {searchQuery && (
+                <button type="button" onClick={() => setSearchQuery('')} style={{ color: 'var(--evd-ink-muted)' }}>
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setPaused((v) => !v)}
+              className="evd-btn"
+              title={paused ? 'Resume live scroll' : 'Pause live scroll'}
+            >
+              {paused ? <Play size={14} /> : <Pause size={14} />}
             </button>
-          )}
+            <button type="button" onClick={clearLogs} className="evd-btn" aria-label="Clear feed" title="Clear">
+              <X size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={() => exportCsv(filteredEntries)}
+              className="evd-btn"
+              aria-label="Export CSV"
+              title="Export CSV"
+            >
+              <Download size={14} />
+            </button>
+          </div>
         </div>
 
-        <div ref={tableBodyRef} onScroll={handleScroll} className="overflow-auto" style={{ maxHeight: '580px' }}>
-          <table className="w-full text-left border-collapse min-w-[550px]">
-            <thead className="sticky top-0 bg-bg-base/90 backdrop-blur-sm border-b border-border-subtle z-10">
-              <tr>
-                {['Timestamp', 'IP Address', 'Method', 'Path', 'Status', 'Threat', 'Bytes'].map(h => (
-                  <th key={h} className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-subtle">
-              {initialLoading && Array.from({ length: 8 }).map((_, i) => (
-                <tr key={i} className="animate-pulse">
-                  {Array.from({ length: 7 }).map((_, j) => (
-                    <td key={j} className="px-4 py-3"><div className="h-3 bg-black/[0.04] rounded" style={{ width: j === 3 ? '80%' : '60%' }} /></td>
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {METHOD_FILTERS.map((method) => (
+            <button
+              key={method}
+              type="button"
+              onClick={() => setMethodFilter(method)}
+              className="evd-mono text-[10px] px-2 py-1"
+              style={{
+                border: '1px solid var(--evd-line)',
+                background: methodFilter === method ? 'var(--evd-signal-dim)' : 'transparent',
+                color: methodFilter === method ? 'var(--evd-signal)' : 'var(--evd-ink-muted)',
+              }}
+            >
+              {method}
+            </button>
+          ))}
+        </div>
+
+        {isError && <QueryError message="Failed to load recent traffic" onRetry={() => refetch()} />}
+
+        {paused && (
+          <button
+            type="button"
+            onClick={() => {
+              setPaused(false);
+              tableBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className="evd-link mb-3"
+          >
+            <RefreshCw size={11} /> RESUME LIVE SCROLL
+          </button>
+        )}
+
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div ref={tableBodyRef} onScroll={handleScroll} className="overflow-auto" style={{ maxHeight: 580 }}>
+            <table className="evd-table min-w-[720px]">
+              <thead className="sticky top-0 z-10">
+                <tr>
+                  {['Time', 'Source', 'Method', 'Host / Path', 'Status', 'Proto', 'Latency', 'Threat'].map((h) => (
+                    <th key={h}>{h}</th>
                   ))}
                 </tr>
-              ))}
+              </thead>
+              <tbody>
+                {initialLoading &&
+                  recentLogs.length === 0 &&
+                  Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={i} className="animate-pulse">
+                      {Array.from({ length: 8 }).map((_, j) => (
+                        <td key={j}>
+                          <div className="h-3 rounded" style={{ width: j === 3 ? '80%' : '60%', background: 'var(--evd-line)' }} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
 
-              {!initialLoading && filteredEntries.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-xs text-text-muted">
-                  {connected ? 'Waiting for traffic...' : 'Disconnected. Reconnecting...'}
-                </td></tr>
-              )}
-
-              {filteredEntries.map((entry) => {
-                const attacks = entry.attacks ?? [];
-                const isThreat = attacks.length > 0;
-                const topAttack = isThreat ? attacks[0] : null;
-                const mc = methodColors(entry.method);
-                const sc = statusColor(entry.status);
-
-                return (
-                  <tr key={entry.id} className={`transition-colors hover:bg-white/[0.02] ${isThreat ? 'bg-red-950/20' : ''}`}>
-                    <td className="px-4 py-2.5 text-[11px] font-mono text-text-muted whitespace-nowrap">{formatTime(entry.timestamp)}</td>
-                    <td className="px-4 py-2.5 text-[12px] font-mono text-text-primary whitespace-nowrap">{entry.ip}</td>
-                    <td className="px-4 py-2.5">
-                      <span className="text-[11px] font-bold font-mono px-2 py-0.5 rounded" style={{ backgroundColor: mc.bg, color: mc.text }}>{entry.method}</span>
-                    </td>
-                    <td className="px-4 py-2.5 text-[12px] font-mono text-text-secondary max-w-[280px] truncate">{entry.path}</td>
-                    <td className="px-4 py-2.5"><span className="text-[12px] font-bold font-mono tabular-nums" style={{ color: sc }}>{entry.status}</span></td>
-                    <td className="px-4 py-2.5">
-                      {topAttack ? (
-                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap"
-                          style={{ color: severityColor(topAttack.severity), borderColor: `${severityColor(topAttack.severity)}40`, backgroundColor: `${severityColor(topAttack.severity)}15` }}>
-                          {topAttack.category}
-                        </span>
-                      ) : <span className="text-[11px] text-text-muted">-</span>}
-                    </td>
-                    <td className="px-4 py-2.5 text-[11px] font-mono text-text-muted whitespace-nowrap">
-                      {entry.bytes != null && entry.bytes !== '-' ? Number(entry.bytes).toLocaleString() + ' B' : '-'}
+                {!initialLoading && filteredEntries.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="text-center py-12">
+                      <div className="space-y-2">
+                        <p className="evd-mono text-[11px]" style={{ color: 'var(--evd-ink-muted)' }}>
+                          {connected
+                            ? 'No HTTP request logs for this tenant yet.'
+                            : 'Disconnected — reconnecting via shared socket…'}
+                        </p>
+                        <p className="text-[12px]" style={{ color: 'var(--evd-ink-muted)' }}>
+                          Live Feed shows decrypted HTTPS from the node eBPF sensor. Generate traffic to a
+                          wecrew ingress host, then this table fills.
+                        </p>
+                        <button type="button" onClick={() => refetch()} className="evd-link mt-2">
+                          <RefreshCw size={11} /> RELOAD RECENT
+                        </button>
+                      </div>
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                )}
+
+                {filteredEntries.map((entry) => {
+                  const attacks = entry.attacks ?? [];
+                  const topAttack = attacks[0] ?? null;
+                  const mc = methodTone(entry.method);
+                  const sc = statusTone(entry.status);
+                  const isSelected = selected?.id === entry.id;
+                  return (
+                    <tr
+                      key={entry.id}
+                      data-selected={isSelected || undefined}
+                      onClick={() => setSelectedId(entry.id)}
+                      style={attacks.length ? { background: 'var(--evd-signal-dim)' } : undefined}
+                    >
+                      <td className="whitespace-nowrap">
+                        <div className="evd-mono text-[11px] tabular-nums">{formatClock(entry.timestamp)}</div>
+                        <div className="evd-mono text-[10px]" style={{ color: 'var(--evd-ink-muted)' }}>
+                          {formatRelative(entry.timestamp, now)}
+                        </div>
+                      </td>
+                      <td className="evd-mono text-[12px] whitespace-nowrap">{entry.ip || '—'}</td>
+                      <td>
+                        <span className="evd-mono text-[10px] font-bold px-2 py-0.5" style={{ background: mc.bg, color: mc.text }}>
+                          {entry.method}
+                        </span>
+                      </td>
+                      <td className="max-w-[320px]">
+                        {entry.host ? (
+                          <div className="evd-mono text-[10px] truncate" style={{ color: 'var(--evd-ink-muted)' }}>
+                            {entry.host}
+                          </div>
+                        ) : null}
+                        <div className="evd-mono text-[12px] truncate">{entry.path}</div>
+                      </td>
+                      <td className="evd-mono text-[12px] font-bold tabular-nums" style={{ color: sc }}>
+                        {entry.status || '—'}
+                      </td>
+                      <td className="evd-mono text-[10px] whitespace-nowrap" style={{ color: 'var(--evd-ink-muted)' }}>
+                        {formatProtocol(entry.protocol)}
+                      </td>
+                      <td className="evd-mono text-[11px] tabular-nums whitespace-nowrap" style={{ color: 'var(--evd-ink-muted)' }}>
+                        {formatLatency(entry.latencyMs)}
+                      </td>
+                      <td>
+                        {topAttack ? (
+                          <span className="evd-badge" style={{ color: severityColor(topAttack.severity) }}>
+                            {topAttack.category}
+                          </span>
+                        ) : (
+                          <span className="evd-mono text-[11px]" style={{ color: 'var(--evd-ink-muted)' }}>—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <aside className="evd-inspector">
+            {selected ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="evd-mono text-[10px] tracking-[0.14em]" style={{ color: 'var(--evd-ink-muted)' }}>
+                    EVENT DETAIL
+                  </span>
+                  <button type="button" className="evd-link" onClick={() => copyText(`${selected.method} ${selected.host ?? ''}${selected.path}`)}>
+                    <Copy size={11} /> COPY
+                  </button>
+                </div>
+                <dl className="evd-kv">
+                  <div><dt>Observed</dt><dd>{formatAbsolute(selected.timestamp)}</dd></div>
+                  <div><dt>Age</dt><dd>{formatRelative(selected.timestamp, now)}</dd></div>
+                  <div><dt>Source IP</dt><dd>{selected.ip || '—'}</dd></div>
+                  <div><dt>Host</dt><dd>{selected.host || '—'}</dd></div>
+                  <div><dt>Method</dt><dd>{selected.method}</dd></div>
+                  <div><dt>Path</dt><dd className="break-all">{selected.path}</dd></div>
+                  <div><dt>Status</dt><dd style={{ color: statusTone(selected.status) }}>{selected.status || '—'}</dd></div>
+                  <div><dt>Protocol</dt><dd>{formatProtocol(selected.protocol)}</dd></div>
+                  <div><dt>Latency</dt><dd>{formatLatency(selected.latencyMs)}</dd></div>
+                  <div><dt>Source</dt><dd>{selected.source || 'ebpf'}</dd></div>
+                  <div>
+                    <dt>Threat</dt>
+                    <dd>
+                      {selected.attacks.length
+                        ? selected.attacks.map((a) => `${a.severity} ${a.category}`).join(', ')
+                        : 'none'}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            ) : (
+              <p className="evd-mono text-[11px]" style={{ color: 'var(--evd-ink-muted)' }}>
+                Select a row to inspect host, timing, and threat overlay.
+              </p>
+            )}
+          </aside>
         </div>
-      </div>
+      </EvidencePanel>
     </div>
   );
 };

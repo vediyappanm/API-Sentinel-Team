@@ -903,7 +903,11 @@ class SelectionFilterEngine:
         except (TypeError, ValueError):
             return 0
 
-    def _check_payload(self, rule: dict | list, body: str) -> bool:
+    def _check_payload(self, rule: dict | list, body: str | None) -> bool:
+        # Endpoints discovered from an OpenAPI/Postman import have never been
+        # observed live, so last_response_body is NULL rather than absent —
+        # dict.get(key, "") hands back None and every filter below would fail.
+        body = body or ""
         if isinstance(rule, list):
             return all(self._check_payload(item, body) for item in rule)
         if not isinstance(rule, dict):

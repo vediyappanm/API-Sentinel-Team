@@ -1,11 +1,11 @@
 import logging
 
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from fastapi import Request
 import jwt
 
 from server.config import settings
+from server.modules.auth.client_ip import get_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ def get_rate_limit_key(request: Request) -> str:
     request.state.account_id only if middleware set it. Never uses app.state
     (process-global and unsafe for multi-tenant limits).
     """
-    client_ip = get_remote_address(request)
+    client_ip = get_client_ip(request)
     account_id = None
 
     auth_header = request.headers.get("authorization", "")

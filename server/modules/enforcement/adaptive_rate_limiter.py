@@ -45,31 +45,47 @@ class AdaptiveRequestGuard:
             await self.app(scope, receive, send)
             return
 
-        account_id = await self._extract_account_id(request)
+        try:
+            account_id = await self._extract_account_id(request)
+        except Exception:
+            logger.exception("adaptive_request_guard_auth_failed path=%s", path)
+            await self.app(scope, receive, send)
+            return
+
         if account_id is None:
             await self.app(scope, receive, send)
             return
 
-        source_ip = self._extract_source_ip(request)
-        endpoint = await self._resolve_endpoint(account_id, request.method.upper(), path, request.url.hostname or "unknown")
-
-        if await self._check_blocked_ip(account_id, source_ip):
-            response = JSONResponse({"error": "access_denied", "reason": "ip_blocked"}, status_code=403)
-            await response(scope, receive, send)
-            return
-
-        if endpoint and await self._check_endpoint_block(account_id, endpoint.id):
-            response = JSONResponse({"error": "service_unavailable", "reason": "endpoint_blocked"}, status_code=503)
-            await response(scope, receive, send)
-            return
-
         rate_limit_remaining = None
-        if endpoint:
-            rate_limit_remaining = await self._enforce_rate_limit(account_id, endpoint.id, source_ip)
-            if rate_limit_remaining is not None and rate_limit_remaining <= 0:
-                response = JSONResponse({"error": "too_many_requests", "reason": "rate_limit_exceeded"}, status_code=429)
+        try:
+            source_ip = self._extract_source_ip(request)
+            endpoint = await self._resolve_endpoint(
+                account_id,
+                request.method.upper(),
+                path,
+                request.url.hostname or "unknown",
+            )
+
+            if await self._check_blocked_ip(account_id, source_ip):
+                response = JSONResponse({"error": "access_denied", "reason": "ip_blocked"}, status_code=403)
                 await response(scope, receive, send)
                 return
+
+            if endpoint and await self._check_endpoint_block(account_id, endpoint.id):
+                response = JSONResponse({"error": "service_unavailable", "reason": "endpoint_blocked"}, status_code=503)
+                await response(scope, receive, send)
+                return
+
+            if endpoint:
+                rate_limit_remaining = await self._enforce_rate_limit(account_id, endpoint.id, source_ip)
+                if rate_limit_remaining is not None and rate_limit_remaining <= 0:
+                    response = JSONResponse({"error": "too_many_requests", "reason": "rate_limit_exceeded"}, status_code=429)
+                    await response(scope, receive, send)
+                    return
+        except Exception:
+            logger.exception("adaptive_request_guard_failed path=%s", path)
+            await self.app(scope, receive, send)
+            return
 
         async def send_wrapper(message):
             if message["type"] == "http.response.start" and rate_limit_remaining is not None:
@@ -122,24 +138,41 @@ class AdaptiveRequestGuard:
         host: str,
     ) -> APIEndpoint | None:
         path_pattern = _path_normalizer.normalize(request_path.split("?", 1)[0])
-        cache_key = f"endpoint_lookup:{account_id}:{method}:{host}:{path_pattern}"
+        host_key = (host or "unknown").lower()
+        cache_key = f"endpoint_lookup:{account_id}:{method}:{host_key}:{path_pattern}"
         cached = await redis_cache.get_json(cache_key)
         if cached and cached.get("id"):
             async with AsyncSessionLocal() as db:
                 result = await db.execute(select(APIEndpoint).where(APIEndpoint.id == cached["id"]))
-                endpoint = result.scalar_one_or_none()
+                endpoint = result.scalars().first()
                 if endpoint is not None:
                     return endpoint
 
         async with AsyncSessionLocal() as db:
             result = await db.execute(
-                select(APIEndpoint).where(
+                select(APIEndpoint)
+                .where(
                     APIEndpoint.account_id == account_id,
                     APIEndpoint.method == method,
                     APIEndpoint.path_pattern == path_pattern,
+                    APIEndpoint.host == host_key,
                 )
+                .limit(1)
             )
-            endpoint = result.scalar_one_or_none()
+            endpoint = result.scalars().first()
+            if endpoint is None:
+                # Inventory is unique on (method, host, path). The same console
+                # path exists once per captured host; never require exactly one row.
+                result = await db.execute(
+                    select(APIEndpoint)
+                    .where(
+                        APIEndpoint.account_id == account_id,
+                        APIEndpoint.method == method,
+                        APIEndpoint.path_pattern == path_pattern,
+                    )
+                    .limit(1)
+                )
+                endpoint = result.scalars().first()
 
         if endpoint is not None:
             await redis_cache.set_json(cache_key, {"id": endpoint.id}, ttl_seconds=RATE_LIMIT_CACHE_TTL)

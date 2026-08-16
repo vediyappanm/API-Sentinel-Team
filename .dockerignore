@@ -14,9 +14,17 @@ venv311/
 .mypy_cache/
 .ruff_cache/
 
-# Node and frontend build artifacts
-api-sentinel-view-main/node_modules/
-api-sentinel-view-main/dist/
+# Node and frontend build artifacts (frontend has its own image)
+api-sentinel-view-main/
+docs/
+infra/
+tests/
+k8s/
+*.md
+*.png
+*.ps1
+.release*
+.github/
 
 # Runtime and local db artifacts
 *.db

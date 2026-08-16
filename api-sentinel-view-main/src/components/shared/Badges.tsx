@@ -15,7 +15,7 @@ const STATUS_MAP: Record<string, { bg: string; text: string; label: string }> = 
   'Open': { bg: 'rgba(239,68,68,0.1)', text: '#EF4444', label: 'Open' },
   'False Positive': { bg: 'rgba(99,44,175,0.1)', text: '#632CA6', label: 'False Positive' },
   'Analyzed': { bg: 'rgba(234,179,8,0.1)', text: '#EAB308', label: 'Analyzed' },
-  'Risk Accepted': { bg: 'rgba(167,139,250,0.1)', text: '#7C3AED', label: 'Risk Accepted' },
+  'Risk Accepted': { bg: 'rgba(43,76,255,0.1)', text: '#2B4CFF', label: 'Risk Accepted' },
   'Resolved': { bg: 'rgba(34,197,94,0.1)', text: '#22C55E', label: 'Resolved' },
 };
 

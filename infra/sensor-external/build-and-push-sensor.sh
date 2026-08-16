@@ -42,11 +42,12 @@ if [[ ! -f Dockerfile ]]; then
   exit 1
 fi
 
-echo "==> make (BPF + Rust)"
-make
+echo "==> make BPF object (userspace/ dir shadows the Makefile target)"
+make bpf/http_trace.bpf.o
+( cd userspace && cargo build --release )
 
 echo "==> Stage binary for Dockerfile"
-cp userspace/target/release/api-sec-sensor ./api-sec-sensor
+cp -f userspace/target/release/api-sec-sensor ./api-sec-sensor
 
 echo "==> docker build -> $REGISTRY_IMAGE"
 docker build -t "$REGISTRY_IMAGE" .

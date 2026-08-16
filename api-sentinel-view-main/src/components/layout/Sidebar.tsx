@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/auth-context';
 import StatusPulse from '@/components/ui/StatusPulse';
 import { useLayout } from '@/components/layout/layout-context';
 import { useMediaQuery } from '@/hooks/use-media-query';
+import { useLiveTraffic } from '@/lib/realtime';
 import type { WorkspaceConfig } from '@/components/layout/workspaces';
 
 function getInitials(user: { login: string; name?: string } | null): string {
@@ -21,6 +22,7 @@ function getInitials(user: { login: string; name?: string } | null): string {
 
 export const Sidebar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace }) => {
   const { user } = useAuth();
+  const { connected: streamConnected } = useLiveTraffic();
   const { isSidebarCollapsed, isMobileSidebarOpen, toggleSidebar, closeMobileSidebar } = useLayout();
   const isDesktop = useMediaQuery('(min-width: 1024px)');
   const initials = getInitials(user);
@@ -74,7 +76,7 @@ export const Sidebar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace })
           isMobileSidebarOpen && 'translate-x-0'
         )}
         style={{
-          background: 'linear-gradient(180deg, #F4F4F8 0%, #F0F0F5 50%, #F4F4F8 100%)',
+          background: 'var(--bg-sidebar)',
         }}
       >
       {/* Logo */}
@@ -83,7 +85,7 @@ export const Sidebar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace })
           <div className={clsx('flex items-center gap-3', collapsed && 'justify-center')}>
             <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-bg-elevated border border-brand/20 relative shrink-0">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2L21 6.5V13C21 17.4 17 21.2 12 22C7 21.2 3 17.4 3 13V6.5L12 2Z" fill="#632CA6" />
+                <path d="M12 2L21 6.5V13C21 17.4 17 21.2 12 22C7 21.2 3 17.4 3 13V6.5L12 2Z" fill="#FF5B2E" />
                 <path d="M12 6L17 8.5V13C17 15.5 14.8 17.7 12 18.5C9.2 17.7 7 15.5 7 13V8.5L12 6Z" fill="#FFFFFF" />
               </svg>
               <div className="absolute -inset-1 rounded-xl border border-brand/10 animate-pulse pointer-events-none" style={{ animationDuration: '3s' }} />
@@ -175,9 +177,11 @@ export const Sidebar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace })
       <div className="flex flex-col w-full pb-4 border-t border-border-subtle pt-3">
         {/* System status */}
         <div className={clsx('flex items-center px-3 mb-2', collapsed ? 'justify-center' : 'gap-2')}>
-          <StatusPulse variant="online" size="sm" />
+          <StatusPulse variant={streamConnected ? 'online' : 'warning'} size="sm" />
           {!collapsed && (
-            <span className="text-[11px] text-green-600 animate-fade-in">{workspace.badge} Workspace</span>
+            <span className={clsx('text-[11px] animate-fade-in', streamConnected ? 'text-green-600' : 'text-amber-600')}>
+              {streamConnected ? 'Live stream' : 'Reconnecting'} · {workspace.badge}
+            </span>
           )}
         </div>
 

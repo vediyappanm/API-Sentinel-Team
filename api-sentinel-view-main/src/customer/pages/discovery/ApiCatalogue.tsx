@@ -319,7 +319,7 @@ const ApiCatalogue: React.FC = () => {
           value={specCoverage}
           suffix="%"
           icon={Eye}
-          iconColor="#632CA6"
+          iconColor="#FF5B2E"
           iconBg="rgba(99,44,175,0.1)"
           changeLabel="Traffic-based OpenAPI inference"
         />

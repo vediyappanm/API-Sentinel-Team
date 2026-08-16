@@ -52,17 +52,7 @@ export function buildWebSocketUrl(path: string) {
   return `${wsOrigin}${normalizePath(path)}`;
 }
 
-async function handleApiError(res: Response): Promise<never> {
-  if (res.status === 401) {
-    setToken(null);
-
-    if (window.location.pathname !== '/login') {
-      window.location.assign('/login');
-    }
-
-    throw new ApiError(res.status, res.statusText, { detail: 'Session expired. Please log in again.' });
-  }
-
+async function handleApiError(res: Response, path?: string): Promise<never> {
   let errBody: unknown = null;
   try {
     const text = await res.text();
@@ -70,6 +60,26 @@ async function handleApiError(res: Response): Promise<never> {
   } catch {
     // Ignore non-JSON error bodies.
   }
+
+  if (res.status === 401) {
+    setToken(null);
+
+    // Failed login/signup are credential errors, not an expired session.
+    const isCredentialAuth =
+      path === '/auth/login' || path === '/auth/signup';
+
+    if (!isCredentialAuth) {
+      if (window.location.pathname !== '/login') {
+        window.location.assign('/login');
+      }
+      throw new ApiError(res.status, res.statusText, {
+        detail: 'Session expired. Please log in again.',
+      });
+    }
+
+    throw new ApiError(res.status, res.statusText, errBody);
+  }
+
   throw new ApiError(res.status, res.statusText, errBody);
 }
 
@@ -87,7 +97,7 @@ export async function fetchWithSession(path: string, init?: RequestInit): Promis
   });
 
   if (!res.ok) {
-    await handleApiError(res);
+    await handleApiError(res, path);
   }
 
   return res;
@@ -116,7 +126,7 @@ async function request<T>(
   });
 
   if (!res.ok) {
-    await handleApiError(res);
+    await handleApiError(res, path);
   }
 
   const text = await res.text();

@@ -8,6 +8,7 @@ import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
 import { useLayout } from '@/components/layout/layout-context';
 import { useTheme } from '@/lib/theme-context';
+import { useLiveTraffic } from '@/lib/realtime';
 import { adminWorkspace, customerWorkspace, platformWorkspace, type WorkspaceConfig } from '@/components/layout/workspaces';
 
 function getInitials(user: { login: string; name?: string } | null): string {
@@ -21,7 +22,7 @@ function getInitials(user: { login: string; name?: string } | null): string {
 function useCurrentTime() {
   const [time, setTime] = useState(new Date());
   useEffect(() => {
-    const interval = setInterval(() => setTime(new Date()), 60000);
+    const interval = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
   return time;
@@ -46,6 +47,7 @@ export const TopBar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace }) 
   const { data: collectionsData } = useApiCollections();
   const collections = collectionsData?.apiCollections ?? [];
   const currentTime = useCurrentTime();
+  const { connected: streamConnected } = useLiveTraffic();
 
   const pathParts = location.pathname.split('/').filter(Boolean);
   const workspacePathParts = pathParts[0] === workspace.basePath.replace('/', '') ? pathParts.slice(1) : pathParts;
@@ -268,13 +270,18 @@ export const TopBar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace }) 
             {workspace.badge}
           </div>
 
+          <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border-subtle bg-bg-elevated text-[11px] font-semibold text-text-secondary">
+            <span className={`w-2 h-2 rounded-full ${streamConnected ? 'bg-green-500' : 'bg-amber-500 animate-pulse'}`} />
+            {streamConnected ? 'Stream' : 'Socket'}
+          </div>
+
           {/* Live sync status */}
           <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border-subtle bg-bg-elevated text-[11px] font-semibold text-text-secondary">
             <span className={`w-2 h-2 rounded-full ${isFetching > 0 ? 'bg-brand animate-pulse' : 'bg-green-500'}`} />
             {isFetching > 0 ? 'Syncing' : 'Live'}
             {lastSync && (
               <span className="text-text-muted ml-1">
-                {lastSync.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {lastSync.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
               </span>
             )}
           </div>
@@ -282,7 +289,7 @@ export const TopBar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace }) 
           {/* Clock */}
           <div className="hidden md:flex items-center gap-1 text-[11px] text-text-muted tabular-nums">
             <Clock size={11} />
-            {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
           </div>
 
           <div className="w-px h-4 bg-border-subtle mx-0.5" />
