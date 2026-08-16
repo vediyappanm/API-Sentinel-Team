@@ -1,9 +1,15 @@
-"""Organization — manage tenant accounts, plan tiers, and workspace settings."""
-from fastapi import APIRouter, Depends, HTTPException, Body, Query
+"""Organization — manage tenant accounts, plan tiers, and workspace settings.
+
+All endpoints require authentication. Cross-tenant listing is restricted to
+``PLATFORM_ADMIN``; per-account endpoints require ``ADMIN`` of that account
+(or ``PLATFORM_ADMIN``).
+"""
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.future import select
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from server.modules.persistence.database import get_db
+from server.modules.auth.rbac import RBAC
 from server.models.core import Account, User, APIEndpoint, Vulnerability, TestRun
 
 router = APIRouter()
@@ -11,9 +17,27 @@ router = APIRouter()
 PLAN_TIERS = {"FREE", "STARTER", "PRO", "ENTERPRISE"}
 
 
+def _is_platform_admin(payload: dict) -> bool:
+    return (payload.get("role") or "").upper() == "PLATFORM_ADMIN"
+
+
+def _require_account_access(payload: dict, account_id: int) -> None:
+    """Allow PLATFORM_ADMIN or ADMIN of the target account; else 403."""
+    if _is_platform_admin(payload):
+        return
+    if (payload.get("role") or "").upper() == "ADMIN" and int(payload.get("account_id") or 0) == int(account_id):
+        return
+    raise HTTPException(status_code=403, detail="Not authorized for this organization")
+
+
 @router.get("/")
-async def list_organizations(db: AsyncSession = Depends(get_db)):
-    """List all tenant accounts."""
+async def list_organizations(
+    db: AsyncSession = Depends(get_db),
+    payload: dict = Depends(RBAC.require_auth),
+):
+    """List all tenant accounts. Restricted to PLATFORM_ADMIN."""
+    if not _is_platform_admin(payload):
+        raise HTTPException(status_code=403, detail="PLATFORM_ADMIN role required to list organizations")
     result = await db.execute(select(Account))
     accounts = result.scalars().all()
     return {
@@ -26,8 +50,13 @@ async def list_organizations(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{account_id}")
-async def get_organization(account_id: int, db: AsyncSession = Depends(get_db)):
+async def get_organization(
+    account_id: int,
+    db: AsyncSession = Depends(get_db),
+    payload: dict = Depends(RBAC.require_auth),
+):
     """Get organization details including usage stats."""
+    _require_account_access(payload, account_id)
     result = await db.execute(select(Account).where(Account.id == account_id))
     account = result.scalar_one_or_none()
     if not account:
@@ -69,8 +98,10 @@ async def update_organization(
     name: str = Body(None),
     plan_tier: str = Body(None),
     db: AsyncSession = Depends(get_db),
+    payload: dict = Depends(RBAC.require_auth),
 ):
     """Update organization name or plan tier."""
+    _require_account_access(payload, account_id)
     result = await db.execute(select(Account).where(Account.id == account_id))
     account = result.scalar_one_or_none()
     if not account:
@@ -88,8 +119,13 @@ async def update_organization(
 
 
 @router.get("/{account_id}/members")
-async def list_members(account_id: int, db: AsyncSession = Depends(get_db)):
+async def list_members(
+    account_id: int,
+    db: AsyncSession = Depends(get_db),
+    payload: dict = Depends(RBAC.require_auth),
+):
     """List all users belonging to an organization."""
+    _require_account_access(payload, account_id)
     result = await db.execute(select(User).where(User.account_id == account_id))
     users = result.scalars().all()
     return {
@@ -108,11 +144,13 @@ async def invite_member(
     email: str = Body(...),
     role: str = Body("MEMBER", description="ADMIN | MEMBER | VIEWER"),
     db: AsyncSession = Depends(get_db),
+    payload: dict = Depends(RBAC.require_auth),
 ):
     """
     Invite a new member to the organization.
     Creates a placeholder User record (no password — user sets it on first login).
     """
+    _require_account_access(payload, account_id)
     result = await db.execute(select(Account).where(Account.id == account_id))
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Organization not found")
@@ -139,8 +177,14 @@ async def invite_member(
 
 
 @router.delete("/{account_id}/members/{user_id}")
-async def remove_member(account_id: int, user_id: str, db: AsyncSession = Depends(get_db)):
+async def remove_member(
+    account_id: int,
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    payload: dict = Depends(RBAC.require_auth),
+):
     """Remove a member from the organization."""
+    _require_account_access(payload, account_id)
     result = await db.execute(
         select(User).where(User.id == user_id, User.account_id == account_id)
     )

@@ -67,12 +67,24 @@ class PDFRenderer:
 
     async def save_pdf(self, html: str, filepath: str) -> bool:
         """
-        Placeholder for real PDF rendering (e.g. using weasyprint or pdfkit).
+        Render ``html`` to a real PDF at ``filepath``.
+
+        Uses WeasyPrint when installed. If WeasyPrint is unavailable, returns
+        ``False`` and logs a clear warning instead of silently writing HTML
+        under a ``.pdf`` name.
         """
         try:
-            with open(filepath, 'w') as f:
-                f.write(html)
+            from weasyprint import HTML  # type: ignore
+        except ImportError:
+            logger.warning(
+                "save_pdf_failed_no_renderer: WeasyPrint is not installed; "
+                "install `weasyprint` to enable PDF export. No file written."
+            )
+            return False
+
+        try:
+            HTML(string=html).write_pdf(filepath)
             return True
         except Exception as e:
-            logger.error(f"Failed to save PDF: {e}")
+            logger.error("save_pdf_failed: %s", e)
             return False

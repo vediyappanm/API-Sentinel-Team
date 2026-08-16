@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import uuid
 import datetime
 from typing import Optional
@@ -34,6 +35,7 @@ from server.modules.vulnerability_detector.lifecycle import (
 )
 
 router = APIRouter(tags=["CI/CD Integration"])
+logger = logging.getLogger(__name__)
 
 _STRICT_GATE_FAIL_ON = {"CRITICAL", "HIGH"}
 _TICKET_REQUIRED_STOPPED_STATUSES = {
@@ -92,6 +94,28 @@ def _parse_evidence(value: object) -> object:
 def _safe_webhook_payload(payload: object) -> dict:
     redacted = Redactor.redact_json(payload)
     return redacted if isinstance(redacted, dict) else {}
+
+
+def _resolve_webhook_account_id(x_account_id: Optional[str]) -> int:
+    """Resolve the tenant account for an inbound CI webhook.
+
+    Multi-tenant deployments should send ``X-Account-Id`` on every webhook.
+    When absent, fall back to ``DEFAULT_ACCOUNT_ID`` and warn so operators
+    know CI triggers are being attributed to the shared default tenant.
+    """
+    if x_account_id:
+        try:
+            return int(x_account_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="X-Account-Id must be an integer account id")
+    default_id = int(getattr(settings, "DEFAULT_ACCOUNT_ID", 1000000))
+    logger.warning(
+        "cicd_webhook_default_account: no X-Account-Id header; attributing "
+        "trigger to DEFAULT_ACCOUNT_ID=%s. Configure per-tenant webhook "
+        "secrets and send X-Account-Id for multi-tenant CI.",
+        default_id,
+    )
+    return default_id
 
 
 async def _load_run(
@@ -1370,6 +1394,7 @@ async def github_webhook(
     request: Request,
     x_hub_signature_256: Optional[str] = Header(None),
     x_github_event: Optional[str] = Header(None),
+    x_account_id: Optional[str] = Header(None),
     db: AsyncSession = Depends(get_db),
 ):
     body = await request.body()
@@ -1380,10 +1405,11 @@ async def github_webhook(
     if not hmac.compare_digest(x_hub_signature_256 or "", expected):
         raise HTTPException(401, "Invalid webhook signature")
 
+    account_id = _resolve_webhook_account_id(x_account_id)
     payload = await request.json()
     trigger = CICDTrigger(
         id=str(uuid.uuid4()),
-        account_id=int(getattr(settings, "DEFAULT_ACCOUNT_ID", 1000000)),
+        account_id=account_id,
         source="github",
         commit_sha=payload.get("after", "") or payload.get("pull_request", {}).get("head", {}).get("sha", ""),
         branch=str(payload.get("ref", "")).replace("refs/heads/", ""),
@@ -1401,15 +1427,17 @@ async def gitlab_webhook(
     request: Request,
     x_gitlab_token: Optional[str] = Header(None),
     x_gitlab_event: Optional[str] = Header(None),
+    x_account_id: Optional[str] = Header(None),
     db: AsyncSession = Depends(get_db),
 ):
     secret = str(getattr(settings, "GITLAB_WEBHOOK_SECRET", "") or "")
     if secret and x_gitlab_token != secret:
         raise HTTPException(401, "Invalid GitLab token")
+    account_id = _resolve_webhook_account_id(x_account_id)
     payload = await request.json()
     trigger = CICDTrigger(
         id=str(uuid.uuid4()),
-        account_id=int(getattr(settings, "DEFAULT_ACCOUNT_ID", 1000000)),
+        account_id=account_id,
         source="gitlab",
         commit_sha=payload.get("checkout_sha", ""),
         branch=str(payload.get("ref", "")).replace("refs/heads/", ""),

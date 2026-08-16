@@ -117,12 +117,21 @@ async def run_agentic_scan_async(
 
     graph = (existing_graph or KnowledgeGraph()).merge(build_from_endpoints(endpoints))
 
-    # ── ALWAYS: multi-step attack chains (no LLM needed) ─────────────────────
-    # Run regardless of AGENTIC_LLM_ENABLED — these are deterministic and need
-    # >=2 identities (same requirement as replay). The graph is enriched here so
-    # later stages (LLM proposer, detector sweep) see cross-endpoint edges.
+    # Active deterministic sweeps (attack chains + targeted detectors) issue real
+    # httpx traffic against discovered endpoints. Require an explicit pentest
+    # target allowlist so we never actively probe hosts the operator has not
+    # scoped. When the allowlist is empty (e.g. test fixtures, or a fresh
+    # deploy that hasn't been scoped yet), skip the sweeps entirely — the LLM
+    # proposer loop below is separately gated by AGENTIC_LLM_ENABLED.
+    allowlist = str(getattr(settings, "PENTEST_TARGET_ALLOWLIST", "") or "").strip()
+    active_sweeps_allowed = bool(allowlist)
+
+    # ── ALWAYS (when allowlist is set): multi-step attack chains (no LLM) ──
+    # These are deterministic and need >=2 identities (same requirement as
+    # replay). The graph is enriched here so later stages (LLM proposer,
+    # detector sweep) see cross-endpoint edges.
     chain_findings: list[dict[str, Any]] = []
-    if test_accounts and len(test_accounts) >= 2:
+    if active_sweeps_allowed and test_accounts and len(test_accounts) >= 2:
         chain_findings = await _run_attack_chains(
             graph=graph,
             endpoints=endpoints,
@@ -135,15 +144,18 @@ async def run_agentic_scan_async(
         for finding in chain_findings:
             graph.ingest_finding(finding)
 
-    # ── ALWAYS: targeted deterministic detectors (no LLM needed) ─────────────
-    # Single-endpoint checks that templates miss: sensitive-data/credential dumps,
-    # error-based SQLi, and mass-assignment. Deterministic (no LLM), each behind
-    # the same TargetGuard/StateChangeGuard as the rest of the engine.
-    detector_findings = await _run_targeted_detectors(
-        endpoints=endpoints,
-        settings=settings,
-        allow_state_change=allow_state_change,
-    )
+    # ── ALWAYS (when allowlist is set): targeted deterministic detectors ────
+    # Single-endpoint checks that templates miss: sensitive-data/credential
+    # dumps, error-based SQLi, and mass-assignment. Deterministic (no LLM),
+    # each behind the same TargetGuard/StateChangeGuard as the rest of the
+    # engine.
+    detector_findings: list[dict[str, Any]] = []
+    if active_sweeps_allowed:
+        detector_findings = await _run_targeted_detectors(
+            endpoints=endpoints,
+            settings=settings,
+            allow_state_change=allow_state_change,
+        )
     for finding in detector_findings:
         graph.ingest_finding(finding)
 

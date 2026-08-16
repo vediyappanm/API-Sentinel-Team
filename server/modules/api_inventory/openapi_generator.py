@@ -34,11 +34,18 @@ class OpenAPIGenerator:
             endpoints = result.scalars().all()
 
             for ep in endpoints:
-                if ep.path not in spec["paths"]:
-                    spec["paths"][ep.path] = {}
+                # Prefer the templated path_pattern (/users/{id}) over the
+                # literal observed path (/users/12345) so the generated spec
+                # collapses equivalent endpoints instead of exploding into
+                # one path per observed ID.
+                path_key = ep.path_pattern or ep.path
+                if not path_key:
+                    continue
+                if path_key not in spec["paths"]:
+                    spec["paths"][path_key] = {}
 
-                spec["paths"][ep.path][ep.method.lower()] = {
-                    "summary": f"Observed {ep.method} on {ep.path}",
+                spec["paths"][path_key][ep.method.lower()] = {
+                    "summary": f"Observed {ep.method} on {path_key}",
                     "responses": {
                         "200": {
                             "description": "Successful response observed",

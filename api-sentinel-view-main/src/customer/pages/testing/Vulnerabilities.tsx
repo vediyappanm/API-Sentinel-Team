@@ -10,7 +10,7 @@ import QueryError from '@/components/shared/QueryError';
 import MetricWidget from '@/components/ui/MetricWidget';
 import GlassCard from '@/components/ui/GlassCard';
 import AnimatedCounter from '@/components/ui/AnimatedCounter';
-import { useVulnerabilities, useIssueSummary, useIssuesTrend } from '@/hooks/use-testing';
+import { useVulnerabilities, useIssueSummary, useIssuesTrend, useBulkUpdateIssueStatus } from '@/hooks/use-testing';
 import { useQueryClient } from '@tanstack/react-query';
 
 function formatTs(epoch: number) {
@@ -51,8 +51,11 @@ const Vulnerabilities: React.FC = () => {
   const [showAgg, setShowAgg] = useState(true);
   const [chartTab, setChartTab] = useState<'total' | 'open' | 'resolved'>('total');
   const [page, setPage] = useState(0);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkStatus, setBulkStatus] = useState<string>('FALSE_POSITIVE');
   const pageSize = 10;
   const qc = useQueryClient();
+  const bulkMutation = useBulkUpdateIssueStatus();
 
   const days = timeRange === '24h' ? 1 : 7;
   const startTs = useMemo(() => daysAgoTs(days), [days]);
@@ -70,6 +73,26 @@ const Vulnerabilities: React.FC = () => {
 
   const rows = data?.issues ?? [];
   const total = data?.totalIssuesCount ?? 0;
+  const pageIds = rows.map(r => r.id);
+  const allOnPageSelected = pageIds.length > 0 && pageIds.every(id => selected.has(id));
+  const toggleRow = (id: string) => setSelected(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const toggleAllOnPage = () => setSelected(prev => {
+    const next = new Set(prev);
+    if (allOnPageSelected) pageIds.forEach(id => next.delete(id));
+    else pageIds.forEach(id => next.add(id));
+    return next;
+  });
+  const applyBulkStatus = () => {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    bulkMutation.mutate({ issueIds: ids, status: bulkStatus }, {
+      onSuccess: () => setSelected(new Set()),
+    });
+  };
   const sm = summary.data;
   const totalIssues = sm?.totalIssues ?? 0;
   const openIssues = sm?.openIssues ?? 0;
@@ -170,6 +193,34 @@ const Vulnerabilities: React.FC = () => {
       <div className="flex items-center justify-between px-1">
         <span className="text-sm font-bold text-text-primary">Vulnerability List</span>
         <div className="flex items-center gap-2">
+          {selected.size > 0 && (
+            <div className="flex items-center gap-2 mr-2">
+              <span className="text-[11px] text-text-muted">{selected.size} selected</span>
+              <select
+                value={bulkStatus}
+                onChange={e => setBulkStatus(e.target.value)}
+                className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[11px] outline-none"
+              >
+                <option value="FALSE_POSITIVE">Mark False Positive</option>
+                <option value="IGNORED">Ignore</option>
+                <option value="OPEN">Reopen</option>
+                <option value="CLOSED">Resolve</option>
+              </select>
+              <button
+                onClick={applyBulkStatus}
+                disabled={bulkMutation.isPending}
+                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-sev-medium bg-sev-medium/10 border border-sev-medium/20 hover:bg-sev-medium/20 transition-all outline-none disabled:opacity-50"
+              >
+                <Zap size={13} /> {bulkMutation.isPending ? 'Applying…' : 'Apply'}
+              </button>
+              <button
+                onClick={() => setSelected(new Set())}
+                className="px-2 py-1 rounded-md text-[11px] text-text-muted hover:text-text-primary border border-border-subtle"
+              >
+                Clear
+              </button>
+            </div>
+          )}
           <button className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-sev-medium bg-sev-medium/10 border border-sev-medium/20 hover:bg-sev-medium/20 transition-all outline-none">
             <Zap size={13} /> Revalidate
           </button>
@@ -190,7 +241,7 @@ const Vulnerabilities: React.FC = () => {
             <table className="w-full text-left border-collapse min-w-[650px]">
               <thead className="bg-bg-base/50">
                 <tr>
-                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-10"><input type="checkbox" className="accent-brand" /></th>
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-10"><input type="checkbox" className="accent-brand" checked={allOnPageSelected} onChange={toggleAllOnPage} /></th>
                   <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20">Severity</th>
                   <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-[28%]">Endpoint</th>
                   <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-28">Timestamp</th>
@@ -205,7 +256,7 @@ const Vulnerabilities: React.FC = () => {
                   const s = mapSev(row.severity);
                   return (
                     <tr key={row.id} className="data-row-interactive hover:bg-white/[0.02] transition-colors cursor-pointer" style={{ borderLeftColor: sevBorderColors[s] || 'transparent' }}>
-                      <td className="px-4 py-3"><input type="checkbox" className="accent-brand" /></td>
+                      <td className="px-4 py-3"><input type="checkbox" className="accent-brand" checked={selected.has(row.id)} onChange={() => toggleRow(row.id)} /></td>
                       <td className="px-4 py-3"><SeverityBadge severity={s} /></td>
                       <td className="px-4 py-3">
                         <div className="flex gap-2 items-center">

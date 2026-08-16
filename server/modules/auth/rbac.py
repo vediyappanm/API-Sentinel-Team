@@ -97,6 +97,10 @@ ROLE_PERMISSIONS: dict[str, Set[str]] = {
         Permission.AUDIT_READ, Permission.BILLING_READ,
     },
     "ADMIN": _ALL,
+    # Cross-tenant oversight role for the platform operator. Same permission
+    # surface as ADMIN but additionally authorized to read across accounts
+    # (e.g. /organization list). Tenant scoping in routers still applies.
+    "PLATFORM_ADMIN": _ALL,
 }
 
 

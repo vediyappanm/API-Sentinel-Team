@@ -320,6 +320,17 @@ async def handle_ebpf_ingest_request(request: Request, db: AsyncSession) -> dict
         catalogue_path = inventory_path(path)
         if catalogue_path:
             query = path.split("?", 1)[1] if "?" in path else None
+            auth_types: list[str] = []
+            auth_header_value = ""
+            for _hk, _hv in (headers or {}).items():
+                if str(_hk).lower() == "authorization":
+                    auth_header_value = str(_hv or "")
+                    break
+            if auth_header_value.lower().startswith("bearer "):
+                tok = auth_header_value.split(" ", 1)[1]
+                auth_types = ["JWT"] if tok.count(".") == 2 else ["BEARER"]
+            elif auth_header_value.lower().startswith("basic "):
+                auth_types = ["BASIC"]
             endpoint = await discovery.discover(
                 {
                     "account_id": account_id,
@@ -331,6 +342,8 @@ async def handle_ebpf_ingest_request(request: Request, db: AsyncSession) -> dict
                     "status": status,
                     "last_seen": ts,
                     "query_string": query,
+                    "auth_types_found": auth_types,
+                    "auth_required": bool(auth_types),
                 },
                 commit=False,
             )

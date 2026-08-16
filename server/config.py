@@ -176,7 +176,12 @@ class Settings(BaseSettings):
     DETECTION_BURST_THRESHOLD: int = 45
     DETECTION_ALERT_COOLDOWN_SECONDS: int = 120
     DETECTION_SLOW_RESPONSE_THRESHOLD_MS: int = 1500
-    UNIFIED_PIPELINE_MODE: str = "off"  # off | shadow | active
+    # Default to "shadow" so the unified detection pipeline runs on ingest and
+    # operators can observe what it would catch before promoting to "active".
+    # Shadow mode does not persist findings, alert, or enforce — it only
+    # evaluates detectors and records health/metrics. Set to "active" once
+    # you've reviewed shadow output; set to "off" to fall back to legacy regex.
+    UNIFIED_PIPELINE_MODE: str = "shadow"  # off | shadow | active
     DETECTION_META_VERSION: str = "2026-03-29"
     DETECTION_ALERT_DEDUPE_SECONDS: int = 300
     DETECTION_IP_BLOCK_THRESHOLD: float = 0.8

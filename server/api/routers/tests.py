@@ -1579,19 +1579,20 @@ async def _run_security_tasks(
             if canceled:
                 break
 
-        # ── Agentic pass (opt-in via AGENTIC_LLM_ENABLED) ───────────────────────
+        # ── Agentic pass ─────────────────────────────────────────────────────
         # Runs AFTER the deterministic template scan, reusing the same engine,
-        # endpoints, and safety guards. run_agentic_scan_async's chain/detector
-        # sweep needs no LLM internally, but the probes issue their own httpx
-        # calls (not routed through the injectable ExecutionEngine), so this
-        # call site stays gated by AGENTIC_LLM_ENABLED rather than running
-        # unconditionally against every scanned endpoint. When enabled, all
-        # three finding categories (attack-chain, detector, LLM-confirmed) are
+        # endpoints, and safety guards. The deterministic sub-passes (multi-step
+        # attack chains + targeted detectors: sensitive exposure, SQLi, mass
+        # assignment, business abuse) run unconditionally — they need no LLM
+        # and each is behind the same TargetGuard/StateChangeGuard as the rest
+        # of the engine. The LLM proposer-confirmer loop runs only when
+        # AGENTIC_LLM_ENABLED is true (handled inside run_agentic_scan_async).
+        # All three finding categories (chain, detector, LLM-confirmed) are
         # promoted to persisted Vulnerability rows (not just a per-run
         # TestResult) so they reach the dashboard, compliance reports, and
         # every export the same way a template finding does. Fully wrapped so
         # it can never fail a scan.
-        if not canceled and settings.AGENTIC_LLM_ENABLED:
+        if not canceled:
             try:
                 agentic_result = await _run_agentic_scan_pass(
                     engine=engine,
