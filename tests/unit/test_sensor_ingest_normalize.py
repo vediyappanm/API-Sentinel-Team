@@ -64,3 +64,33 @@ def test_stale_session_start_is_clamped_to_now():
     # Stuck BPF boot time must not survive into ingest.
     assert events[0]["observed_at"] > (time.time() - 30) * 1000
 
+
+
+def test_bodies_and_identity_survive_normalization():
+    """Sensor ships request/response bodies + JWT identity; ingest must keep
+    them so PII/schema/detection can use the evidence, not just method+path."""
+    payload = {
+        "MsgHeader": {"Version": "2.0", "TenantId": "acme"},
+        "Batch": [
+            {
+                "HTTPReq.Method": "POST",
+                "HTTPReq.Uri": "/api/login",
+                "HTTPReq.Body": "eyJ1c2VyIjoiYUBiLmNvbSJ9",  # base64 {"user":"a@b.com"}
+                "HTTPResp.ResponseCode": 200,
+                "HTTPResp.Body": "eyJvayI6dHJ1ZX0=",          # base64 {"ok":true}
+                "user_id": "user-42",
+                "user_role": "admin",
+                "session_id": "sid-abc",
+                "auth_session_id": "jti-xyz",
+            }
+        ],
+    }
+    events = normalize_sensor_events(payload)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev["request"]["body"] == "eyJ1c2VyIjoiYUBiLmNvbSJ9"
+    assert ev["response"]["body"] == "eyJvayI6dHJ1ZX0="
+    assert ev["user_id"] == "user-42"
+    assert ev["user_role"] == "admin"
+    assert ev["session_id"] == "sid-abc"
+    assert ev["auth_session_id"] == "jti-xyz"

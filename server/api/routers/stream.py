@@ -84,6 +84,13 @@ def normalize_sensor_events(data: dict) -> list:
         )
         protocol = item.get("L7Protocol") or "HTTP/1.1"
         latency_ms = int(item.get("SessionStats.TimeToLastDownstreamTxByte") or 0)
+        resp_headers = {}
+        for key, value in item.items():
+            if key.startswith("Resp.Header.") and key != "Resp.Header.extra":
+                resp_headers[key.split(".", 2)[-1].lower()] = value
+        # Bodies are evidence; keep them (sensor already redacted + capped).
+        req_body = item.get("HTTPReq.Body")
+        resp_body = item.get("HTTPResp.Body")
         normalized.append(
             {
                 "method": method,
@@ -93,13 +100,26 @@ def normalize_sensor_events(data: dict) -> list:
                 "protocol": protocol,
                 "latency_ms": latency_ms or None,
                 "observed_at": clamp_sensor_ts_ms(coerce_sensor_ts_ms(item.get("SessionStats.StartTime"))),
+                # Identity extracted by the sensor from the JWT/session; without
+                # this it is dropped and every event looks anonymous.
+                "user_id": item.get("user_id"),
+                "user_role": item.get("user_role"),
+                "session_id": item.get("session_id"),
+                "auth_session_id": item.get("auth_session_id"),
                 "request": {
                     "method": method,
                     "path": path,
                     "host": host,
                     "headers": headers,
+                    "body": req_body,
                 },
-                "response": {"status": status, "status_code": status, "latency_ms": latency_ms or None},
+                "response": {
+                    "status": status,
+                    "status_code": status,
+                    "latency_ms": latency_ms or None,
+                    "headers": resp_headers,
+                    "body": resp_body,
+                },
             }
         )
     return normalized
