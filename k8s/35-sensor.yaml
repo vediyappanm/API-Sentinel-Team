@@ -141,7 +141,7 @@ spec:
           type: Unconfined
       containers:
         - name: sensor
-          image: harbor.wecrew.in/finspot/api-sentinel-sensor:20260816-fixes
+          image: harbor.wecrew.in/finspot/api-sentinel-sensor:20260816-bodies
           imagePullPolicy: Always
           command: ["/bin/bash", "/config/discover-and-run.sh"]
           args:
