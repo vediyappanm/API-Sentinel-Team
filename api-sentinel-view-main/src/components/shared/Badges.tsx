@@ -22,8 +22,12 @@ const STATUS_MAP: Record<string, { bg: string; text: string; label: string }> = 
 interface SeverityBadgeProps { severity: Severity; }
 export const SeverityBadge: React.FC<SeverityBadgeProps> = ({ severity }) => {
   const c = SEV_CONFIG[severity] || SEV_CONFIG.info;
+  const label = severity || 'info';
   return (
-    <div className="flex items-center justify-center w-6 h-6 rounded-full border text-[11px] font-bold"
+    <div
+      className="flex items-center justify-center w-6 h-6 rounded-full border text-[11px] font-bold"
+      aria-label={`Severity ${label}`}
+      title={label}
       style={{
         borderColor: `${c.color}60`,
         color: c.color,

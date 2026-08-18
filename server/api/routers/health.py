@@ -62,12 +62,8 @@ def _tests_library_status() -> dict[str, object]:
 @router.get("")
 @router.get("/")
 async def health_check(db: AsyncSession = Depends(get_db)):
-    """Returns deploy-oriented health information."""
+    """Deploy-oriented health. Inventory counts are admin-only on /stats."""
     db_status = "connected" if await _db_ready(db) else "error"
-    actors = await db.scalar(select(func.count(ThreatActor.id))) or 0
-    events = await db.scalar(select(func.count(MaliciousEventRecord.id))) or 0
-    endpoints = await db.scalar(select(func.count(APIEndpoint.id))) or 0
-    vulns = await db.scalar(select(func.count(Vulnerability.id))) or 0
     tests_library = _tests_library_status()
 
     return {
@@ -92,7 +88,9 @@ async def health_check(db: AsyncSession = Depends(get_db)):
             "ml_training": {
                 "status": _component_status(settings.ML_TRAINING_ENABLED),
             },
-            "tests_library": tests_library,
+            "tests_library": {
+                "status": tests_library["status"],
+            },
             "workers": {
                 "scheduler": _component_status(settings.STARTUP_ENABLE_TEST_SCHEDULER),
                 "ingestion_queue": _component_status(settings.STARTUP_ENABLE_INGESTION_QUEUE),
@@ -100,12 +98,6 @@ async def health_check(db: AsyncSession = Depends(get_db)):
                 "archive_processor": _component_status(settings.STARTUP_ENABLE_ARCHIVER),
                 "stream_pipeline": _component_status(settings.STARTUP_ENABLE_STREAM_PIPELINE and settings.STREAM_PROCESSING_ENABLED),
             },
-        },
-        "stats": {
-            "total_threat_actors": actors,
-            "total_events": events,
-            "total_endpoints": endpoints,
-            "total_vulnerabilities": vulns,
         },
     }
 
@@ -127,6 +119,25 @@ async def readiness(response: Response, db: AsyncSession = Depends(get_db)):
             "database": db_ok,
             "tests_library": tests_library["status"] == "ready",
         },
+    }
+
+
+@router.get("/stats")
+async def health_stats(
+    db: AsyncSession = Depends(get_db),
+    payload: dict = Depends(require_admin),
+):
+    """Tenant-agnostic inventory counts — admin only, not a public probe."""
+    del payload
+    actors = await db.scalar(select(func.count(ThreatActor.id))) or 0
+    events = await db.scalar(select(func.count(MaliciousEventRecord.id))) or 0
+    endpoints = await db.scalar(select(func.count(APIEndpoint.id))) or 0
+    vulns = await db.scalar(select(func.count(Vulnerability.id))) or 0
+    return {
+        "total_threat_actors": int(actors),
+        "total_events": int(events),
+        "total_endpoints": int(endpoints),
+        "total_vulnerabilities": int(vulns),
     }
 
 

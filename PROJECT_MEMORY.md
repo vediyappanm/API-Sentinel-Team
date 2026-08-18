@@ -1,6 +1,6 @@
 # API Sentinel / API Security Engine — Project Memory
 
-Last reviewed: 2026-08-15  
+Last reviewed: 2026-08-17  
 Purpose: persistent context for humans and agents working in this repository.  
 Full E2E guide: [`docs/PROJECT_END_TO_END.md`](docs/PROJECT_END_TO_END.md)
 
@@ -34,7 +34,9 @@ North star: evidence-grade continuous API red team — see `docs/API_PENTESTING_
 | **WIP focus** | Live traffic → inventory → tests on `https://sentinel.wecrew.in/` |
 | **Cluster** | kind `wecrew`, ns `api-sentinel`, Harbor `harbor.wecrew.in/finspot/api-sentinel-{backend,frontend,sensor}` |
 
-**Live status (2026-08-16):** backend/frontend/postgres/redis Running; eBPF sensor DaemonSet `api-sentinel-sensor` Ready; LE cert Ready; `/healthz` + `/api/health/ready` OK. Sensor `wecrew-ebpf` (account_id=1) ingesting via in-cluster `POST /v1/events`. Console self-traffic (`/api/*` with blank host, `sentinel.wecrew.in`) is dropped from Live Feed.
+**Live status (2026-08-17):** backend/frontend/postgres/redis Running; eBPF sensor DaemonSet `api-sentinel-sensor` Ready; LE cert Ready. Sensor `wecrew-ebpf` (account_id=1) ingesting via in-cluster `POST /v1/events`. Console self-traffic is dropped. Request/response bodies + JWT identity persist on `request_logs` and endpoint samples. Unified pipeline is `active` with auto-block thresholds >1 (observe/evidence, no auto IP block). Go TLS attach enabled (`--go-tls`). Continuous testing remains off until auth profiles exist.
+
+**Security contract (2026-08-17):** `/api/organization*` is authenticated and tenant-scoped. Public signup is forced off when `DEBUG=False` (`SIGNUP_ENABLED`). Unauthenticated `/api/health` no longer returns inventory counts.
 
 **Shipped on this branch:**
 

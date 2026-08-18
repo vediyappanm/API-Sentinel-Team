@@ -274,6 +274,12 @@ class RequestLog(Base):
     host: Mapped[str] = mapped_column(String(255), nullable=True)
     response_code: Mapped[int] = mapped_column(Integer, nullable=True)
     response_time_ms: Mapped[int] = mapped_column(Integer, nullable=True)
+    protocol: Mapped[str] = mapped_column(String(32), nullable=True)
+    request_body: Mapped[str] = mapped_column(Text, nullable=True)
+    response_body: Mapped[str] = mapped_column(Text, nullable=True)
+    user_id: Mapped[str] = mapped_column(String(128), nullable=True)
+    user_role: Mapped[str] = mapped_column(String(64), nullable=True)
+    session_id: Mapped[str] = mapped_column(String(128), nullable=True)
     created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

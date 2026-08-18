@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
-import { ChevronRight, Bell, Search, ChevronDown, RefreshCw, LogOut, Clock, Zap, Settings, Menu, Moon, Sun } from 'lucide-react';
+import { ChevronRight, Search, ChevronDown, RefreshCw, LogOut, Settings, Menu, Moon, Sun } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/auth-context';
 import { useOnboarding } from '@/lib/onboarding-context';
@@ -17,15 +17,6 @@ function getInitials(user: { login: string; name?: string } | null): string {
   const parts = name.split(/[@.\s]+/).filter(Boolean);
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
   return name.slice(0, 2).toUpperCase();
-}
-
-function useCurrentTime() {
-  const [time, setTime] = useState(new Date());
-  useEffect(() => {
-    const interval = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(interval);
-  }, []);
-  return time;
 }
 
 export const TopBar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace }) => {
@@ -46,7 +37,6 @@ export const TopBar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace }) 
   const { openMobileSidebar } = useLayout();
   const { data: collectionsData } = useApiCollections();
   const collections = collectionsData?.apiCollections ?? [];
-  const currentTime = useCurrentTime();
   const { connected: streamConnected } = useLiveTraffic();
 
   const pathParts = location.pathname.split('/').filter(Boolean);
@@ -66,7 +56,6 @@ export const TopBar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace }) 
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const deferredSearchQuery = useDeferredValue(searchQuery);
-  const [hasNotif] = useState(true);
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const accessibleWorkspaces = useMemo(() => {
     const options: WorkspaceConfig[] = [];
@@ -135,11 +124,10 @@ export const TopBar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace }) 
   return (
     <>
       <div
-        className="flex items-center justify-between px-5 py-2 border-b shrink-0 border-border-subtle glass"
-        style={{ minHeight: 48, maxWidth: '100vw' }}
+        className="flex min-h-[52px] min-w-0 shrink-0 items-center justify-between gap-3 overflow-hidden border-b border-border-subtle bg-bg-surface px-5"
       >
         {/* Left: Breadcrumb */}
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
           <button
             onClick={openMobileSidebar}
             className="flex h-8 w-8 items-center justify-center rounded-lg border border-border-subtle bg-bg-elevated/60 text-text-muted transition-colors hover:text-text-primary hover:border-brand/20 lg:hidden"
@@ -198,7 +186,7 @@ export const TopBar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace }) 
         </div>
 
         {/* Right: Actions */}
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           {showWorkspaceSwitcher && (
             <div className="relative hidden md:block">
               <button
@@ -255,7 +243,6 @@ export const TopBar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace }) 
             </div>
           )}
 
-          {/* Environment pill */}
           {workspace.key === 'admin' && !onboarding.data.completed && (
             <button
               onClick={() => navigate('/admin/onboarding')}
@@ -265,34 +252,19 @@ export const TopBar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace }) 
             </button>
           )}
 
-          <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-600 font-semibold">
-            <Zap size={10} />
-            {workspace.badge}
-          </div>
-
-          <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border-subtle bg-bg-elevated text-[11px] font-semibold text-text-secondary">
-            <span className={`w-2 h-2 rounded-full ${streamConnected ? 'bg-green-500' : 'bg-amber-500 animate-pulse'}`} />
-            {streamConnected ? 'Stream' : 'Socket'}
-          </div>
-
-          {/* Live sync status */}
-          <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border-subtle bg-bg-elevated text-[11px] font-semibold text-text-secondary">
-            <span className={`w-2 h-2 rounded-full ${isFetching > 0 ? 'bg-brand animate-pulse' : 'bg-green-500'}`} />
-            {isFetching > 0 ? 'Syncing' : 'Live'}
-            {lastSync && (
-              <span className="text-text-muted ml-1">
-                {lastSync.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          <div className="hidden items-center gap-2 rounded-full border border-border-subtle bg-bg-base px-2.5 py-1 text-[11px] font-medium text-text-secondary lg:flex">
+            <span className={`h-1.5 w-1.5 rounded-full ${streamConnected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+            {streamConnected ? 'Stream live' : 'Reconnecting'}
+            {isFetching > 0 ? (
+              <span className="text-text-muted">· syncing</span>
+            ) : lastSync ? (
+              <span className="text-text-muted">
+                · {lastSync.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </span>
-            )}
+            ) : null}
           </div>
 
-          {/* Clock */}
-          <div className="hidden md:flex items-center gap-1 text-[11px] text-text-muted tabular-nums">
-            <Clock size={11} />
-            {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-          </div>
-
-          <div className="w-px h-4 bg-border-subtle mx-0.5" />
+          <div className="mx-0.5 h-4 w-px bg-border-subtle" />
 
           {/* Search */}
           <button
@@ -322,17 +294,7 @@ export const TopBar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace }) 
             {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
           </button>
 
-          {/* Notifications */}
-          <button className="relative w-7 h-7 rounded-lg border border-border-subtle bg-bg-elevated/50 flex items-center justify-center text-muted-foreground hover:text-text-primary hover:border-brand/20 transition-all outline-none">
-            <Bell size={13} />
-            {hasNotif && (
-              <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-brand text-[8px] text-white font-bold flex items-center justify-center ring-2 ring-bg-base">
-                3
-              </span>
-            )}
-          </button>
-
-          <div className="w-px h-4 bg-border-subtle mx-0.5" />
+          <div className="mx-0.5 h-4 w-px bg-border-subtle" />
 
           {/* User Menu */}
           <div className="relative">

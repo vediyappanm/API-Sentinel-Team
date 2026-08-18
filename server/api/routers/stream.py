@@ -25,6 +25,7 @@ from server.modules.ingestion.queue import IngestionJobItem, ingestion_queue
 from server.modules.ingestion.redaction import redact_ingestion_path
 from server.modules.ingestion.self_traffic import excluded_hosts, is_self_traffic
 from server.modules.ingestion.sensor_time import clamp_sensor_ts_ms, coerce_sensor_ts_ms
+from server.modules.ingestion.traffic_sample import apply_captured_sample, persistable_body, persistable_identity
 from server.modules.persistence.database import AsyncSessionLocal, get_db
 from server.modules.quotas.tenant_quota import check_ingest_quota
 from server.modules.sensors.keys import resolve_sensor_by_key
@@ -336,6 +337,7 @@ async def handle_ebpf_ingest_request(request: Request, db: AsyncSession) -> dict
         ts_raw = ev.get("observed_at") or ev.get("ts")
         ts = _datetime_from_sensor_ts(ts_raw)
 
+        endpoint = None
         endpoint_id = None
         catalogue_path = inventory_path(path)
         if catalogue_path:
@@ -356,47 +358,53 @@ async def handle_ebpf_ingest_request(request: Request, db: AsyncSession) -> dict
             )
             endpoint_id = endpoint.id
             inventoried += 1
+        apply_captured_sample(
+            endpoint,
+            request_body=req.get("body"),
+            response_body=resp.get("body"),
+            response_headers=resp.get("headers"),
+            request_headers=headers,
+            user_id=ev.get("user_id"),
+        )
 
-        if pipeline_mode == "active":
+        db.add(RequestLog(
+            account_id=account_id,
+            endpoint_id=endpoint_id,
+            source_ip=source_ip,
+            method=method,
+            path=safe_path,
+            host=host or None,
+            protocol=str(protocol)[:32] if protocol else None,
+            response_code=status,
+            response_time_ms=latency_ms,
+            request_body=persistable_body(req.get("body")),
+            response_body=persistable_body(resp.get("body")),
+            user_id=persistable_identity(ev.get("user_id")),
+            user_role=persistable_identity(ev.get("user_role"), max_len=64),
+            session_id=persistable_identity(ev.get("session_id") or ev.get("auth_session_id")),
+            created_at=ts,
+        ))
+
+        attacks: list[dict[str, str]] = []
+        if pipeline_mode in {"shadow", "active"}:
             result = await unified_detection_pipeline.process(
                 db,
                 account_id=account_id,
                 source_type="stream_ebpf",
                 raw_event=ev,
-                persist_request_log=True,
+                persist_request_log=False,
                 existing_endpoint_id=endpoint_id,
                 context_source="EBPF_SENSOR",
+                shadow=(pipeline_mode != "active"),
             )
             attacks = [
                 {"category": signal.category, "severity": signal.severity}
                 for signal in result["signals"]
             ]
-            threats_detected += len(attacks)
-        else:
-            if pipeline_mode == "shadow":
-                await unified_detection_pipeline.process(
-                    db,
-                    account_id=account_id,
-                    source_type="stream_ebpf",
-                    raw_event=ev,
-                    persist_request_log=False,
-                    existing_endpoint_id=endpoint_id,
-                    context_source="EBPF_SENSOR",
-                    shadow=True,
-                )
+            if pipeline_mode == "active":
+                threats_detected += len(attacks)
 
-            db.add(RequestLog(
-                account_id=account_id,
-                endpoint_id=endpoint_id,
-                source_ip=source_ip,
-                method=method,
-                path=safe_path,
-                host=host or None,
-                response_code=status,
-                response_time_ms=latency_ms,
-                created_at=ts,
-            ))
-
+        if pipeline_mode != "active":
             attacks = _detect_attacks(path, headers)
             for attack in attacks:
                 threats_detected += 1
@@ -537,6 +545,9 @@ async def recent_events(
             "host": r.host or "",
             "status": r.response_code,
             "latency_ms": r.response_time_ms,
+            "protocol": r.protocol or "",
+            "user_id": r.user_id,
+            "has_body": bool(r.request_body or r.response_body),
             "timestamp": r.created_at.isoformat() if r.created_at else None,
             "attacks": _attacks_for_log(overlay, r),
         }

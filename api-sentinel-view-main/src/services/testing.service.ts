@@ -12,6 +12,10 @@ export interface AktoIssue {
   method: string;
   apiCollectionId: ApiCollectionId;
   lastSeen: number;
+  endpointId?: string;
+  description?: string;
+  hasEvidence?: boolean;
+  confidence?: string | number | null;
 }
 
 export interface AktoIssueSummary {
@@ -34,6 +38,11 @@ interface RawVulnerability {
   method?: string;
   api_collection_id?: ApiCollectionId;
   collection_id?: ApiCollectionId;
+  endpoint_id?: string;
+  description?: string;
+  evidence?: unknown;
+  confidence?: string | number | null;
+  last_seen_at?: string;
 }
 
 interface RawTemplate {
@@ -75,7 +84,15 @@ export async function fetchAllIssues(
     url: vulnerability.url || '/',
     method: vulnerability.method || 'GET',
     apiCollectionId: vulnerability.api_collection_id ?? vulnerability.collection_id ?? DEFAULT_COLLECTION_ID,
-    lastSeen: vulnerability.created_at ? new Date(vulnerability.created_at).getTime() : Date.now(),
+    lastSeen: vulnerability.last_seen_at
+      ? new Date(vulnerability.last_seen_at).getTime()
+      : vulnerability.created_at
+        ? new Date(vulnerability.created_at).getTime()
+        : Date.now(),
+    endpointId: vulnerability.endpoint_id,
+    description: vulnerability.description,
+    hasEvidence: Boolean(vulnerability.evidence),
+    confidence: vulnerability.confidence,
   }));
 
   return {
@@ -203,4 +220,35 @@ export async function fetchComplianceReport(framework: string = 'OWASP_API_2023'
 
 export async function downloadReportPDF(reportId: string, signal?: AbortSignal) {
   return { downloadUrl: `/api/compliance/reports/${reportId}/export?format=html` };
+}
+
+export interface FindingDetail {
+  id: string;
+  template_id?: string | null;
+  endpoint_id?: string | null;
+  url?: string | null;
+  method?: string | null;
+  severity?: string | null;
+  type?: string | null;
+  description?: string | null;
+  status?: string | null;
+  confidence?: string | number | null;
+  evidence?: unknown;
+  evidence_integrity?: unknown;
+  created_at?: string;
+  first_seen_at?: string | null;
+  last_seen_at?: string | null;
+  remediation?: string | null;
+  ticket_url?: string | null;
+}
+
+export async function fetchFinding(findingId: string, signal?: AbortSignal) {
+  return get<FindingDetail>(`/vulnerabilities/${findingId}`, signal);
+}
+
+export async function fetchFindingsForEndpoint(endpointId: string, signal?: AbortSignal) {
+  return get<{ total: number; vulnerabilities: FindingDetail[] }>(
+    `/vulnerabilities/?endpoint_id=${encodeURIComponent(endpointId)}&limit=50`,
+    signal,
+  );
 }

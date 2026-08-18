@@ -58,6 +58,13 @@ class LoginRequest(BaseModel):
 
 router = APIRouter()
 
+
+@router.get("/public-config")
+async def public_auth_config():
+    """Unauthenticated flags the login page is allowed to know."""
+    return {"signup_enabled": bool(settings.SIGNUP_ENABLED)}
+
+
 @router.post("/signup")
 @limiter.limit("5/minute")
 async def signup(
@@ -67,6 +74,11 @@ async def signup(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new user and a new account for multi-tenancy."""
+    if not settings.SIGNUP_ENABLED:
+        raise HTTPException(
+            status_code=403,
+            detail="Public signup is disabled. Ask an administrator to invite you.",
+        )
     try:
         # Validate account name
         validated_account_name = InputValidator.validate_string(

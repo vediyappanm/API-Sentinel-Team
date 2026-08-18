@@ -23,7 +23,9 @@ def _production_settings(**overrides):
     return Settings(**payload, _env_file=None)
 
 
-def test_settings_accepts_valid_fernet_encryption_key_in_production():
+def test_settings_force_signup_disabled_in_production():
+    settings = _production_settings(SIGNUP_ENABLED=True)
+    assert settings.SIGNUP_ENABLED is False
     settings = _production_settings()
 
     assert settings.ENCRYPTION_KEY

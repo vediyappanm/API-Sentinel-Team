@@ -745,6 +745,7 @@ async def get_vulnerabilities(
     false_positive: bool = Query(None),
     confirmed: bool = Query(None, description="true for confirmed findings, false for non-confirmed findings"),
     confirmation_status: str = Query(None, description="CONFIRMED | DISPROVEN | UNCONFIRMED"),
+    endpoint_id: str = Query(None),
     limit: int = Query(100),
     offset: int = Query(0),
     payload: dict = Depends(RBAC.require_permission(Permission.VULNS_READ)),
@@ -783,11 +784,16 @@ async def get_vulnerabilities(
                 raise ValidationError("confirmed=true conflicts with confirmation_status")
             if not confirmed and validated_confirmation_status == "CONFIRMED":
                 raise ValidationError("confirmed=false conflicts with confirmation_status=CONFIRMED")
+        validated_endpoint_id = None
+        if endpoint_id:
+            validated_endpoint_id = InputValidator.validate_uuid(endpoint_id, "endpoint_id")
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     account_id = payload.get("account_id")
     filters = [Vulnerability.account_id == account_id]
+    if validated_endpoint_id:
+        filters.append(Vulnerability.endpoint_id == validated_endpoint_id)
     if validated_severity:
         filters.append(Vulnerability.severity == validated_severity)
     if validated_type:

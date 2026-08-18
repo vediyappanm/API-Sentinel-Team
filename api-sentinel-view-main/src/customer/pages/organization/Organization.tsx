@@ -1,228 +1,272 @@
 import React, { useState } from 'react';
-import { RefreshCw, ChevronRight, Activity, ShieldAlert, Eye, Lock, Cpu } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import DonutChart from '@/components/charts/DonutChart';
-import TimeFilter from '@/components/shared/TimeFilter';
-import TableSkeleton from '@/components/shared/TableSkeleton';
-import QueryError from '@/components/shared/QueryError';
-import MetricWidget from '@/components/ui/MetricWidget';
-import GlassCard from '@/components/ui/GlassCard';
-import ProgressRing from '@/components/ui/ProgressRing';
-import AnimatedCounter from '@/components/ui/AnimatedCounter';
-import { useApiCollections, useEndpointsCount } from '@/hooks/use-discovery';
-import { useIssueSummary } from '@/hooks/use-testing';
-import { useDashboardKPIs } from '@/hooks/use-dashboard';
 import { useQueryClient } from '@tanstack/react-query';
+import { Activity, AlertTriangle, ChevronRight, Eye, Globe, Lock, RefreshCw, ShieldAlert } from 'lucide-react';
+import TimeFilter from '@/components/shared/TimeFilter';
+import QueryError from '@/components/shared/QueryError';
+import TableSkeleton from '@/components/shared/TableSkeleton';
+import PageHeader from '@/components/shared/PageHeader';
+import { MethodBadge } from '@/components/shared/Badges';
+import EvidencePanel from '@/components/ui/EvidencePanel';
+import EvidenceSectionHead from '@/components/ui/EvidenceSectionHead';
+import { EvidenceStatLine } from '@/components/ui/EvidenceStatLine';
+import EvidenceStamp from '@/components/ui/EvidenceStamp';
+import EvidenceLedgerItem from '@/components/ui/EvidenceLedger';
+import { useApiCollections } from '@/hooks/use-discovery';
+import { useOrganizationAttention } from '@/hooks/use-organization';
 import { useOnboarding } from '@/lib/onboarding-context';
 import type { AktoApiCollection } from '@/services/discovery.service';
+
+const SEV_META: Record<string, { label: string; color: string }> = {
+  CRITICAL: { label: 'Critical', color: '#EF4444' },
+  HIGH: { label: 'High', color: '#F97316' },
+  MEDIUM: { label: 'Medium', color: '#EAB308' },
+  LOW: { label: 'Low', color: '#22C55E' },
+  INFO: { label: 'Informational', color: '#3B82F6' },
+};
+
+const SeverityChip: React.FC<{ severity: string }> = ({ severity }) => {
+  const key = (severity || 'LOW').toUpperCase();
+  const meta = SEV_META[key] || SEV_META.LOW;
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-semibold"
+      style={{ color: meta.color, borderColor: `${meta.color}40`, background: `${meta.color}14` }}
+      aria-label={`Severity ${meta.label}`}
+    >
+      {meta.label}
+    </span>
+  );
+};
 
 const Organization: React.FC = () => {
   const [timeRange, setTimeRange] = useState<'24h' | '7d'>('24h');
   const qc = useQueryClient();
   const navigate = useNavigate();
   const onboarding = useOnboarding();
-
-  const { data: collectionsData, isLoading, isError, refetch } = useApiCollections();
-  const epCount = useEndpointsCount();
-  const issueSummary = useIssueSummary();
-  const { threats } = useDashboardKPIs();
-
+  const windowHours = timeRange === '24h' ? 24 : 168;
+  const attention = useOrganizationAttention(windowHours);
+  const { data: collectionsData, isLoading: collectionsLoading } = useApiCollections();
   const collections = collectionsData?.apiCollections ?? [];
-  const totalApis = epCount.data?.endpointsCount ?? 0;
 
-  const sev = issueSummary.data?.severityBreakdown ?? {};
-  const criticalCount = sev.CRITICAL ?? 0;
-  const highCount = sev.HIGH ?? 0;
-  const mediumCount = sev.MEDIUM ?? 0;
-  const lowCount = sev.LOW ?? 0;
-  const totalVulns = issueSummary.data?.totalIssues ?? 0;
-  const blockedActors = threats.data?.threatData?.blockedActors ?? 0;
-
-  const riskData = [
-    { name: 'Critical', value: criticalCount, color: '#EF4444' },
-    { name: 'High', value: highCount, color: '#F97316' },
-    { name: 'Medium', value: mediumCount, color: '#EAB308' },
-    { name: 'Low', value: lowCount, color: '#22C55E' },
-  ];
-  const riskTotal = riskData.reduce((s, d) => s + d.value, 0);
-  const healthScore = totalVulns === 0 ? 100 : Math.max(0, 100 - criticalCount * 15 - highCount * 8 - mediumCount * 3);
+  const data = attention.data;
+  const posture = data?.posture.score ?? 0;
+  const postureTone = posture >= 70 ? 'warn' : posture >= 35 ? 'signal' : 'ok';
 
   return (
-    <div className="space-y-5 animate-fade-in w-full pb-10">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-sm font-bold text-text-primary">Organization Overview</h2>
-          <p className="text-[11px] text-text-muted mt-0.5">All applications and their security posture</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => { qc.invalidateQueries({ queryKey: ['discovery'] }); qc.invalidateQueries({ queryKey: ['testing'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); }}
-            className="w-7 h-7 rounded-lg border border-border-subtle bg-bg-surface flex items-center justify-center text-muted-foreground hover:text-brand transition-all outline-none">
-            <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
-          </button>
-          <TimeFilter value={timeRange} onChange={setTimeRange} />
-        </div>
-      </div>
+    <div className="w-full space-y-6 pb-10 animate-fade-in">
+      <PageHeader
+        eyebrow="Workspace"
+        title="Organization"
+        description="Open findings ranked by the documented risk model. Inventory facts are listed separately — they are not extra score points."
+        actions={
+          <>
+            <button
+              type="button"
+              aria-label="Refresh organization attention"
+              onClick={() => {
+                qc.invalidateQueries({ queryKey: ['organization'] });
+                qc.invalidateQueries({ queryKey: ['discovery'] });
+              }}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border-subtle bg-bg-surface text-muted-foreground transition-colors hover:text-brand"
+            >
+              <RefreshCw size={13} className={attention.isLoading ? 'animate-spin' : ''} />
+            </button>
+            <TimeFilter value={timeRange} onChange={setTimeRange} />
+          </>
+        }
+      />
 
-      {isError && <QueryError message="Failed to load organization data" onRetry={() => refetch()} />}
-
-      {!onboarding.data.completed && (
-        <GlassCard variant="accent" className="p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="max-w-2xl">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand">Onboarding In Progress</div>
-              <h3 className="mt-1 text-lg font-bold text-text-primary">Finish deployment, traffic, and application setup before relying on the posture scores.</h3>
-              <p className="mt-2 text-[11px] leading-5 text-text-secondary">
-                The new onboarding flow now mirrors the AppSentinels setup pattern: control plane, traffic hookup, application mapping, identity attributes, and go-live validation.
-              </p>
-            </div>
-            <div className="min-w-[260px]">
-              <div className="flex items-center justify-between text-[11px] text-text-secondary">
-                <span>Setup completion</span>
-                <span className="font-bold text-text-primary">{onboarding.progress}%</span>
-              </div>
-              <div className="mt-2 h-2 rounded-full bg-black/[0.06] overflow-hidden">
-                <div className="h-full rounded-full bg-gradient-to-r from-brand to-blue-500" style={{ width: `${onboarding.progress}%` }} />
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button onClick={() => navigate('/admin/onboarding')} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white hover:bg-brand-dark transition-colors">
-                  Continue Onboarding
-                </button>
-                <button onClick={() => navigate('/admin/applications/add')} className="rounded-lg border border-border-subtle px-4 py-2 text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-brand/20 transition-all">
-                  Register App
-                </button>
-              </div>
-            </div>
-          </div>
-        </GlassCard>
+      {attention.isError && (
+        <QueryError message="Failed to load organization attention" onRetry={() => attention.refetch()} />
       )}
 
-      {/* KPI Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {([
-          { label: 'Total APIs', value: totalApis, icon: Cpu, color: '#FF5B2E', bg: 'rgba(255,91,46,0.1)' },
-          { label: 'Critical Risk', value: criticalCount, icon: ShieldAlert, color: '#EF4444', bg: 'rgba(239,68,68,0.1)' },
-          { label: 'High Risk', value: highCount, icon: ShieldAlert, color: '#F97316', bg: 'rgba(99,44,175,0.1)' },
-          { label: 'Applications', value: collections.length, icon: Eye, color: '#3B82F6', bg: 'rgba(59,130,246,0.1)' },
-          { label: 'Total Vulns', value: totalVulns, icon: Activity, color: '#EAB308', bg: 'rgba(234,179,8,0.1)' },
-          { label: 'Blocked Actors', value: blockedActors, icon: Lock, color: '#22C55E', bg: 'rgba(34,197,94,0.1)' },
-        ] as const).map((item, i) => (
-          <div key={item.label} className={`animate-stagger-${Math.min(i + 1, 6)}`}>
-            <MetricWidget label={item.label} value={item.value} icon={item.icon} iconColor={item.color} iconBg={item.bg} />
+      {!onboarding.data.completed && (
+        <EvidencePanel className="p-5">
+          <EvidenceSectionHead code="SETUP" title="Onboarding incomplete" />
+          <p className="mt-1 text-sm leading-6 text-text-secondary">
+            Finish deployment, traffic, and application setup before treating posture as a baseline.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => navigate('/admin/onboarding')}
+              className="rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-brand-dark"
+            >
+              Continue onboarding
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/admin/applications/add')}
+              className="rounded-lg border border-border-subtle px-4 py-2 text-xs font-semibold text-text-secondary transition-colors hover:border-brand/20 hover:text-text-primary"
+            >
+              Register app
+            </button>
           </div>
-        ))}
-      </div>
+        </EvidencePanel>
+      )}
 
-      {/* Posture + Distribution */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <GlassCard variant="elevated" className="p-5 flex items-center gap-6">
-          <ProgressRing value={healthScore} max={100} size={100} strokeWidth={8} label="Health" />
-          <div className="flex-1">
-            <h3 className="text-sm font-bold text-text-primary mb-2">Security Posture</h3>
-            <div className="flex items-baseline gap-1.5 mb-3">
-              <span className="text-2xl font-bold text-text-primary tabular-nums"><AnimatedCounter value={totalApis} /></span>
-              <span className="text-[11px] text-text-muted">APIs monitored</span>
-            </div>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-              {[
-                ['Collections', String(collections.length), 'var(--text-primary)'],
-                ['Critical', String(criticalCount), '#EF4444'],
-                ['High', String(highCount), '#F97316'],
-                ['Medium', String(mediumCount), '#EAB308'],
-                ['Low', String(lowCount), '#22C55E'],
-                ['Total Vulns', String(totalVulns), '#EAB308'],
-              ].map(([k, v, c]) => (
-                <div key={k} className="flex items-center justify-between">
-                  <span className="text-[11px] text-text-muted">{k}</span>
-                  <span className="text-[11px] font-mono font-bold tabular-nums" style={{ color: c }}>{v}</span>
-                </div>
+      {attention.isLoading && !data ? (
+        <TableSkeleton columns={4} rows={4} />
+      ) : data ? (
+        <>
+          <div className="evd-ledger">
+            <EvidenceLedgerItem icon={ShieldAlert} color="#EF4444" label="Critical" value={data.severity.critical} />
+            <EvidenceLedgerItem icon={ShieldAlert} color="#F97316" label="High" value={data.severity.high} />
+            <EvidenceLedgerItem icon={AlertTriangle} color="#EAB308" label="Medium" value={data.severity.medium} />
+            <EvidenceLedgerItem icon={Activity} color="#22C55E" label="Low" value={data.severity.low} />
+            <EvidenceLedgerItem icon={Globe} color="#3B82F6" label="APIs" value={data.inventory.apis_discovered} />
+            <EvidenceLedgerItem icon={Lock} color="#22C55E" label="Open alerts" value={data.activity.open_alerts} />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <EvidencePanel className="p-5">
+              <div className="flex items-start justify-between gap-3">
+                <EvidenceSectionHead code="POSTURE" title="Security posture" />
+                <EvidenceStamp tone={postureTone}>{posture}</EvidenceStamp>
+              </div>
+              <p className="text-sm leading-6 text-text-secondary">{data.posture.scale}. {data.risk_model.formula}</p>
+              <p className="mt-1 text-sm leading-6 text-text-secondary">{data.risk_model.rationale}</p>
+              <div className="mt-3">
+                {data.posture.reasons.map((reason) => (
+                  <EvidenceStatLine
+                    key={reason.factor}
+                    label={`${reason.factor} (${reason.count})`}
+                    value={`+${reason.points}`}
+                  />
+                ))}
+              </div>
+            </EvidencePanel>
+
+            <EvidencePanel className="p-5">
+              <EvidenceSectionHead code="INVENTORY" title="API surface" desc={`${windowHours}h window`} />
+              <EvidenceStatLine label="Discovered APIs" value={data.inventory.apis_discovered} />
+              <EvidenceStatLine label="Internet exposed (PUBLIC)" value={data.inventory.internet_facing} />
+              <EvidenceStatLine label="Shadow / rogue" value={data.inventory.shadow} />
+              <EvidenceStatLine label="Unauthenticated" value={data.inventory.unauthenticated} />
+              <EvidenceStatLine label="Sensitive" value={data.inventory.sensitive} />
+              <EvidenceStatLine label="New findings" value={data.activity.new_findings} />
+              <EvidenceStatLine label="Resolved findings" value={data.activity.resolved_findings} />
+            </EvidencePanel>
+          </div>
+
+          {data.notes.length > 0 && (
+            <EvidencePanel className="p-4">
+              {data.notes.map((note) => (
+                <p key={note} className="text-sm leading-6 text-text-secondary">{note}</p>
               ))}
-            </div>
-          </div>
-        </GlassCard>
+            </EvidencePanel>
+          )}
 
-        <GlassCard variant="elevated" className="p-5 flex items-center gap-6">
-          <DonutChart data={riskData} centerValue={riskTotal} size={120} innerRadius={38} outerRadius={55} centerLabel="Vulns" />
-          <div className="flex-1">
-            <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Vulnerability Distribution</span>
-            <div className="mt-3 space-y-2">
-              {riskData.map(({ name, value, color }) => (
-                <div key={name} className="space-y-0.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-sm" style={{ background: color }} /><span className="text-[11px] text-text-secondary">{name}</span></div>
-                    <span className="text-[11px] font-bold font-mono tabular-nums" style={{ color }}>{value}</span>
-                  </div>
-                  <div className="h-1 bg-black/[0.04] rounded-full overflow-hidden">
-                    <div className="h-full rounded-full transition-all duration-700" style={{ width: `${riskTotal > 0 ? (value / riskTotal) * 100 : 0}%`, background: color }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </GlassCard>
-      </div>
-
-      {/* Applications */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-xs font-bold text-text-primary uppercase tracking-wider">Applications</h3>
-          <span className="text-[11px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted">{collections.length} apps</span>
-        </div>
-
-        {isLoading ? <TableSkeleton columns={6} rows={3} /> : (
-          <div className="space-y-3">
-            {collections.length === 0 && (
-              <GlassCard variant="default" className="p-12 text-center">
-                <Cpu size={32} className="mx-auto mb-3 text-text-muted" />
-                <p className="text-xs text-text-muted">No applications found. Connect a traffic source to start discovering APIs.</p>
-              </GlassCard>
+          <div>
+            <EvidenceSectionHead
+              code="RISKS"
+              title="Top risks"
+              action={<span className="text-xs text-text-muted">{data.top_risks.length} open</span>}
+            />
+            {data.top_risks.length === 0 ? (
+              <EvidencePanel className="p-10 text-center">
+                <Eye size={22} className="mx-auto mb-3 text-text-muted" />
+                <p className="text-sm text-text-secondary">
+                  No open findings in this tenant. That is not the same as a verified-clean estate.
+                </p>
+              </EvidencePanel>
+            ) : (
+              <div className="evd-table-wrap">
+                <table className="evd-table">
+                  <thead>
+                    <tr>
+                      <th>Severity</th>
+                      <th>Finding</th>
+                      <th>API</th>
+                      <th>Evidence</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.top_risks.map((risk) => {
+                      const path = risk.api.url || 'Unknown API';
+                      return (
+                        <tr key={risk.id} onClick={() => navigate(`/app/findings/${risk.id}`)}>
+                          <td><SeverityChip severity={risk.severity} /></td>
+                          <td>
+                            <div className="font-semibold text-text-primary">{risk.title}</div>
+                            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-muted">
+                              {risk.facts.map((fact) => (
+                                <span key={`${fact.label}-${fact.value}`}>
+                                  {fact.label}: {fact.value}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td>
+                            <div className="flex items-center gap-2 font-mono text-xs text-text-secondary">
+                              {risk.api.method && <MethodBadge method={risk.api.method} />}
+                              <span className="truncate">{risk.api.host ? `${risk.api.host}${path}` : path}</span>
+                            </div>
+                          </td>
+                          <td>
+                            {risk.has_evidence ? (
+                              <span className="text-xs font-semibold text-emerald-600">Ready</span>
+                            ) : (
+                              <span className="text-xs text-text-muted">None yet</span>
+                            )}
+                          </td>
+                          <td>
+                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-brand">
+                              {risk.next_action} <ChevronRight size={12} />
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
-            {collections.map((app: AktoApiCollection, idx: number) => {
-              const isDefault = collections.length === 1 || idx === 0;
-              const epValue = isDefault ? totalApis : (app.urlsCount ?? 0);
-              const critVal = isDefault ? criticalCount : 0;
-              const highVal = isDefault ? highCount : 0;
-              const medVal = isDefault ? mediumCount : 0;
-              const lowVal = isDefault ? lowCount : 0;
-              const vulnCount = isDefault ? totalVulns : 0;
+          </div>
+        </>
+      ) : null}
 
-              return (
-                <GlassCard key={app.id} variant="default" className="p-5 cursor-pointer" hoverLift>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-brand/10 border border-brand/20">
-                        <Cpu size={16} className="text-brand" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-bold text-text-primary">{app.displayName || app.hostName || `Collection ${app.id}`}</h4>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[11px] px-1.5 py-0.5 rounded border border-border-subtle text-text-muted bg-black/[0.04]">{app.type || 'API'}</span>
-                          <span className="text-[11px] text-text-muted">{app.hostName}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <button className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold text-brand bg-brand/10 border border-brand/20 hover:bg-brand/20 transition-all">
-                      Open Dashboard <ChevronRight size={12} />
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-4 pt-3 border-t border-border-subtle">
-                    {[
-                      { label: 'Endpoints', value: epValue, color: 'var(--text-primary)' },
-                      { label: 'Critical', value: critVal, color: '#EF4444' },
-                      { label: 'High', value: highVal, color: '#F97316' },
-                      { label: 'Medium', value: medVal, color: '#EAB308' },
-                      { label: 'Low', value: lowVal, color: '#22C55E' },
-                      { label: 'Total Vulns', value: vulnCount, color: '#EF4444' },
-                    ].map(({ label, value, color }) => (
-                      <div key={label} className="flex flex-col gap-1">
-                        <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">{label}</span>
-                        <span className="text-sm font-bold font-mono tabular-nums" style={{ color }}>{value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </GlassCard>
-              );
-            })}
+      <div>
+        <EvidenceSectionHead
+          code="APPS"
+          title="Applications"
+          action={<span className="text-xs text-text-muted">{collections.length} apps</span>}
+        />
+        {collectionsLoading ? (
+          <TableSkeleton columns={3} rows={2} />
+        ) : collections.length === 0 ? (
+          <EvidencePanel className="p-10 text-center">
+            <Globe size={22} className="mx-auto mb-3 text-text-muted" />
+            <p className="text-sm text-text-secondary">No applications found. Connect a traffic source to start discovering APIs.</p>
+          </EvidencePanel>
+        ) : (
+          <div className="evd-table-wrap">
+            <table className="evd-table">
+              <thead>
+                <tr>
+                  <th>Application</th>
+                  <th>Host</th>
+                  <th>Endpoints</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {collections.map((app: AktoApiCollection) => (
+                  <tr key={String(app.id)} onClick={() => navigate('/app/discovery')}>
+                    <td className="font-semibold text-text-primary">{app.displayName || app.hostName || `Collection ${app.id}`}</td>
+                    <td className="font-mono text-xs">{app.hostName || '—'}</td>
+                    <td>{app.urlsCount ?? 0}</td>
+                    <td>
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-brand">
+                        Open catalogue <ChevronRight size={12} />
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

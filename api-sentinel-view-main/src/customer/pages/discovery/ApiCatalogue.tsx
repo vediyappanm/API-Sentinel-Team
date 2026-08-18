@@ -1,14 +1,16 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { RefreshCw, Download, Globe, Eye, ShieldOff, Calendar, Filter, Upload, Search, X, ChevronRight, GitBranch, FileCheck } from 'lucide-react';
+import { RefreshCw, Download, Globe, Eye, ShieldOff, Upload, Search, X, GitBranch, FileCheck, KeyRound, Ghost } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import DonutChart from '@/components/charts/DonutChart';
 import TimeFilter from '@/components/shared/TimeFilter';
-import LineChart from '@/components/charts/LineChart';
 import { MethodBadge, AuthBadge } from '@/components/shared/Badges';
 import TableSkeleton from '@/components/shared/TableSkeleton';
 import QueryError from '@/components/shared/QueryError';
-import MetricWidget from '@/components/ui/MetricWidget';
-import GlassCard from '@/components/ui/GlassCard';
+import PageHeader from '@/components/shared/PageHeader';
+import EvidencePanel from '@/components/ui/EvidencePanel';
+import EvidenceSectionHead from '@/components/ui/EvidenceSectionHead';
+import EvidenceLedgerItem from '@/components/ui/EvidenceLedger';
+import { EvidenceStatLine, EvidenceBarLine } from '@/components/ui/EvidenceStatLine';
 import { useApiCollections, useApiInfos, useSeverityCounts } from '@/hooks/use-discovery';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
@@ -38,10 +40,6 @@ function riskColor(label: string): string {
     default: return '#22C55E';
   }
 }
-
-const methodColors: Record<string, string> = {
-  GET: '#22C55E', POST: '#632CA6', PUT: '#3B82F6', PATCH: '#8B5CF6', DELETE: '#EF4444', HEAD: '#6B7280', OPTIONS: '#6B7280',
-};
 
 const typeColors: Record<string, string> = {
   REST: '#3B82F6',
@@ -217,274 +215,212 @@ const ApiCatalogue: React.FC = () => {
     }).length;
   }, [filteredRows]);
   const specCoverage = totalApis > 0 ? Math.round((authCounts.auth / Math.max(1, totalApis)) * 100) : 0;
+  const methodEntries = Object.entries(methodDist).sort((a, b) => b[1] - a[1]);
+  const maxMethod = methodEntries[0]?.[1] ?? 1;
+  const from = filteredRows.length === 0 ? 0 : page * pageSize + 1;
+  const to = Math.min((page + 1) * pageSize, filteredRows.length);
 
   return (
-    <div className="space-y-5 animate-fade-in w-full pb-10">
-      {/* Action bar */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search endpoints..."
-              className="pl-8 pr-3 py-1.5 text-xs rounded-lg border border-border-subtle bg-bg-base text-text-primary placeholder-text-muted outline-none focus:border-brand/30 w-56 transition-all"
-            />
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => qc.invalidateQueries({ queryKey: ['discovery'] })} className="w-7 h-7 rounded-lg border border-border-subtle bg-bg-surface flex items-center justify-center text-muted-foreground hover:text-brand transition-all outline-none">
-            <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
-          </button>
-          <TimeFilter value={timeRange} onChange={setTimeRange} />
-          <input ref={fileInputRef} type="file" accept=".log,.txt" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleNginxUpload(f); }} />
-          <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-            className="flex items-center gap-1.5 rounded-lg border border-brand/30 px-3 py-1.5 text-xs text-brand hover:bg-brand/10 transition-all outline-none disabled:opacity-50">
-            <Upload size={13} /> {uploading ? 'Importing...' : 'Import Log'}
-          </button>
-          <button onClick={handleExport} className="flex items-center gap-1.5 rounded-lg border border-border-subtle px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:border-brand/20 transition-all outline-none">
-            <Download size={13} /> Export
-          </button>
-        </div>
-      </div>
+    <div className="w-full min-w-0 space-y-5 pb-8">
+      <PageHeader
+        eyebrow="Discovery"
+        title="API catalogue"
+        description="Endpoints observed from live traffic. Click a row to open the API record."
+        actions={
+          <>
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search endpoints..."
+                className="w-full max-w-56 min-w-[10rem] rounded-lg border border-border-subtle bg-bg-base py-1.5 pl-8 pr-3 text-xs text-text-primary placeholder-text-muted outline-none transition-all focus:border-brand/30"
+              />
+            </div>
+            <button onClick={() => qc.invalidateQueries({ queryKey: ['discovery'] })} className="flex h-8 w-8 items-center justify-center rounded-lg border border-border-subtle bg-bg-surface text-muted-foreground transition-colors hover:text-brand outline-none">
+              <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
+            </button>
+            <TimeFilter value={timeRange} onChange={setTimeRange} />
+            <input ref={fileInputRef} type="file" accept=".log,.txt" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleNginxUpload(f); }} />
+            <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
+              className="flex items-center gap-1.5 rounded-lg border border-brand/30 px-3 py-1.5 text-xs font-semibold text-brand transition-all hover:bg-brand/10 outline-none disabled:opacity-50">
+              <Upload size={13} /> {uploading ? 'Importing...' : 'Import log'}
+            </button>
+            <button onClick={handleExport} className="flex items-center gap-1.5 rounded-lg border border-border-subtle px-3 py-1.5 text-xs font-semibold text-text-secondary transition-all hover:border-brand/20 hover:text-text-primary outline-none">
+              <Download size={13} /> Export
+            </button>
+          </>
+        }
+      />
 
       {/* Upload banner */}
       {uploadResult && (
-        <div className="flex items-center gap-4 glass-card-premium rounded-lg px-4 py-2.5 text-xs text-sev-low border border-sev-low/20 animate-fade-in">
-          <span className="font-bold">Log imported successfully.</span>
-          <span className="text-text-secondary">Lines: <strong className="text-text-primary">{uploadResult.lines}</strong></span>
-          <span className="text-text-secondary">Endpoints: <strong className="text-text-primary">{uploadResult.endpoints_discovered}</strong></span>
-          <span className="text-text-secondary">Threats: <strong className="text-sev-critical">{uploadResult.threats_detected}</strong></span>
-          <button onClick={() => setUploadResult(null)} className="ml-auto text-text-muted hover:text-text-primary">x</button>
-        </div>
+        <EvidencePanel className="flex flex-wrap items-center gap-4 px-4 py-2.5 text-xs">
+          <span className="font-semibold text-text-primary">Log imported.</span>
+          <span className="text-text-muted">Lines <strong className="tabular-nums text-text-primary">{uploadResult.lines}</strong></span>
+          <span className="text-text-muted">Endpoints <strong className="tabular-nums text-text-primary">{uploadResult.endpoints_discovered}</strong></span>
+          <span className="text-text-muted">Threats <strong className="tabular-nums text-text-primary">{uploadResult.threats_detected}</strong></span>
+          <button type="button" onClick={() => setUploadResult(null)} className="ml-auto text-text-muted hover:text-text-primary">Dismiss</button>
+        </EvidencePanel>
       )}
 
-      {/* Summary Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <MetricWidget
-          label="APIs Discovered"
-          value={totalApis}
-          icon={Globe}
-          iconColor="#3B82F6"
-          iconBg="rgba(59,130,246,0.1)"
-          changeLabel={`${authCounts.unauth} unauthenticated, ${authCounts.auth} authenticated`}
-        />
-
-        <GlassCard variant="default" className="p-4 flex items-center gap-4">
-          <DonutChart data={riskData} size={100} innerRadius={30} outerRadius={44} centerValue={totalApis} centerLabel="APIs" />
-          <div className="flex-1 space-y-1.5">
-            <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Risk Distribution</span>
-            {riskData.map(d => (
-              <div key={d.name} className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2 h-2 rounded-sm" style={{ background: d.color }} />
-                  <span className="text-[11px] text-text-secondary">{d.name}</span>
-                </div>
-                <span className="text-[11px] font-bold text-text-primary tabular-nums">{d.value}</span>
-              </div>
-            ))}
-          </div>
-        </GlassCard>
-
-        <GlassCard variant="default" className="p-4">
-          <span className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Method Distribution</span>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {Object.entries(methodDist).sort((a, b) => b[1] - a[1]).map(([method, count]) => (
-              <span
-                key={method}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border"
-                style={{
-                  color: methodColors[method] || '#6B7280',
-                  borderColor: `${methodColors[method] || '#6B7280'}30`,
-                  background: `${methodColors[method] || '#6B7280'}08`,
-                }}
-              >
-                {method}
-                <span className="text-text-primary">{count}</span>
-              </span>
-            ))}
-          </div>
-          {Object.keys(methodDist).length === 0 && (
-            <p className="text-xs text-text-muted mt-3">No method data</p>
-          )}
-        </GlassCard>
+      <div className="evd-ledger min-w-0">
+        <EvidenceLedgerItem icon={Globe} color="var(--evd-info)" label="APIs" value={totalApis} />
+        <EvidenceLedgerItem icon={KeyRound} color="var(--evd-critical)" label="Unauthenticated" value={authCounts.unauth} />
+        <EvidenceLedgerItem icon={ShieldOff} color="var(--evd-high)" label="Shadow" value={shadowCandidates} />
+        <EvidenceLedgerItem icon={Ghost} color="var(--evd-medium)" label="Zombie" value={zombieCandidates} />
+        <EvidenceLedgerItem icon={Globe} color="var(--evd-signal)" label="MCP" value={mcpEndpoints} />
+        <EvidenceLedgerItem icon={Eye} color="var(--evd-low)" label="Auth coverage" value={specCoverage} suffix="%" />
       </div>
 
-      {/* Discovery Signals */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <MetricWidget
-          label="Spec Coverage (Est.)"
-          value={specCoverage}
-          suffix="%"
-          icon={Eye}
-          iconColor="#FF5B2E"
-          iconBg="rgba(99,44,175,0.1)"
-          changeLabel="Traffic-based OpenAPI inference"
-        />
-        <MetricWidget
-          label="Shadow / Rogue"
-          value={shadowCandidates}
-          icon={ShieldOff}
-          iconColor="#EF4444"
-          iconBg="rgba(239,68,68,0.1)"
-          changeLabel="Unregistered endpoints detected"
-        />
-        <MetricWidget
-          label="MCP Endpoints"
-          value={mcpEndpoints}
-          icon={Globe}
-          iconColor="#EAB308"
-          iconBg="rgba(234,179,8,0.1)"
-          changeLabel="Agentic tool surfaces"
-        />
+      <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
+        <EvidencePanel className="min-w-0">
+          <EvidenceSectionHead code="RISK" title="Risk mix" desc={`${totalApis} endpoints`} />
+          <div className="flex min-w-0 items-center gap-4">
+            <DonutChart data={riskData} size={112} innerRadius={34} outerRadius={50} centerValue={totalApis} centerLabel="APIs" />
+            <div className="min-w-0 flex-1">
+              {riskData.map((d) => (
+                <EvidenceStatLine key={d.name} label={d.name} value={d.value} dot={d.color} />
+              ))}
+            </div>
+          </div>
+        </EvidencePanel>
+        <EvidencePanel className="min-w-0">
+          <EvidenceSectionHead code="VERB" title="Methods" desc={methodEntries.length ? `${methodEntries.length} verbs` : 'No traffic yet'} />
+          {methodEntries.length > 0 ? (
+            methodEntries.map(([method, count]) => (
+              <EvidenceBarLine key={method} label={method} value={count} max={maxMethod} />
+            ))
+          ) : (
+            <p className="py-4 text-sm text-text-muted">Methods appear once endpoints are observed.</p>
+          )}
+        </EvidencePanel>
       </div>
 
       {isError && <QueryError message="Failed to load API catalogue" onRetry={refetch} />}
 
       {!isLoading && !isError && total === 0 && (
-        <GlassCard variant="accent" className="px-5 py-4 flex items-start gap-4">
-          <div className="w-9 h-9 rounded-lg bg-brand/10 flex items-center justify-center shrink-0 mt-0.5">
-            <Eye size={18} className="text-brand" />
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-text-primary">Awaiting Traffic Analysis</p>
-            <p className="text-[11px] text-text-secondary mt-1 leading-relaxed">
-              No API endpoints discovered yet. Import an nginx/apache access log using <strong className="text-brand">Import Log</strong> above, or connect a live traffic sensor.
-            </p>
-          </div>
-        </GlassCard>
+        <EvidencePanel className="px-5 py-4">
+          <p className="text-sm font-semibold text-text-primary">Awaiting traffic</p>
+          <p className="mt-1 text-xs leading-5 text-text-muted">
+            No API endpoints discovered yet. Import an nginx/apache access log, or connect a live traffic sensor.
+          </p>
+        </EvidencePanel>
       )}
 
-      {/* Table */}
-      <div className="bg-bg-surface border border-border-subtle rounded-xl overflow-hidden flex flex-col min-h-[400px]">
-        <div className="p-3 border-b border-border-subtle flex items-center justify-between">
-          <span className="text-sm font-bold text-text-primary flex items-center gap-2">
-            API Catalogue
-            <span className="text-[11px] bg-bg-elevated border border-border-subtle px-2 py-0.5 rounded-full text-text-muted flex items-center gap-1">
-              <Calendar size={10} /> Last 90 days
-            </span>
-          </span>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-3 text-xs text-text-muted">
-              <span>{page * pageSize + 1} - {Math.min((page + 1) * pageSize, filteredRows.length)} of {filteredRows.length}</span>
-              <div className="flex gap-1">
-                <button disabled={page === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[11px] disabled:opacity-30 hover:border-brand/20 transition-all">Prev</button>
-                <button disabled={(page + 1) * pageSize >= filteredRows.length} onClick={() => setPage(p => p + 1)} className="px-2 py-1 rounded-md bg-bg-elevated border border-border-subtle text-[11px] disabled:opacity-30 hover:border-brand/20 transition-all">Next</button>
-              </div>
+      <EvidencePanel className="min-w-0">
+        <EvidenceSectionHead
+          code="CAT"
+          title="Endpoints"
+          desc={`${from}–${to} of ${filteredRows.length}`}
+          action={
+            <div className="flex gap-1">
+              <button
+                type="button"
+                disabled={page === 0}
+                onClick={() => setPage((p) => p - 1)}
+                className="rounded-md border border-border-subtle bg-bg-elevated px-2 py-1 text-[11px] disabled:opacity-30"
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                disabled={(page + 1) * pageSize >= filteredRows.length}
+                onClick={() => setPage((p) => p + 1)}
+                className="rounded-md border border-border-subtle bg-bg-elevated px-2 py-1 text-[11px] disabled:opacity-30"
+              >
+                Next
+              </button>
             </div>
-            <button className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-elevated outline-none transition-colors">
-              <Filter size={14} />
-            </button>
-          </div>
-        </div>
-
+          }
+        />
         {isLoading ? (
-          <TableSkeleton columns={10} rows={pageSize} />
+          <TableSkeleton columns={8} rows={pageSize} />
         ) : (
-          <div className="overflow-x-auto flex-1">
-            <table className="w-full text-left border-collapse table-fixed min-w-[700px]">
-              <thead className="bg-bg-base/50">
+          <div className="evd-table-wrap">
+            <table className="evd-table min-w-[760px]">
+              <thead>
                 <tr>
-                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-10 text-center">
-                    <input type="checkbox" className="accent-brand" />
-                  </th>
-                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-24">Traits</th>
-                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Type</th>
-                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-[30%]">Endpoint</th>
-                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-[18%]">Host</th>
-                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-28 text-center">Discovered</th>
-                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-28 text-center">Last Seen</th>
-                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Auth</th>
-                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted w-20 text-center">Risk</th>
+                  <th>Traits</th>
+                  <th>Type</th>
+                  <th>Endpoint</th>
+                  <th>Host</th>
+                  <th>Discovered</th>
+                  <th>Last seen</th>
+                  <th>Auth</th>
+                  <th>Risk</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border-subtle">
+              <tbody>
                 {filteredRows.slice(page * pageSize, (page + 1) * pageSize).map((row) => {
                   const risk = mapRiskScore(row.riskScore);
                   const isUnauth = !row.allAuthTypesFound?.length || row.allAuthTypesFound.includes('UNAUTHENTICATED');
                   const hostCollection = hostCollectionForRow(row);
                   const apiType = inferApiType(row.id.url);
                   const typeColor = typeColors[apiType] || '#6B7280';
+                  const lifecycle = getApiLifecycleStatus(row, hostCollection);
                   return (
-                    <tr 
-                      key={`${row.id.apiCollectionId}-${row.id.method}-${row.id.url}`} 
-                      className="data-row-interactive hover:bg-white/[0.02] transition-colors cursor-pointer"
+                    <tr
+                      key={`${row.id.apiCollectionId}-${row.id.method}-${row.id.url}`}
+                      className="cursor-pointer"
                       onClick={() => {
+                        if (row.endpointId) {
+                          navigate(`/app/discovery/endpoint/${row.endpointId}`);
+                          return;
+                        }
                         setSelectedApi(row);
                         setShowDetailsPanel(true);
                       }}
                     >
-                      <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
-                        <input type="checkbox" className="accent-brand" />
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex gap-1.5 items-center flex-wrap">
-                          <Globe size={12} className="text-sev-info" />
+                      <td>
+                        <div className="flex flex-wrap items-center gap-1.5">
                           {isUnauth && <ShieldOff size={12} className="text-sev-critical" />}
-                          {(() => {
-                            const lifecycle = getApiLifecycleStatus(row, hostCollection);
-                            if (lifecycle.isShadow) {
-                              return (
-                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-sev-critical/10 text-sev-critical border border-sev-critical/20 flex items-center gap-1">
-                                  <ShieldOff size={8} /> Shadow
-                                </span>
-                              );
-                            }
-                            if (lifecycle.isZombie) {
-                              return (
-                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-sev-medium/10 text-sev-medium border border-sev-medium/20 flex items-center gap-1">
-                                  <Calendar size={8} /> Zombie
-                                </span>
-                              );
-                            }
-                            if (lifecycle.isDeprecated) {
-                              return (
-                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-bg-elevated text-text-muted border border-border-subtle">
-                                  Deprecated
-                                </span>
-                              );
-                            }
-                            return null;
-                          })()}
+                          {lifecycle.isShadow && (
+                            <span className="text-[10px] font-semibold" style={{ color: 'var(--evd-critical)' }}>Shadow</span>
+                          )}
+                          {lifecycle.isZombie && (
+                            <span className="text-[10px] font-semibold" style={{ color: 'var(--evd-medium)' }}>Zombie</span>
+                          )}
+                          {lifecycle.isDeprecated && (
+                            <span className="text-[10px] font-semibold text-text-muted">Deprecated</span>
+                          )}
+                          {!isUnauth && !lifecycle.isShadow && !lifecycle.isZombie && !lifecycle.isDeprecated && (
+                            <span className="text-[10px] text-text-muted">—</span>
+                          )}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-center">
-                        <span
-                          className="text-[11px] font-bold px-2 py-0.5 rounded-full border"
-                          style={{ color: typeColor, background: `${typeColor}12`, borderColor: `${typeColor}30` }}
-                        >
-                          {apiType}
-                        </span>
+                      <td>
+                        <span className="text-[11px] font-semibold" style={{ color: typeColor }}>{apiType}</span>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
+                      <td>
+                        <div className="flex min-w-0 items-center gap-2">
                           <MethodBadge method={row.id.method} />
-                          <span className="text-[12px] font-mono text-text-primary truncate">{row.id.url}</span>
+                          <span className="truncate font-mono text-xs">{row.id.url}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-[12px] text-text-secondary truncate">{hostCollection?.hostName || hostCollection?.displayName || '-'}</td>
-                      <td className="px-4 py-3 text-[11px] font-mono text-text-muted text-center">{formatTs(row.discoveredAt ?? 0)}</td>
-                      <td className="px-4 py-3 text-[11px] font-mono text-text-muted text-center">{formatTs(row.lastSeen)}</td>
-                      <td className="px-4 py-3 text-center"><AuthBadge auth={isUnauth ? 'Unauth' : 'Authenticated'} /></td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{
-                          color: riskColor(risk),
-                          background: `${riskColor(risk)}12`,
-                        }}>{risk}</span>
+                      <td className="max-w-[160px] truncate text-xs text-text-secondary">{hostCollection?.hostName || hostCollection?.displayName || '-'}</td>
+                      <td className="font-mono text-xs tabular-nums text-text-muted">{formatTs(row.discoveredAt ?? 0)}</td>
+                      <td className="font-mono text-xs tabular-nums text-text-muted">{formatTs(row.lastSeen)}</td>
+                      <td><AuthBadge auth={isUnauth ? 'Unauth' : 'Authenticated'} /></td>
+                      <td>
+                        <span className="text-[11px] font-semibold" style={{ color: riskColor(risk) }}>{risk}</span>
                       </td>
                     </tr>
                   );
                 })}
                 {filteredRows.length === 0 && !isLoading && (
-                  <tr><td colSpan={10} className="px-4 py-12 text-center text-xs text-text-muted">No APIs found. Connect a traffic source to start discovering APIs.</td></tr>
+                  <tr>
+                    <td colSpan={8} className="py-10 text-center text-xs text-text-muted">
+                      No APIs found. Connect a traffic source to start discovering APIs.
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
           </div>
         )}
-      </div>
+      </EvidencePanel>
 
       {/* API Details Side Panel */}
       {showDetailsPanel && selectedApi && (
@@ -586,9 +522,20 @@ const ApiCatalogue: React.FC = () => {
 
               {/* Actions */}
               <div className="flex gap-2 pt-4 border-t border-border-subtle">
+                {selectedApi.endpointId && (
+                  <button
+                    onClick={() => {
+                      navigate(`/app/discovery/endpoint/${selectedApi.endpointId}`);
+                      setShowDetailsPanel(false);
+                    }}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-brand text-white hover:bg-brand-dark transition-all text-sm font-semibold"
+                  >
+                    Open API page
+                  </button>
+                )}
                 <button 
                   onClick={() => {
-                    navigate(`/app/discovery/sequences?endpoint=${encodeURIComponent(selectedApi.id.url)}&method=${selectedApi.id.method}`);
+                    navigate(`/app/discovery/sequence?endpoint=${encodeURIComponent(selectedApi.id.url)}&method=${selectedApi.id.method}`);
                     setShowDetailsPanel(false);
                   }}
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-brand/10 text-brand hover:bg-brand/20 transition-all text-sm font-semibold"

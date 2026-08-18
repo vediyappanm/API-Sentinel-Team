@@ -14,6 +14,7 @@ from server.models.core import APICollection, APIEndpoint, RequestLog
 from server.modules.api_inventory.path_normalizer import PathNormalizer
 from server.modules.ingestion.redaction import redact_ingestion_path
 from server.modules.ingestion.sensor_time import coerce_sensor_ts_ms
+from server.modules.ingestion.traffic_sample import persistable_body, persistable_identity
 
 from .models import DetectionEnvelope, NormalizationResult
 from .state_store import state_store
@@ -145,13 +146,22 @@ class NormalizationAgent:
         host = str(request.get("host") or raw_event.get("host") or "unknown")
         ts_raw = raw_event.get("observed_at") or raw_event.get("ts")
         observed_at_ms = coerce_sensor_ts_ms(ts_raw)
-        actor_id = str(raw_event.get("source_ip") or raw_event.get("src_ip") or headers.get("x-forwarded-for") or "anonymous")
+        source_ip = str(raw_event.get("source_ip") or raw_event.get("src_ip") or headers.get("x-forwarded-for") or "")
+        user_id = raw_event.get("user_id") or None
+        user_role = raw_event.get("user_role") or None
+        session_id = (
+            raw_event.get("session_id")
+            or raw_event.get("auth_session_id")
+            or headers.get("x-session-id")
+            or headers.get("cookie")
+        )
+        actor_id = str(user_id or source_ip or "anonymous")
         envelope = DetectionEnvelope(
             source_type="sensor_flat",
             account_id=account_id,
             observed_at_ms=observed_at_ms,
             actor_id=actor_id,
-            source_ip=actor_id,
+            source_ip=source_ip or actor_id,
             method=method,
             path=path,
             host=host,
@@ -165,7 +175,9 @@ class NormalizationAgent:
             query_params=_query_params_from_path(path),
             request_body_text=_body_text(request.get("body")),
             response_body_text=_body_text(response.get("body")),
-            session_id=headers.get("x-session-id") or headers.get("cookie"),
+            role=str(user_role) if user_role else None,
+            user_id=str(user_id) if user_id else None,
+            session_id=str(session_id) if session_id else None,
             context_source=context_source,
             raw_ref=raw_event,
             metadata={"sensor_flagged_injection": bool(raw_event.get("has_injection")), "container": raw_event.get("container") or {}, "dest_port": raw_event.get("dest_port") or raw_event.get("dst_port")},
@@ -268,6 +280,7 @@ class NormalizationAgent:
         return envelope
 
     async def _persist_request_log(self, db: AsyncSession, envelope: DetectionEnvelope) -> None:
+        host = envelope.host if envelope.host and envelope.host.lower() != "unknown" else None
         log = RequestLog(
             id=str(uuid.uuid4()),
             account_id=envelope.account_id,
@@ -275,8 +288,15 @@ class NormalizationAgent:
             source_ip=envelope.source_ip or envelope.actor_id,
             method=envelope.method,
             path=redact_ingestion_path(envelope.path),
+            host=host,
+            protocol=envelope.protocol,
             response_code=envelope.status_code,
             response_time_ms=envelope.latency_ms,
+            request_body=persistable_body(envelope.request_body_text),
+            response_body=persistable_body(envelope.response_body_text),
+            user_id=persistable_identity(envelope.user_id),
+            user_role=persistable_identity(envelope.role, max_len=64),
+            session_id=persistable_identity(envelope.session_id),
             created_at=_datetime_from_ms(envelope.observed_at_ms),
         )
         db.add(log)

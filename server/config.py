@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     # CORS_ORIGINS_OVERRIDE: Can be set via env (comma-separated list, no spaces)
     # E.g., CORS_ORIGINS_OVERRIDE="https://app.example.com,https://api.example.com"
     CORS_ORIGINS_OVERRIDE: str = ""
+    # Public self-service signup creates a new ADMIN tenant. Allowed in DEBUG
+    # for tests and local onboarding. Forced off when DEBUG=False.
+    SIGNUP_ENABLED: bool = True
 
 
     # ── Test Execution ───────────────────────────────────────────────
@@ -365,6 +368,8 @@ class Settings(BaseSettings):
             raise ValueError("STARTUP_ARCHIVER_ACCOUNT_ID must be >= 0 when STARTUP_ENABLE_ARCHIVER=True")
 
         if not self.DEBUG:
+            # Provisioned operators only — public signup is a tenant-creation footgun.
+            object.__setattr__(self, "SIGNUP_ENABLED", False)
             if self.STARTUP_BOOTSTRAP_SCHEMA:
                 raise ValueError("STARTUP_BOOTSTRAP_SCHEMA must remain disabled when DEBUG=False; run Alembic migrations separately")
             if self.STARTUP_ENABLE_DEMO_BOOTSTRAP:

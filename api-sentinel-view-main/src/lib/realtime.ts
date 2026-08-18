@@ -56,16 +56,16 @@ type LogListener = (entry: LiveLogEntry) => void;
 /** Which top-level React Query key namespaces go stale when a given
  * server event arrives. Keeps every page's data live without polling. */
 const INVALIDATION_MAP: Record<WSEventType, string[][]> = {
-  VULNERABILITY_FOUND: [['dashboard'], ['testing'], ['security-ops'], ['protection']],
+  VULNERABILITY_FOUND: [['dashboard'], ['testing'], ['security-ops'], ['protection'], ['organization']],
   SCAN_STARTED: [['testing'], ['security-ops']],
-  SCAN_COMPLETED: [['testing'], ['security-ops'], ['dashboard']],
+  SCAN_COMPLETED: [['testing'], ['security-ops'], ['dashboard'], ['organization']],
   SCAN_PROGRESS: [['testing'], ['security-ops']],
   THREAT_ACTOR_FLAGGED: [['dashboard'], ['protection'], ['live-feed']],
-  TRAFFIC_INGESTED: [['dashboard'], ['discovery'], ['live-feed']],
+  TRAFFIC_INGESTED: [['dashboard'], ['discovery'], ['live-feed'], ['organization']],
   IP_BLOCKED: [['protection'], ['dashboard'], ['blocklist']],
   ENDPOINT_BLOCKED: [['protection'], ['discovery']],
   RATE_LIMITED: [['protection'], ['alerts']],
-  INCIDENT_CREATED: [['alerts'], ['dashboard'], ['protection']],
+  INCIDENT_CREATED: [['alerts'], ['dashboard'], ['protection'], ['organization']],
 };
 
 function applyInvalidation(qc: QueryClient, type: string) {

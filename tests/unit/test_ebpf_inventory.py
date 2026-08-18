@@ -160,3 +160,65 @@ async def test_ebpf_ingest_skips_cors_public_host(client, db_session, monkeypatc
         )
     ).scalars().all()
     assert logs == []
+
+
+async def test_ebpf_ingest_persists_bodies_identity_and_endpoint_sample(client, db_session):
+    await _ingest(
+        client,
+        db_session,
+        [
+            {
+                "method": "POST",
+                "path": "/api/login",
+                "host": "payments.example.com",
+                "source_ip": "10.10.10.10",
+                "protocol": "HTTP/2",
+                "user_id": "user-42",
+                "user_role": "admin",
+                "session_id": "sid-abc",
+                "request": {
+                    "method": "POST",
+                    "path": "/api/login",
+                    "host": "payments.example.com",
+                    "headers": {"authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.aaa.bbb"},
+                    "body": '{"email":"a@b.com","password":"raw-secret"}',
+                },
+                "response": {
+                    "status": 200,
+                    "headers": {"content-type": "application/json"},
+                    "body": '{"ok":true,"token":"raw-token"}',
+                },
+            }
+        ],
+        key="ebpf-body-key",
+    )
+
+    log = (
+        await db_session.execute(
+            select(RequestLog).where(RequestLog.source_ip == "10.10.10.10")
+        )
+    ).scalar_one()
+    assert log.host == "payments.example.com"
+    assert log.protocol == "HTTP/2"
+    assert log.user_id == "user-42"
+    assert log.user_role == "admin"
+    assert log.session_id == "sid-abc"
+    assert log.request_body is not None
+    assert "a@b.com" in log.request_body or "email" in log.request_body
+    assert "raw-secret" not in (log.request_body or "")
+    assert log.response_body is not None
+    assert "raw-token" not in (log.response_body or "")
+
+    endpoint = (
+        await db_session.execute(
+            select(APIEndpoint).where(
+                APIEndpoint.account_id == 1000000,
+                APIEndpoint.method == "POST",
+                APIEndpoint.host == "payments.example.com",
+                APIEndpoint.path_pattern == "/api/login",
+            )
+        )
+    ).scalar_one()
+    assert endpoint.last_request_body
+    assert "raw-secret" not in endpoint.last_request_body
+    assert "JWT" in (endpoint.auth_types_found or [])

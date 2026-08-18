@@ -12,6 +12,10 @@ Schemathesis / ZAP), and compliance/evidence surfaces.
 - `server/` — FastAPI backend (Python 3.11, SQLAlchemy 2.x async, Alembic)
 - `api-sentinel-view-main/` — Vite 5 + React 18 + TypeScript SPA (Tailwind, Radix/shadcn, TanStack Query)
 - `tests-library/` — YAML security-test templates + remediation markdown. **Runtime scanner input, not pytest.** Never point pytest at it.
+- `API-Sensor/` — the eBPF TLS-capture sensor itself: C BPF program (`bpf/http_trace.bpf.c`, OpenSSL +
+  Go TLS uprobes) + Rust userspace shipper (`userspace/`, Tokio; HTTP/1.1+HTTP/2 parsing, PII redaction,
+  gzip batch POST to `/v1/events`). Built with its own `Makefile` (clang → BPF object, cargo → binary);
+  has its own README/runbooks and `tests/`.
 - `k8s/` — deploy to kind cluster `wecrew`, namespace `api-sentinel`, `https://sentinel.wecrew.in/`
 - `infra/` — Helm, Terraform (AWS), nginx, Flink, eBPF sensor packaging
 
@@ -73,10 +77,15 @@ docker compose --profile scan-worker up --build    # adds the isolated Schemathe
 
 ./k8s/build-and-push.sh          # harbor.wecrew.in/finspot/api-sentinel-{backend,frontend}:latest
 ./k8s/build-and-push.sh worker   # optional heavy scan-worker image
+./k8s/build-and-push.sh sensor   # eBPF sensor image (built from API-Sensor/)
 ```
 
 Apply `k8s/` manifests in number order (`00-` → `50-`) after `./k8s/create-secrets.sh`; see
-`k8s/README.md` for the Traefik SNI passthrough step required to expose the host publicly.
+`k8s/README.md` for the exact rollout sequence and the Traefik SNI passthrough step required to
+expose the host publicly. The sensor DaemonSet (`35-sensor.yaml`) is a two-step deploy: with the
+backend Ready, run `./k8s/register-sensor.sh` first — it hashes the key from secret
+`api-sentinel-sensor` with the live backend pepper and upserts the sensor row so `/v1/events`
+accepts the DaemonSet's key — then apply the manifest.
 
 ## Architecture
 
@@ -93,6 +102,14 @@ step silently yields a 404. Note `akto_admin` is mounted with no prefix (paths l
 Two routes live **outside** `/api`, defined directly on the app: `POST /v1/events` and `POST /`
 (legacy) both delegate to `handle_ebpf_ingest_request` for eBPF sensor ingest, authenticated with a
 sensor API key as a bearer token rather than a user JWT.
+
+Sensor ingest specifics (all in `server/api/routers/stream.py` + `server/modules/ingestion/`):
+payloads may be gzipped; `normalize_sensor_events` maps the sensor's `HTTPReq.*`/`HTTPResp.*` field
+names to internal events and must preserve request/response **bodies and sensor identity** — losing
+them silently degrades detection downstream. `self_traffic.py` drops the platform's own console/API
+traffic (host match via `INGEST_EXCLUDE_HOSTS` + `CORS_ORIGINS_OVERRIDE`, plus path-prefix fallback
+when the sensor omits Host) both at ingest and in live-feed queries; `sensor_time.py` coerces sensor
+timestamps (epoch s/ms or ISO-8601) and clamps out-of-range values.
 
 WebSocket live feed is at `/api/stream/live`.
 

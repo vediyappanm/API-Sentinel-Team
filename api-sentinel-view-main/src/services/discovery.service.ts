@@ -12,6 +12,7 @@ export interface AktoApiCollection {
 }
 
 export interface AktoApiInfo {
+  endpointId?: string;
   id: { apiCollectionId: ApiCollectionId; url: string; method: string };
   allAuthTypesFound: string[];
   lastSeen: number;
@@ -48,10 +49,12 @@ interface RawEndpoint {
   host?: string;
   method?: string;
   auth_types?: string[];
+  auth_types_found?: string[];
   last_seen?: string;
   created_at?: string;
   risk_score?: number;
   access_types?: string[];
+  access_type?: string;
   deprecated?: boolean;
 }
 
@@ -126,7 +129,8 @@ export async function fetchApiInfosForCollection(
         url,
         method: endpoint.method ?? 'GET',
       },
-      allAuthTypesFound: endpoint.auth_types ?? [],
+      endpointId: endpoint.id,
+      allAuthTypesFound: endpoint.auth_types ?? endpoint.auth_types_found ?? [],
       lastSeen: endpoint.last_seen ? new Date(endpoint.last_seen).getTime() : Date.now(),
       discoveredAt: endpoint.created_at
         ? new Date(endpoint.created_at).getTime()
@@ -134,7 +138,7 @@ export async function fetchApiInfosForCollection(
           ? new Date(endpoint.last_seen).getTime()
           : Date.now(),
       riskScore: endpoint.risk_score ?? 0,
-      apiAccessTypes: endpoint.access_types ?? [],
+      apiAccessTypes: endpoint.access_types ?? (endpoint.access_type ? [endpoint.access_type] : []),
       deprecated: endpoint.deprecated ?? false,
     };
   });
@@ -232,4 +236,66 @@ export async function fetchSensitiveParameters(
     data: { endpoints },
     total: endpoints.length,
   };
+}
+
+export interface EndpointDetail {
+  id: string;
+  method?: string;
+  path?: string;
+  path_pattern?: string;
+  host?: string;
+  port?: number | null;
+  protocol?: string;
+  collection_id?: string | null;
+  last_response_code?: number | null;
+  last_request_body?: string | null;
+  last_response_body?: string | null;
+  risk_score?: number;
+  api_type?: string;
+  last_seen?: string | null;
+  last_tested?: string | null;
+  created_at?: string | null;
+  status?: string;
+  is_sensitive?: boolean;
+  access_type?: string;
+  auth_types_found?: string[];
+  owner?: string | null;
+  sources?: string[];
+}
+
+export interface EndpointHourlyMetric {
+  endpoint_id: string;
+  hour_ts: number;
+  request_count: number;
+  error_count: number;
+  avg_latency_ms: number;
+  p95_latency_ms: number;
+}
+
+export interface EvidenceRecord {
+  id: string;
+  type?: string;
+  endpoint_id?: string | null;
+  severity?: string | null;
+  summary?: string | null;
+  details?: unknown;
+  created_at?: string;
+}
+
+export async function fetchEndpoint(endpointId: string, signal?: AbortSignal) {
+  return get<EndpointDetail>(`/endpoints/${endpointId}`, signal);
+}
+
+export async function fetchEndpointHourly(endpointId: string, hours: number, signal?: AbortSignal) {
+  return get<{ total: number; metrics: EndpointHourlyMetric[] }>(
+    `/analytics/endpoints/hourly?endpoint_id=${encodeURIComponent(endpointId)}&hours=${hours}`,
+    signal,
+  );
+}
+
+export async function fetchEvidenceForEndpoint(endpointId: string, signal?: AbortSignal) {
+  return get<{ total: number; evidence: EvidenceRecord[] }>(
+    `/evidence/?endpoint_id=${encodeURIComponent(endpointId)}`,
+    signal,
+  );
 }

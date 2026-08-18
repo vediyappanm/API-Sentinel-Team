@@ -142,7 +142,15 @@
     @apply border-border;
   }
 
+  html,
+  body,
+  #root {
+    height: 100%;
+    max-height: 100%;
+  }
+
   body {
+    overflow: hidden;
     background-color: var(--bg-base);
     color: var(--text-primary);
     font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
@@ -368,11 +376,28 @@
   content: '';
   position: absolute;
   left: 0;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
-  background: linear-gradient(180deg, #FF5B2E, #D94418);
-  border-radius: 0 3px 3px 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: #FF5B2E;
+  border-radius: 0 2px 2px 0;
+}
+
+/* Command sidebar — always ink, even when the workspace is paper. */
+.ws-sidebar {
+  background: #0e1116;
+  color: #c8c4bc;
+  border-right: 1px solid #252b36;
+}
+.ws-sidebar .ws-sidebar-title {
+  color: #f4f1ea;
+}
+.ws-sidebar .ws-sidebar-muted {
+  color: #8a867e;
+}
+.ws-sidebar a,
+.ws-sidebar button {
+  color: inherit;
 }
 
 /* ========== Table Styles ========== */
@@ -466,22 +491,23 @@
      sidebar and topbar instead of reading as a different product. */
   --evd-void: #f4f1ea;
   --evd-panel: #fffcf7;
-  --evd-panel-raised: #ebe6dc;
-  --evd-line: #ddd6c8;
+  --evd-panel-raised: #f7f3eb;
+  --evd-line: #e4ddd0;
   --evd-line-strong: #d4cdc0;
   --evd-paper: #0e1116;
   --evd-ink: #3f4249;
   --evd-ink-muted: #8a867e;
   --evd-signal: #d94418;
-  --evd-signal-dim: rgba(255, 91, 46, 0.09);
+  --evd-signal-dim: rgba(255, 91, 46, 0.07);
   --evd-critical: #d63d2f;
   --evd-high: #e07b2e;
   --evd-medium: #d4a017;
   --evd-low: #2da44e;
   --evd-info: #3b82f6;
-  --evd-hero-wash: linear-gradient(135deg, rgba(255, 91, 46, 0.07) 0%, transparent 42%, rgba(43, 76, 255, 0.04) 100%);
+  --evd-hero-wash: linear-gradient(135deg, rgba(255, 91, 46, 0.05) 0%, transparent 48%, rgba(43, 76, 255, 0.03) 100%);
 
   font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-size: 14px;
 }
 
 .dark .evd-root {
@@ -510,12 +536,13 @@
   justify-content: space-between;
   gap: 24px;
   flex-wrap: wrap;
-  padding: 22px 24px;
+  padding: 24px 28px;
   background: var(--evd-panel);
   border: 1px solid var(--evd-line);
-  border-radius: 2px;
+  border-radius: 12px;
   position: relative;
   overflow: hidden;
+  box-shadow: 0 1px 2px rgba(14, 17, 22, 0.04);
 }
 
 .evd-hero::before {
@@ -568,24 +595,13 @@
   position: relative;
   background: var(--evd-panel);
   border: 1px solid var(--evd-line);
-  border-radius: 2px;
-  padding: 20px;
+  border-radius: 12px;
+  padding: 20px 22px;
+  box-shadow: 0 1px 2px rgba(14, 17, 22, 0.04);
 }
 
 .evd-panel[data-exhibit]::before {
-  content: attr(data-exhibit);
-  position: absolute;
-  top: -1px;
-  right: -1px;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  color: var(--evd-ink-muted);
-  background: var(--evd-panel-raised);
-  border-left: 1px solid var(--evd-line);
-  border-bottom: 1px solid var(--evd-line);
-  padding: 3px 8px;
-  line-height: 1;
+  display: none;
 }
 
 /* ---------- section header: report divider, not a pill badge ---------- */
@@ -594,29 +610,31 @@
   align-items: baseline;
   flex-wrap: wrap;
   gap: 8px 12px;
-  padding-bottom: 10px;
+  padding-bottom: 12px;
   margin-bottom: 16px;
   border-bottom: 1px solid var(--evd-line);
 }
 
 .evd-section-code {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
-  color: var(--evd-signal);
-  letter-spacing: 0.05em;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--evd-ink-muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .evd-section-title {
-  font-family: 'Space Mono', monospace;
-  font-weight: 700;
-  font-size: 13px;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  text-transform: none;
   color: var(--evd-paper);
 }
 
 .evd-section-desc {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--evd-ink-muted);
   margin-left: auto;
 }
@@ -626,16 +644,16 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  padding: 4px 10px;
-  border: 1.5px solid var(--evd-signal);
+  padding: 5px 10px;
+  border: 1px solid var(--evd-signal);
   color: var(--evd-signal);
-  border-radius: 2px;
-  transform: rotate(-1.5deg);
+  border-radius: 6px;
+  background: var(--evd-signal-dim);
   white-space: nowrap;
 }
 
@@ -654,7 +672,6 @@
   height: 6px;
   border-radius: 50%;
   background: currentColor;
-  animation: evd-blink 2.2s ease-in-out infinite;
 }
 
 @keyframes evd-blink {
@@ -669,15 +686,17 @@
   gap: 1px;
   background: var(--evd-line);
   border: 1px solid var(--evd-line);
+  border-radius: 12px;
+  overflow: hidden;
 }
 
 .evd-ledger-item {
   background: var(--evd-panel);
-  padding: 14px 16px;
+  padding: 16px 18px;
 }
 
 .evd-ledger-label {
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--evd-ink-muted);
@@ -688,9 +707,10 @@
 }
 
 .evd-ledger-value {
-  font-family: 'Space Mono', monospace;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
   font-weight: 700;
-  font-size: 26px;
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
   color: var(--evd-paper);
   line-height: 1;
 }
@@ -763,28 +783,36 @@
 }
 
 /* ---------- table: evidence-styled data table (for migrated pages) ---------- */
+.evd-table-wrap {
+  border: 1px solid var(--evd-line);
+  border-radius: 12px;
+  overflow: auto;
+  background: var(--evd-panel);
+  box-shadow: 0 1px 2px rgba(14, 17, 22, 0.04);
+}
+
 .evd-table {
   width: 100%;
   border-collapse: collapse;
 }
 
 .evd-table thead th {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
-  font-weight: 500;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--evd-ink-muted);
   text-align: left;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--evd-line);
   background: var(--evd-panel-raised);
 }
 
 .evd-table tbody td {
-  padding: 10px 12px;
+  padding: 13px 14px;
   border-bottom: 1px solid var(--evd-line);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--evd-ink);
 }
 

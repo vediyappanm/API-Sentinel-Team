@@ -2,9 +2,9 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import {
   Loader2, Eye, EyeOff, Lock, Mail, ShieldCheck, Radar, FileSearch,
-  Boxes, Activity, ScrollText, ChevronRight, BadgeCheck,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { get } from '@/lib/api-client';
 import { validateEmail, validatePassword } from '@/lib/validations';
 
 const FEATURES = [
@@ -23,14 +23,6 @@ const FEATURES = [
     title: 'Runtime Protection',
     desc: 'Detect, correlate, and enforce — with human-gated remediation paths.',
   },
-] as const;
-
-const FLOW = [
-  { title: 'Discover', sub: 'Live inventory' },
-  { title: 'Test', sub: 'Evidence runs' },
-  { title: 'Detect', sub: 'Correlate signals' },
-  { title: 'Enforce', sub: 'Controlled apply' },
-  { title: 'Verify', sub: 'Post-change' },
 ] as const;
 
 function getPasswordValidationError(password: string, isSignup: boolean): string | null {
@@ -74,26 +66,21 @@ const BrandMark: React.FC<{ size?: 'sm' | 'md' }> = ({ size = 'md' }) => (
       <div
         className="font-semibold tracking-tight"
         style={{
-          fontFamily: "'Fraunces', 'Plus Jakarta Sans', Georgia, serif",
+          fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
           color: '#F4F1EA',
-          fontSize: size === 'md' ? 15 : 14,
+          fontSize: size === 'md' ? 16 : 14,
         }}
       >
-        API Sentinel{' '}
-        <span className="font-medium italic opacity-80" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 12 }}>
-          Security
-        </span>
+        API Sentinel
       </div>
       <div
-        className="font-medium uppercase"
+        className="mt-0.5 font-medium"
         style={{
-          fontSize: 10.5,
-          letterSpacing: '0.14em',
-          color: 'rgba(200,196,188,0.6)',
-          fontFamily: "'IBM Plex Mono', 'JetBrains Mono', monospace",
+          fontSize: 12,
+          color: 'rgba(200,196,188,0.62)',
         }}
       >
-        sentinel · command
+        API security platform
       </div>
     </div>
   </div>
@@ -108,11 +95,30 @@ const Login: React.FC = () => {
   const [localError, setLocalError] = React.useState<string | null>(null);
   const [shakeError, setShakeError] = React.useState(false);
   const [isSignup, setIsSignup] = React.useState(false);
+  const [signupEnabled, setSignupEnabled] = React.useState(false);
   const [emailError, setEmailError] = React.useState<string | null>(null);
   const [passwordError, setPasswordError] = React.useState<string | null>(null);
   const { user, login, signup, error: authError } = useAuth();
   const location = useLocation();
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/';
+
+  React.useEffect(() => {
+    let cancelled = false;
+    get<{ signup_enabled?: boolean }>('/auth/public-config')
+      .then((config) => {
+        if (!cancelled) setSignupEnabled(Boolean(config.signup_enabled));
+      })
+      .catch(() => {
+        if (!cancelled) setSignupEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!signupEnabled) setIsSignup(false);
+  }, [signupEnabled]);
 
   if (user) return <Navigate to={from} replace />;
 
@@ -154,6 +160,12 @@ const Login: React.FC = () => {
     setSubmitting(true);
     try {
       if (isSignup) {
+        if (!signupEnabled) {
+          setLocalError('Public signup is disabled. Ask an administrator to invite you.');
+          triggerShake();
+          setSubmitting(false);
+          return;
+        }
         await signup(email, password);
       } else {
         await login(email, password);
@@ -176,17 +188,17 @@ const Login: React.FC = () => {
 
   return (
     <div
-      className="min-h-screen"
+      className="h-full min-h-0 overflow-y-auto"
       style={{
         background: '#F4F1EA',
         color: '#0E1116',
         fontFamily: "'Plus Jakarta Sans', 'IBM Plex Sans', system-ui, sans-serif",
       }}
     >
-      <div className="grid min-h-screen lg:grid-cols-[1.2fr_minmax(400px,480px)]">
+      <div className="grid min-h-full lg:h-full lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,420px)]">
         {/* Left — AgentOS-style dark brand panel */}
         <section
-          className="relative hidden overflow-hidden lg:flex lg:flex-col"
+          className="relative hidden min-h-0 overflow-y-auto lg:flex lg:flex-col"
           style={{ background: '#0E1116', color: '#C8C4BC', borderRight: '1px solid #252B36' }}
         >
           <div
@@ -209,122 +221,36 @@ const Login: React.FC = () => {
             style={{ background: 'linear-gradient(to bottom, transparent, transparent, rgba(14,17,22,0.8))' }}
           />
 
-          <div className="relative flex flex-1 flex-col justify-between p-10 xl:p-14">
+          <div className="relative flex min-h-full flex-1 flex-col justify-between p-8 xl:p-12">
             <BrandMark />
 
-            <div className="my-8 max-w-xl space-y-9 xl:my-10">
-              <div className="space-y-5">
-                <p
-                  className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
-                  style={{
-                    border: '1px solid rgba(255,91,46,0.3)',
-                    background: 'rgba(255,91,46,0.1)',
-                    color: 'rgba(244,241,234,0.9)',
-                  }}
-                >
-                  <BadgeCheck className="h-3.5 w-3.5" style={{ color: '#FF5B2E' }} />
-                  Enterprise API security platform
-                </p>
+            <div className="my-8 max-w-lg space-y-8 xl:my-10">
+              <div className="space-y-4">
                 <h1
-                  className="text-[2.1rem] leading-[1.12] font-semibold tracking-tight xl:text-[2.5rem]"
-                  style={{
-                    fontFamily: "'Fraunces', Georgia, serif",
-                    color: '#F4F1EA',
-                  }}
+                  className="text-[2rem] font-semibold leading-[1.2] tracking-tight xl:text-[2.25rem]"
+                  style={{ color: '#F4F1EA' }}
                 >
-                  Evidence before action.
-                  <span
-                    className="mt-1 block bg-clip-text text-transparent"
-                    style={{
-                      backgroundImage: 'linear-gradient(90deg, #FF5B2E, #6B85FF)',
-                      WebkitBackgroundClip: 'text',
-                    }}
-                  >
-                    Protection before breach.
-                  </span>
+                  See every API. Prove every finding.
                 </h1>
-                <p className="max-w-md text-[15px] leading-[1.65]" style={{ color: 'rgba(200,196,188,0.75)' }}>
-                  Discover, test, and protect your APIs — live inventory, correlated detections, and
-                  enforcement with audit-ready evidence for security teams.
+                <p className="max-w-md text-[15px] leading-7" style={{ color: 'rgba(200,196,188,0.75)' }}>
+                  Inventory, test, and protect APIs from live traffic — with evidence your security team can act on.
                 </p>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="space-y-5">
                 {FEATURES.map(({ icon: Icon, title, desc }) => (
-                  <div
-                    key={title}
-                    className="group rounded-xl p-4 transition-colors"
-                    style={{
-                      border: '1px solid rgba(37,43,54,0.9)',
-                      background: 'rgba(26,31,40,0.45)',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = 'rgba(255,91,46,0.35)';
-                      e.currentTarget.style.background = 'rgba(26,31,40,0.7)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = 'rgba(37,43,54,0.9)';
-                      e.currentTarget.style.background = 'rgba(26,31,40,0.45)';
-                    }}
-                  >
-                    <Icon className="mb-3 h-4 w-4 transition-transform group-hover:scale-105" style={{ color: '#FF5B2E' }} />
-                    <div className="text-[13px] font-semibold" style={{ color: '#F4F1EA' }}>
-                      {title}
+                  <div key={title} className="flex gap-3">
+                    <div
+                      className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                      style={{ background: 'rgba(255,91,46,0.12)', color: '#FF8A5B' }}
+                    >
+                      <Icon className="h-4 w-4" />
                     </div>
-                    <p className="mt-1.5 text-[11.5px] leading-relaxed" style={{ color: 'rgba(200,196,188,0.65)' }}>
-                      {desc}
-                    </p>
+                    <div>
+                      <div className="text-sm font-semibold" style={{ color: '#F4F1EA' }}>{title}</div>
+                      <p className="mt-0.5 text-[13px] leading-5" style={{ color: 'rgba(200,196,188,0.65)' }}>{desc}</p>
+                    </div>
                   </div>
-                ))}
-              </div>
-
-              <div className="rounded-xl p-4" style={{ border: '1px solid rgba(37,43,54,0.8)', background: 'rgba(14,17,22,0.4)' }}>
-                <div
-                  className="mb-3 uppercase"
-                  style={{
-                    fontSize: 10,
-                    letterSpacing: '0.08em',
-                    color: 'rgba(200,196,188,0.45)',
-                    fontFamily: "'IBM Plex Mono', monospace",
-                  }}
-                >
-                  Security capability flow
-                </div>
-                <div className="flex flex-wrap gap-x-1 gap-y-2">
-                  {FLOW.map((step, i) => (
-                    <div key={step.title} className="flex items-center gap-1">
-                      <div
-                        className="rounded-md px-2.5 py-1.5"
-                        style={{ border: '1px solid rgba(37,43,54,0.8)', background: 'rgba(26,31,40,0.5)' }}
-                      >
-                        <div className="text-[11px] font-semibold" style={{ color: '#F4F1EA' }}>
-                          {step.title}
-                        </div>
-                        <div className="text-[10px]" style={{ color: 'rgba(200,196,188,0.55)' }}>
-                          {step.sub}
-                        </div>
-                      </div>
-                      {i < FLOW.length - 1 && (
-                        <ChevronRight className="mx-0.5 h-3.5 w-3.5 shrink-0" style={{ color: 'rgba(200,196,188,0.3)' }} />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {['OWASP', 'Nuclei', 'Schemathesis', 'eBPF', 'OpenAPI', 'CI/CD Gate'].map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded-full px-2.5 py-0.5 text-[10.5px] font-medium"
-                    style={{
-                      border: '1px solid rgba(37,43,54,0.7)',
-                      background: 'rgba(26,31,40,0.4)',
-                      color: 'rgba(200,196,188,0.7)',
-                    }}
-                  >
-                    {tag}
-                  </span>
                 ))}
               </div>
             </div>
@@ -343,7 +269,7 @@ const Login: React.FC = () => {
         </section>
 
         {/* Right — credential panel */}
-        <section className="relative flex flex-col justify-center px-6 py-10 sm:px-10 lg:px-12 xl:px-14" style={{ background: '#F4F1EA' }}>
+        <section className="relative flex min-h-0 flex-col justify-center overflow-y-auto px-6 py-8 sm:px-10 lg:px-12">
           {/* Mobile brand strip */}
           <div
             className="mb-8 rounded-xl p-5 lg:hidden"
@@ -351,7 +277,7 @@ const Login: React.FC = () => {
           >
             <BrandMark size="sm" />
             <p className="mt-4 text-[15px] font-semibold leading-snug" style={{ color: '#F4F1EA' }}>
-              Evidence before action. Protection before breach.
+              See every API. Prove every finding.
             </p>
             <p className="mt-2 text-[12px] leading-relaxed" style={{ color: 'rgba(200,196,188,0.7)' }}>
               Live API discovery, testing, and runtime protection.
@@ -361,15 +287,15 @@ const Login: React.FC = () => {
           <div className="mx-auto w-full max-w-[400px] space-y-7">
             <div className="space-y-1.5 lg:pt-2">
               <h2
-                className="text-[1.65rem] font-semibold tracking-tight"
-                style={{ fontFamily: "'Fraunces', Georgia, serif", color: '#0E1116' }}
+                className="text-[1.5rem] font-semibold tracking-tight"
+                style={{ color: '#0E1116' }}
               >
-                {isSignup ? 'Create account' : 'Welcome back'}
+                {isSignup ? 'Create account' : 'Sign in'}
               </h2>
-              <p className="text-[13px] leading-relaxed" style={{ color: '#5C5A56' }}>
+              <p className="text-sm leading-6" style={{ color: '#5C5A56' }}>
                 {isSignup
                   ? 'Set up your admin account for a new tenant workspace.'
-                  : 'Sign in with your allowlisted operator credentials.'}
+                  : 'Use your operator credentials to open the workspace.'}
               </p>
             </div>
 
@@ -453,16 +379,9 @@ const Login: React.FC = () => {
                 </div>
 
                 <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label htmlFor="auth-password" className="text-xs font-medium" style={{ color: '#0E1116' }}>
-                      Password
-                    </label>
-                    {!isSignup && (
-                      <a href="#" className="text-[11px] font-medium hover:underline" style={{ color: '#D94418' }}>
-                        Forgot?
-                      </a>
-                    )}
-                  </div>
+                  <label htmlFor="auth-password" className="text-xs font-medium" style={{ color: '#0E1116' }}>
+                    Password
+                  </label>
                   <div className="relative">
                     <Lock
                       size={15}
@@ -585,20 +504,24 @@ const Login: React.FC = () => {
               ) : (
                 <>
                   Access is limited to provisioned operators.
-                  <br />
-                  First time?{' '}
-                  <button
-                    data-testid="auth-mode-toggle"
-                    type="button"
-                    onClick={() => {
-                      setIsSignup(true);
-                      setLocalError(null);
-                    }}
-                    className="font-semibold underline-offset-2 hover:underline"
-                    style={{ color: '#D94418' }}
-                  >
-                    Create admin account
-                  </button>
+                  {signupEnabled && (
+                    <>
+                      <br />
+                      First time?{' '}
+                      <button
+                        data-testid="auth-mode-toggle"
+                        type="button"
+                        onClick={() => {
+                          setIsSignup(true);
+                          setLocalError(null);
+                        }}
+                        className="font-semibold underline-offset-2 hover:underline"
+                        style={{ color: '#D94418' }}
+                      >
+                        Create admin account
+                      </button>
+                    </>
+                  )}
                 </>
               )}
             </p>
@@ -608,15 +531,15 @@ const Login: React.FC = () => {
               style={{ borderTop: '1px solid #DDD6C8', color: '#5C5A56' }}
             >
               <span className="inline-flex items-center gap-1.5">
-                <Boxes className="h-3.5 w-3.5" style={{ color: 'rgba(43,76,255,0.7)' }} />
+                <FileSearch className="h-3.5 w-3.5" style={{ color: 'rgba(43,76,255,0.7)' }} />
                 Live inventory
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <Activity className="h-3.5 w-3.5" style={{ color: 'rgba(43,76,255,0.7)' }} />
+                <Radar className="h-3.5 w-3.5" style={{ color: 'rgba(43,76,255,0.7)' }} />
                 Runtime detect
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <ScrollText className="h-3.5 w-3.5" style={{ color: 'rgba(43,76,255,0.7)' }} />
+                <ShieldCheck className="h-3.5 w-3.5" style={{ color: 'rgba(43,76,255,0.7)' }} />
                 Audit evidence
               </span>
             </div>

@@ -78,7 +78,7 @@ export const customerWorkspace: WorkspaceConfig = {
     { icon: Settings, label: 'Workspace', path: '/app/organization' },
   ],
   searchShortcuts: [
-    { label: 'Organization', path: '/app/organization', hint: 'Tenant overview and posture', keywords: ['overview', 'apps'] },
+    { label: 'Organization', path: '/app/organization', hint: 'What needs attention now', keywords: ['overview', 'apps', 'attention', 'risks'] },
     { label: 'Dashboard', path: '/app/dashboard', hint: 'KPI overview', keywords: ['home', 'metrics'] },
     { label: 'Live Feed', path: '/app/live', hint: 'Real-time traffic', keywords: ['stream', 'events'] },
     { label: 'Alerts', path: '/app/alerts', hint: 'Active detections', keywords: ['incidents', 'detections'] },

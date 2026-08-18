@@ -18,15 +18,15 @@ const WorkspaceShellInner: React.FC<{ workspace: WorkspaceConfig }> = ({ workspa
   }, [closeMobileSidebar, location.pathname]);
 
   return (
-    <div className="flex min-h-screen w-full overflow-hidden bg-bg-base text-text-primary">
+    <div className="flex h-full min-h-0 w-full overflow-hidden bg-bg-base text-text-primary">
       <Sidebar workspace={workspace} />
-      <main className="relative flex flex-1 flex-col overflow-hidden">
+      <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <TopBar workspace={workspace} />
         <div
           ref={contentRef}
           id="app-content"
           className={cn(
-            'flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-5',
+            'min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-5',
             workspace.key === 'customer' && 'evd-root',
           )}
         >

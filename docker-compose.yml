@@ -13,6 +13,7 @@ services:
     environment:
       APP_NAME: API Security Engine
       DEBUG: "false"
+      SIGNUP_ENABLED: "false"
       DATABASE_URL: postgresql+asyncpg://app_user:generated_secure_password_here@postgres:5432/api_security
       REDIS_URL: redis://redis:6379/0
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092

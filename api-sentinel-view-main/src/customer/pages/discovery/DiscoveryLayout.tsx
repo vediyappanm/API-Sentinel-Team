@@ -24,12 +24,12 @@ const DiscoveryLayout: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full animate-fade-in w-full">
-      <div className="border-b border-border-subtle -mx-6 mb-6">
+    <div className="flex h-full min-h-0 min-w-0 w-full flex-col animate-fade-in">
+      <div className="-mx-6 mb-6 min-w-0 border-b border-border-subtle">
         <TabNav tabs={tabs} activeTab={activeTab} onChange={handleTabChange} />
       </div>
 
-      <div className="flex-1">
+      <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden">
         <Outlet />
       </div>
     </div>

@@ -1,23 +1,21 @@
 import React, { useState, useMemo } from 'react';
 import {
-  RefreshCw, Shield, Activity, Users, TrendingUp, Lock, ShieldAlert,
-  Eye, Database, Globe, Bot, Clock, FileCheck,
+  RefreshCw, Shield, Activity, Users, TrendingUp, ShieldAlert, Globe, Clock,
 } from 'lucide-react';
 import DonutChart from '@/components/charts/DonutChart';
 import GeoMap from '@/components/charts/GeoMap';
 import TimeFilter from '@/components/shared/TimeFilter';
 import QueryError from '@/components/shared/QueryError';
+import PageHeader from '@/components/shared/PageHeader';
 import { useDashboardKPIs, useIssuesTrend, useSeverityBreakdown } from '@/hooks/use-dashboard';
 import { useThreatCategoryCount, useActorsGeoCount } from '@/hooks/use-protection';
 import { useTestRuns } from '@/hooks/use-security-ops';
 import { centroidForCountryCode } from '@/lib/country-centroids';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/lib/auth-context';
 import type { DashboardThreatData } from '@/services/dashboard.service';
 import EvidencePanel from '@/components/ui/EvidencePanel';
 import EvidenceSectionHead from '@/components/ui/EvidenceSectionHead';
-import EvidenceStamp from '@/components/ui/EvidenceStamp';
 import EvidenceLedgerItem from '@/components/ui/EvidenceLedger';
 import { EvidenceStatLine, EvidenceBarLine } from '@/components/ui/EvidenceStatLine';
 import EvidenceTrace from '@/components/ui/EvidenceTrace';
@@ -28,16 +26,11 @@ function daysAgoTs(days: number) {
   return Math.floor((Date.now() - days * 86400_000) / 1000);
 }
 
-function nowStamp(): string {
-  return new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
 const Dashboard: React.FC = () => {
   const [timeRange, setTimeRange] = useState<'24h' | '7d'>('24h');
   const [activeTab, setActiveTab] = useState<'total' | 'blocked' | 'successful'>('total');
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { user } = useAuth();
   const realtime = useRealtimeStatus();
   const { recentLogs } = useLiveTraffic();
 
@@ -87,12 +80,11 @@ const Dashboard: React.FC = () => {
   const postureDenom = totalIssues + kpi.resolved;
   const postureScore = postureDenom > 0 ? Math.min(100, Math.round((kpi.resolved / postureDenom) * 100)) : 0;
   const endpointCount = Number(endpoints.data?.endpointsCount ?? 0);
-  const mcpSessions = threatDataResult.mcpSessions ?? 0;
 
   const postureTone =
     postureScore >= 80 ? 'var(--evd-low)' : postureScore >= 50 ? 'var(--evd-medium)' : 'var(--evd-critical)';
   const postureLabel =
-    postureScore >= 80 ? 'HARDENED' : postureScore >= 50 ? 'WATCH' : postureDenom === 0 ? 'NO BASELINE' : 'EXPOSED';
+    postureScore >= 80 ? 'Hardened' : postureScore >= 50 ? 'Watch' : postureDenom === 0 ? 'No baseline' : 'Exposed';
 
   const runs = testRuns.data?.runs ?? [];
   const testsRun = runs.reduce((sum, run) => sum + Number(run.total_tests || 0), 0);
@@ -147,75 +139,29 @@ const Dashboard: React.FC = () => {
   }, [geoCount.data]);
 
   const hasError = issues.isError || endpoints.isError;
-  const displayName = user?.name || user?.login?.split('@')[0] || 'User';
+  const windowLabel = timeRange === '24h' ? 'Last 24 hours' : 'Last 7 days';
+  const ring = 2 * Math.PI * 42;
 
   return (
-    <div className="space-y-5 w-full p-4 pb-10">
-      {/* Hero — one composition: identity, posture, live status */}
-      <section className="evd-hero animate-fade-in">
-        <div className="evd-hero-copy">
-          <p className="evd-mono text-[10px] tracking-[0.14em] uppercase mb-2" style={{ color: 'var(--evd-ink-muted)' }}>
-            Case file · live posture
-          </p>
-          <h1 className="evd-display text-2xl md:text-3xl leading-tight" style={{ color: 'var(--evd-paper)' }}>
-            {displayName.toUpperCase()}
-          </h1>
-          <p className="mt-2 text-sm max-w-md" style={{ color: 'var(--evd-ink)' }}>
-            Resolved vs open issues form the score. Numbers below are live API counts only.
-          </p>
-          <div className="flex items-center gap-3 mt-4 flex-wrap">
-            <EvidenceStamp tone={realtime.connected ? 'ok' : 'warn'} pulse>
-              {realtime.connected ? 'NOMINAL' : 'RECONNECTING'}
-            </EvidenceStamp>
-            <EvidenceStamp tone={postureScore >= 80 ? 'ok' : postureScore >= 50 ? 'warn' : undefined}>
-              {postureLabel}
-            </EvidenceStamp>
-            <span className="evd-mono text-[11px]" style={{ color: 'var(--evd-ink-muted)' }}>
-              SYNC {nowStamp()}
-            </span>
-          </div>
-        </div>
-
-        <div className="evd-hero-score">
-          <div className="relative inline-flex items-center justify-center">
-            <svg width={148} height={148} className="-rotate-90 evd-score-ring" aria-hidden>
-              <circle cx={74} cy={74} r={64} fill="none" stroke="var(--evd-line)" strokeWidth={9} />
-              <circle
-                cx={74}
-                cy={74}
-                r={64}
-                fill="none"
-                stroke={postureTone}
-                strokeWidth={9}
-                strokeLinecap="butt"
-                strokeDasharray={2 * Math.PI * 64}
-                strokeDashoffset={2 * Math.PI * 64 * (1 - postureScore / 100)}
-              />
-            </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="evd-display text-4xl tabular-nums" style={{ color: 'var(--evd-paper)' }}>
-                {postureScore}
-              </span>
-              <span className="evd-mono text-[9px] tracking-widest" style={{ color: 'var(--evd-ink-muted)' }}>
-                SCORE
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 mt-3">
+    <div className="w-full min-w-0 space-y-5 pb-8">
+      <PageHeader
+        eyebrow="Operations"
+        title="Dashboard"
+        description="Posture is resolved findings versus open findings. Counts below are live inventory."
+        actions={
+          <>
             <button
+              type="button"
               onClick={() => qc.invalidateQueries({ queryKey: ['dashboard'] })}
-              className={`evd-btn ${isLoading ? 'animate-spin' : ''}`}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border-subtle bg-bg-surface text-muted-foreground transition-colors hover:text-brand"
               aria-label="Refresh dashboard data"
             >
-              <RefreshCw size={14} />
+              <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
             </button>
             <TimeFilter value={timeRange} onChange={setTimeRange} />
-            <button onClick={() => navigate('/app/reports')} className="evd-link ml-1">
-              REPORT →
-            </button>
-          </div>
-        </div>
-      </section>
+          </>
+        }
+      />
 
       {hasError && (
         <QueryError
@@ -224,124 +170,167 @@ const Dashboard: React.FC = () => {
         />
       )}
 
-      {/* Single KPI ledger — no duplicate inventory strip */}
-      <div className="evd-ledger animate-slide-up" style={{ animationDelay: '40ms' }}>
-        <EvidenceLedgerItem icon={Users} color="var(--evd-critical)" label="Threat Actors" value={Number(kpi.threatActors) || 0} />
-        <EvidenceLedgerItem icon={Shield} color="var(--evd-signal)" label="Blocked" value={Number(kpi.blocked) || 0} />
-        <EvidenceLedgerItem icon={ShieldAlert} color="var(--evd-critical)" label="Critical" value={Number(kpi.critical) || 0} />
-        <EvidenceLedgerItem icon={TrendingUp} color="var(--evd-low)" label="Resolved" value={Number(kpi.resolved) || 0} />
-        <EvidenceLedgerItem icon={Activity} color="var(--evd-info)" label="Events" value={Number(kpi.securityEvents) || 0} />
-        <EvidenceLedgerItem icon={Globe} color="var(--evd-info)" label="Endpoints" value={endpointCount} />
-        <EvidenceLedgerItem icon={Database} color="var(--evd-medium)" label="Open Issues" value={totalIssues} />
-        <EvidenceLedgerItem icon={Bot} color="var(--evd-signal)" label="MCP Sessions" value={Number(mcpSessions) || 0} />
-      </div>
-
-      {/* Primary exhibits — one job each, no repeated donuts/categories */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 animate-slide-up" style={{ animationDelay: '80ms' }}>
-        <EvidencePanel exhibit="EXH-01" className="lg:col-span-4">
-          <EvidenceSectionHead
-            code="§01"
-            title="Detection Mix"
-            desc={topCategories.length ? `${topCategories.length} ACTIVE` : 'WAITING ON TRAFFIC'}
-          />
-          <div className="space-y-0.5">
-            {topCategories.length > 0 ? (
-              topCategories.map(([name, count]) => (
-                <EvidenceBarLine key={String(name)} label={String(name)} value={Number(count)} max={maxCatVal} />
-              ))
-            ) : (
-              <p className="evd-mono text-[11px] py-4" style={{ color: 'var(--evd-ink-muted)' }}>
-                Categories appear once detections land from traffic or scans.
-              </p>
-            )}
+      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[240px_minmax(0,1fr)]">
+        <EvidencePanel className="flex items-center gap-4 p-4">
+          <div className="relative inline-flex h-[96px] w-[96px] shrink-0 items-center justify-center">
+            <svg width={96} height={96} className="-rotate-90" aria-hidden>
+              <circle cx={48} cy={48} r={42} fill="none" stroke="var(--evd-line)" strokeWidth={7} />
+              <circle
+                cx={48}
+                cy={48}
+                r={42}
+                fill="none"
+                stroke={postureTone}
+                strokeWidth={7}
+                strokeLinecap="round"
+                strokeDasharray={ring}
+                strokeDashoffset={ring * (1 - postureScore / 100)}
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-2xl font-bold tabular-nums text-text-primary">{postureScore}</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">Score</span>
+            </div>
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-text-primary">{postureLabel}</p>
+            <p className="mt-1 text-xs leading-5 text-text-muted">
+              {realtime.connected ? 'Stream live' : 'Reconnecting'} · {windowLabel.toLowerCase()}
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate('/app/reports')}
+              className="mt-2 text-xs font-semibold text-brand"
+            >
+              Open reports
+            </button>
           </div>
         </EvidencePanel>
 
-        <EvidencePanel exhibit="EXH-02" className="lg:col-span-4">
-          <div className="flex items-start justify-between gap-2 mb-1">
-            <EvidenceSectionHead code="§02" title="Threat Actors" />
-            <button onClick={() => navigate('/app/protection')} className="evd-link shrink-0">
-              DETAILS →
-            </button>
-          </div>
-          <div className="flex items-center gap-5" style={{ marginTop: -8 }}>
+        <div className="evd-ledger min-w-0">
+          <EvidenceLedgerItem icon={ShieldAlert} color="var(--evd-critical)" label="Critical" value={Number(kpi.critical) || 0} />
+          <EvidenceLedgerItem icon={Activity} color="var(--evd-medium)" label="Open issues" value={totalIssues} />
+          <EvidenceLedgerItem icon={TrendingUp} color="var(--evd-low)" label="Resolved" value={Number(kpi.resolved) || 0} />
+          <EvidenceLedgerItem icon={Globe} color="var(--evd-info)" label="Endpoints" value={endpointCount} />
+          <EvidenceLedgerItem icon={Shield} color="var(--evd-signal)" label="Blocked" value={Number(kpi.blocked) || 0} />
+          <EvidenceLedgerItem icon={Users} color="var(--evd-critical)" label="Actors" value={Number(kpi.threatActors) || 0} />
+        </div>
+      </div>
+
+      <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-3">
+        <EvidencePanel className="min-w-0">
+          <EvidenceSectionHead
+            code="MIX"
+            title="Detection mix"
+            desc={topCategories.length ? `${topCategories.length} active` : 'Waiting on traffic'}
+          />
+          {topCategories.length > 0 ? (
+            topCategories.map(([name, count]) => (
+              <EvidenceBarLine key={String(name)} label={String(name)} value={Number(count)} max={maxCatVal} />
+            ))
+          ) : (
+            <p className="py-4 text-sm text-text-muted">
+              Categories appear once detections land from traffic or scans.
+            </p>
+          )}
+        </EvidencePanel>
+
+        <EvidencePanel className="min-w-0">
+          <EvidenceSectionHead
+            code="ACTORS"
+            title="Threat actors"
+            action={
+              <button type="button" onClick={() => navigate('/app/protection')} className="text-xs font-semibold text-brand">
+                Details
+              </button>
+            }
+          />
+          <div className="flex min-w-0 items-center gap-4">
             <DonutChart
               data={threatData}
               centerValue={Number(kpi.threatActors) || 0}
               centerLabel="Total"
-              size={120}
-              innerRadius={36}
-              outerRadius={54}
+              size={112}
+              innerRadius={34}
+              outerRadius={50}
             />
-            <div className="flex-1 min-w-0">
+            <div className="min-w-0 flex-1">
               {threatData.map((d) => (
                 <EvidenceStatLine key={d.name} label={d.name} value={d.value} dot={d.color} />
               ))}
-              <div className="pt-2 flex flex-wrap gap-x-3 gap-y-1 evd-mono text-[10px]" style={{ color: 'var(--evd-ink-muted)' }}>
-                <span className="inline-flex items-center gap-1"><Eye size={10} /> WL {kpi.whitelisted}</span>
-                <span className="inline-flex items-center gap-1"><Lock size={10} /> UNAUTH {kpi.unauth}</span>
-              </div>
+              <p className="mt-2 text-xs text-text-muted">
+                Allowlisted {kpi.whitelisted} · Unauthenticated APIs {kpi.unauth}
+              </p>
             </div>
           </div>
         </EvidencePanel>
 
-        <EvidencePanel exhibit="EXH-03" className="lg:col-span-4">
-          <div className="flex items-start justify-between gap-2 mb-1">
-            <EvidenceSectionHead code="§03" title="Testing" desc="FROM /tests/runs" />
-            <button onClick={() => navigate('/app/testing')} className="evd-link shrink-0">
-              VIEW →
-            </button>
-          </div>
-          <div className="grid grid-cols-2 gap-5" style={{ marginTop: -8 }}>
-            <StatBlock label="Tests Run" value={testsRun} />
+        <EvidencePanel className="min-w-0">
+          <EvidenceSectionHead
+            code="TESTS"
+            title="Testing"
+            action={
+              <button type="button" onClick={() => navigate('/app/testing')} className="text-xs font-semibold text-brand">
+                View
+              </button>
+            }
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <StatBlock label="Tests run" value={testsRun} />
             <StatBlock label="Vulnerabilities" value={vulnsFound} tone="var(--evd-critical)" />
-            <StatBlock label="Recent Runs" value={runs.length} />
-            <StatBlock label="Last Run" value={lastRunLabel} mono />
+            <StatBlock label="Recent runs" value={runs.length} />
+            <StatBlock label="Last run" value={lastRunLabel} />
           </div>
         </EvidencePanel>
       </div>
 
-      {/* Map + event summary */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 animate-slide-up" style={{ animationDelay: '120ms' }}>
-        <div className="lg:col-span-7 evd-panel overflow-hidden" data-exhibit="EXH-04" style={{ padding: 0 }}>
-          <div className="px-5 pt-4 pb-2">
-            <EvidenceSectionHead code="§04" title="Actor Geography" desc="COUNTRY CENTROIDS ONLY" />
+      <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-12">
+        <EvidencePanel className="min-w-0 overflow-hidden p-0 lg:col-span-7">
+          <div className="px-5 pt-4">
+            <EvidenceSectionHead code="GEO" title="Actor geography" desc="Country centroids" />
           </div>
-          <GeoMap threats={geoThreats} height={260} />
-        </div>
+          <GeoMap threats={geoThreats} height={240} />
+        </EvidencePanel>
 
-        <EvidencePanel exhibit="EXH-05" className="lg:col-span-5">
+        <EvidencePanel className="min-w-0 lg:col-span-5">
           <EvidenceSectionHead
-            code="§05"
-            title="Security Events"
-            desc={timeRange === '24h' ? 'LAST 24 HOURS' : 'LAST 7 DAYS'}
+            code="EVENTS"
+            title="Security events"
+            desc={windowLabel}
           />
-          <div className="evd-display text-4xl tabular-nums mb-5" style={{ color: 'var(--evd-paper)' }}>
+          <p className="mb-4 text-3xl font-bold tabular-nums text-text-primary">
             {Number(kpi.securityEvents).toLocaleString()}
-          </div>
-          <div className="grid grid-cols-2 gap-y-4">
+          </p>
+          <div className="grid grid-cols-2 gap-y-3">
             <StatBlock label="Blocked" value={historicalData?.blockedThreats ?? 0} tone="var(--evd-critical)" small />
             <StatBlock label="High" value={sevBreakdown.data?.severityCount?.HIGH ?? 0} tone="var(--evd-high)" small />
             <StatBlock label="Medium" value={sevBreakdown.data?.severityCount?.MEDIUM ?? 0} tone="var(--evd-medium)" small />
             <StatBlock label="Low" value={sevBreakdown.data?.severityCount?.LOW ?? 0} tone="var(--evd-info)" small />
           </div>
-          <div className="mt-5 pt-4" style={{ borderTop: '1px solid var(--evd-line)' }}>
-            <EvidenceStatLine label="Critical Issues" value={kpi.critical} dot="var(--evd-critical)" />
-            <EvidenceStatLine label="Resolved" value={kpi.resolved} dot="var(--evd-low)" />
-            <EvidenceStatLine label="Open Issues" value={totalIssues} dot="var(--evd-medium)" />
-            <EvidenceStatLine label="Endpoints" value={endpointCount} dot="var(--evd-info)" />
-          </div>
         </EvidencePanel>
       </div>
 
-      {/* Timeline */}
-      <div className="animate-slide-up" style={{ animationDelay: '160ms' }}>
-        <EvidenceSectionHead code="§06" title="Event Trace" desc={timeRange === '24h' ? 'LAST 24 HOURS' : 'LAST 7 DAYS'} />
-        <EvidencePanel exhibit="EXH-06">
-          <div className="flex gap-1 mb-4">
-            {(['total', 'blocked', 'successful'] as const).map((key) => (
-              <button key={key} onClick={() => setActiveTab(key)} className="evd-tab" data-active={activeTab === key}>
-                {key}
+      <div className="min-w-0">
+        <EvidenceSectionHead
+          code="TREND"
+          title="Event trend"
+          desc={windowLabel}
+        />
+        <EvidencePanel>
+          <div className="mb-4 flex flex-wrap gap-1">
+            {([
+              { key: 'total', label: 'Total' },
+              { key: 'blocked', label: 'Blocked' },
+              { key: 'successful', label: 'Successful' },
+            ] as const).map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className="evd-tab"
+                data-active={activeTab === tab.key}
+              >
+                {tab.label}
               </button>
             ))}
           </div>
@@ -354,101 +343,85 @@ const Dashboard: React.FC = () => {
                   ? 'var(--evd-critical)'
                   : 'var(--evd-low)'
             }
-            height={200}
+            height={180}
           />
         </EvidencePanel>
       </div>
 
-      {/* Live stream — same shared /api/stream/live socket as Live Feed */}
-      <EvidencePanel exhibit="EXH-07" className="animate-slide-up" style={{ animationDelay: '200ms' }}>
-        <div className="flex items-center justify-between mb-3">
-          <EvidenceSectionHead
-            code="§07"
-            title="Live Traffic"
-            desc={realtime.connected ? 'STREAM OPEN' : 'RECONNECTING'}
-          />
-          <button onClick={() => navigate('/app/live')} className="evd-link">
-            FULL FEED →
-          </button>
-        </div>
-        <div style={{ marginTop: -16 }}>
-          {recentLogs.length > 0 ? (
-            recentLogs.slice(0, 8).map((entry, i) => {
-              const threat = entry.attacks?.[0];
-              const mc = methodTone(entry.method);
-              return (
-                <div
-                  key={entry.id}
-                  className="evd-row"
-                  style={{ padding: '8px 0', borderBottom: i < 7 ? '1px solid var(--evd-line)' : 'none' }}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className="evd-mono text-[11px] tabular-nums shrink-0" style={{ color: 'var(--evd-ink-muted)' }}>
-                      {formatClock(entry.timestamp)}
-                    </span>
-                    <span
-                      className="evd-mono text-[10px] font-bold px-1.5 py-0.5 shrink-0"
-                      style={{ background: mc.bg, color: mc.text }}
-                    >
-                      {entry.method}
-                    </span>
-                    <span className="text-xs truncate evd-mono" style={{ color: 'var(--evd-ink)' }}>
-                      {entry.host ? `${entry.host}${entry.path}` : entry.path}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="evd-mono text-[10px]" style={{ color: 'var(--evd-ink-muted)' }}>
-                      {formatProtocol(entry.protocol)}
-                    </span>
-                    <span className="evd-mono text-[10px]" style={{ color: threat ? 'var(--evd-critical)' : statusTone(entry.status) }}>
-                      {threat ? threat.category : entry.status}
-                    </span>
-                    <span className="evd-mono text-[10px]" style={{ color: 'var(--evd-ink-muted)' }}>
-                      {formatRelative(entry.timestamp)}
-                    </span>
-                  </div>
-                </div>
-              );
-            })
-          ) : timelineData.length > 0 ? (
-            timelineData
-              .slice(-5)
-              .reverse()
-              .map((entry, i) => (
-                <div
-                  key={`${entry.date}-${i}`}
-                  className="evd-row"
-                  style={{ padding: '8px 0', borderBottom: i < 4 ? '1px solid var(--evd-line)' : 'none' }}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <Clock size={11} style={{ color: 'var(--evd-ink-muted)' }} />
-                    <span className="evd-mono text-[11px] tabular-nums shrink-0" style={{ color: 'var(--evd-ink-muted)' }}>
-                      {entry.date}
-                    </span>
-                    <span className="text-xs truncate" style={{ color: 'var(--evd-ink)' }}>
-                      {entry.total} events ({entry.blocked} blocked, {entry.successful} successful)
-                    </span>
-                  </div>
-                  <span className="evd-mono text-[10px] shrink-0" style={{ color: 'var(--evd-ink-muted)' }}>
-                    AGGREGATE
+      <EvidencePanel className="min-w-0">
+        <EvidenceSectionHead
+          code="LIVE"
+          title="Live traffic"
+          desc={realtime.connected ? 'Stream open' : 'Reconnecting'}
+          action={
+            <button type="button" onClick={() => navigate('/app/live')} className="text-xs font-semibold text-brand">
+              Full feed
+            </button>
+          }
+        />
+        {recentLogs.length > 0 ? (
+          <div className="evd-table-wrap">
+            <table className="evd-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Method</th>
+                  <th>Path</th>
+                  <th>Status</th>
+                  <th>When</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentLogs.slice(0, 8).map((entry) => {
+                  const threat = entry.attacks?.[0];
+                  const mc = methodTone(entry.method);
+                  return (
+                    <tr key={entry.id} onClick={() => navigate('/app/live')}>
+                      <td className="font-mono text-xs tabular-nums">{formatClock(entry.timestamp)}</td>
+                      <td>
+                        <span
+                          className="inline-block rounded px-1.5 py-0.5 font-mono text-[10px] font-bold"
+                          style={{ background: mc.bg, color: mc.text }}
+                        >
+                          {entry.method}
+                        </span>
+                      </td>
+                      <td className="max-w-[280px] truncate font-mono text-xs">
+                        {entry.host ? `${entry.host}${entry.path}` : entry.path}
+                        <span className="ml-2 text-text-muted">{formatProtocol(entry.protocol)}</span>
+                      </td>
+                      <td className="font-mono text-xs" style={{ color: threat ? 'var(--evd-critical)' : statusTone(entry.status) }}>
+                        {threat ? threat.category : entry.status}
+                      </td>
+                      <td className="text-xs text-text-muted">{formatRelative(entry.timestamp)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : timelineData.length > 0 ? (
+          <div className="space-y-2">
+            {timelineData.slice(-5).reverse().map((entry, i) => (
+              <div key={`${entry.date}-${i}`} className="flex min-w-0 items-center justify-between gap-3 py-1.5">
+                <div className="flex min-w-0 items-center gap-2 text-sm text-text-secondary">
+                  <Clock size={12} className="shrink-0 text-text-muted" />
+                  <span className="tabular-nums text-text-muted">{entry.date}</span>
+                  <span className="truncate">
+                    {entry.total} events ({entry.blocked} blocked)
                   </span>
                 </div>
-              ))
-          ) : (
-            <p className="text-xs py-4 text-center" style={{ color: 'var(--evd-ink-muted)' }}>
-              {realtime.connected
-                ? 'Stream open — waiting for traffic frames…'
-                : 'No live frames yet. Open Live Feed after sensors ingest traffic.'}
-            </p>
-          )}
-        </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="py-4 text-center text-sm text-text-muted">
+            {realtime.connected
+              ? 'Stream open — waiting for traffic frames.'
+              : 'No live frames yet. Open Live Feed after sensors ingest traffic.'}
+          </p>
+        )}
       </EvidencePanel>
-
-      {/* Quiet footer cue — inventory still discoverable */}
-      <p className="evd-mono text-[10px] text-center pt-1" style={{ color: 'var(--evd-ink-muted)' }}>
-        <FileCheck size={10} className="inline mr-1 -mt-0.5" />
-        Figures refresh via live feed · query namespace dashboard
-      </p>
     </div>
   );
 };
@@ -457,15 +430,12 @@ const StatBlock: React.FC<{
   label: string;
   value: React.ReactNode;
   tone?: string;
-  mono?: boolean;
   small?: boolean;
-}> = ({ label, value, tone, mono, small }) => (
-  <div>
-    <p className="text-[11px] mb-1" style={{ color: 'var(--evd-ink-muted)' }}>
-      {label}
-    </p>
+}> = ({ label, value, tone, small }) => (
+  <div className="min-w-0">
+    <p className="mb-1 text-xs text-text-muted">{label}</p>
     <p
-      className={`${mono ? 'evd-mono' : 'evd-display'} tabular-nums ${small ? 'text-sm' : 'text-2xl'}`}
+      className={`truncate font-semibold tabular-nums ${small ? 'text-sm' : 'text-xl'}`}
       style={{ color: tone || 'var(--evd-paper)' }}
     >
       {value}

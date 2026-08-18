@@ -13,6 +13,13 @@ function friendlyError(err: unknown, action: 'login' | 'signup'): string {
     }
     // FastAPI JSON handlers in main.py use { error, message }
     if (typeof body?.message === 'string') return body.message;
+    if (err.status === 403) {
+      return typeof body?.detail === 'string'
+        ? body.detail
+        : typeof body?.message === 'string'
+          ? body.message
+          : 'This action is not allowed.';
+    }
     if (err.status === 401) return 'Incorrect email or password.';
     if (err.status === 409) return 'An account with this email already exists.';
     if (err.status === 422) return action === 'signup' ? 'Please fill all fields correctly.' : 'Invalid email or password format.';

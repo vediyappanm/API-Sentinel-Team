@@ -7,6 +7,8 @@ import {
   updateIssueStatus,
   bulkUpdateIssueStatus,
   fetchAllSubCategories,
+  fetchFinding,
+  fetchFindingsForEndpoint,
 } from '@/services/testing.service';
 
 export function useVulnerabilities(
@@ -69,6 +71,24 @@ export function useUpdateIssueStatus() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['testing'] });
     },
+  });
+}
+
+export function useFinding(findingId: string | undefined) {
+  return useQuery({
+    queryKey: ['testing', 'finding', findingId],
+    queryFn: ({ signal }) => fetchFinding(findingId!, signal),
+    enabled: Boolean(findingId),
+    staleTime: 15_000,
+  });
+}
+
+export function useEndpointFindings(endpointId: string | undefined) {
+  return useQuery({
+    queryKey: ['testing', 'endpoint-findings', endpointId],
+    queryFn: ({ signal }) => fetchFindingsForEndpoint(endpointId!, signal),
+    enabled: Boolean(endpointId),
+    staleTime: 15_000,
   });
 }
 

@@ -21,6 +21,8 @@ const CustomerLayout = lazy(() => import("./customer/layouts/CustomerLayout"));
 const AdminLayout = lazy(() => import("./admin/layouts/AdminLayout"));
 const PlatformLayout = lazy(() => import("./platform/layouts/PlatformLayout"));
 const Organization = lazy(() => import("./customer/pages/organization/Organization"));
+const ApiDetail = lazy(() => import("./customer/pages/discovery/ApiDetail"));
+const FindingDetail = lazy(() => import("./customer/pages/testing/FindingDetail"));
 const Dashboard = lazy(() => import("./customer/pages/dashboard/Dashboard"));
 const DiscoveryLayout = lazy(() => import("./customer/pages/discovery/DiscoveryLayout"));
 const ApiCatalogue = lazy(() => import("./customer/pages/discovery/ApiCatalogue"));
@@ -90,9 +92,10 @@ const App = () => (
           <Toaster />
           <Sonner />
           <BrowserRouter>
-            <ErrorBoundary>
-              <Suspense fallback={<AppShellFallback />}>
-                <Routes>
+            <div className="h-full min-h-0 overflow-hidden">
+              <ErrorBoundary>
+                <Suspense fallback={<AppShellFallback />}>
+                  <Routes>
                   <Route path="/" element={<RootRedirect />} />
                   <Route path="/login" element={<Login />} />
                   <Route path="/access-restricted" element={<AccessRestricted />} />
@@ -101,6 +104,8 @@ const App = () => (
                     <Route path="/app" element={<Navigate to="/app/dashboard" replace />} />
                     <Route path="/app/organization" element={<Organization />} />
                     <Route path="/app/dashboard" element={<Dashboard />} />
+                    <Route path="/app/discovery/endpoint/:endpointId" element={<ApiDetail />} />
+                    <Route path="/app/findings/:findingId" element={<FindingDetail />} />
 
                     <Route path="/app/discovery" element={<DiscoveryLayout />}>
                       <Route index element={<ApiCatalogue />} />
@@ -182,8 +187,9 @@ const App = () => (
 
                   <Route path="*" element={<NotFound />} />
                 </Routes>
-              </Suspense>
-            </ErrorBoundary>
+                </Suspense>
+              </ErrorBoundary>
+            </div>
           </BrowserRouter>
         </TooltipProvider>
       </OnboardingProvider>

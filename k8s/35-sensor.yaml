@@ -1,5 +1,5 @@
-# eBPF sensor DaemonSet — API-Sensor (session-4-production-fixes)
-# Image: harbor.wecrew.in/finspot/api-sentinel-sensor:latest
+# eBPF sensor DaemonSet — API-Sensor (in-tree API-Sensor/ checkout)
+# Image: harbor.wecrew.in/finspot/api-sentinel-sensor:20260817-e2e (pinned; build with TAG=... ./k8s/build-and-push.sh sensor)
 # Ingest: in-cluster POST /v1/events (Bearer sensor_key).
 #
 # Prerequisites:
@@ -141,7 +141,7 @@ spec:
           type: Unconfined
       containers:
         - name: sensor
-          image: harbor.wecrew.in/finspot/api-sentinel-sensor:20260816-bodies
+          image: harbor.wecrew.in/finspot/api-sentinel-sensor:20260817-e2e
           imagePullPolicy: Always
           command: ["/bin/bash", "/config/discover-and-run.sh"]
           args:
@@ -162,6 +162,7 @@ spec:
             - --sample-health
             - $(SAMPLE_HEALTH)
             - --discover-libs
+            - --go-tls
           envFrom:
             - configMapRef:
                 name: api-sentinel-sensor

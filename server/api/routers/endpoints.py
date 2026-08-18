@@ -147,7 +147,8 @@ async def get_endpoint(
     if not ep:
         raise HTTPException(status_code=404, detail="Endpoint not found")
     return {
-        "id": ep.id, "method": ep.method, "path": ep.path, "host": ep.host,
+        "id": ep.id, "method": ep.method, "path": ep.path,
+        "path_pattern": ep.path_pattern, "host": ep.host,
         "port": ep.port, "protocol": ep.protocol, "collection_id": ep.collection_id,
         "last_response_code": ep.last_response_code,
         "last_response_body": ep.last_response_body,
@@ -157,6 +158,8 @@ async def get_endpoint(
         "risk_score": ep.risk_score,
         "api_type": ep.api_type,
         "last_seen": str(ep.last_seen) if ep.last_seen else None,
+        "last_tested": str(ep.last_tested) if ep.last_tested else None,
+        "created_at": str(ep.created_at) if ep.created_at else None,
         **_endpoint_metadata(ep),
     }
 
