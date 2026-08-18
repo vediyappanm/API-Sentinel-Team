@@ -46,8 +46,8 @@ export const Sidebar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace })
       'relative flex w-full min-w-0 items-center gap-3 cursor-pointer transition-colors duration-150 outline-none group rounded-md',
       collapsed ? 'flex-col justify-center py-2.5 px-0' : 'py-2 px-3',
       isActive
-        ? 'text-[#FF8A5B] nav-active-bar bg-white/[0.04]'
-        : 'text-[#8a867e] hover:text-[#f4f1ea] hover:bg-white/[0.05]'
+        ? 'text-[var(--sidebar-active)] nav-active-bar bg-white/[0.04]'
+        : 'text-[var(--sidebar-muted)] hover:text-[var(--sidebar-title)] hover:bg-white/[0.05]'
     ));
 
   // Group items by section for expanded mode

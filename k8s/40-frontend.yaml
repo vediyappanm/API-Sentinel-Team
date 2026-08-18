@@ -1,5 +1,5 @@
 # API Sentinel frontend (nginx SPA). Proxies /api and /v1 to api-sentinel-backend.
-# Image: harbor.wecrew.in/finspot/api-sentinel-frontend:20260817-1846
+# Image: harbor.wecrew.in/finspot/api-sentinel-frontend:20260818-0045
 # Public host: https://sentinel.wecrew.in/
 ---
 apiVersion: apps/v1
@@ -29,7 +29,7 @@ spec:
         fsGroup: 101
       containers:
         - name: frontend
-          image: harbor.wecrew.in/finspot/api-sentinel-frontend:20260817-1846
+          image: harbor.wecrew.in/finspot/api-sentinel-frontend:20260818-0045
           imagePullPolicy: Always
           ports:
             - name: http

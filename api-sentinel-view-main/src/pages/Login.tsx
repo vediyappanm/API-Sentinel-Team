@@ -187,19 +187,12 @@ const Login: React.FC = () => {
   const displayError = localError || authError;
 
   return (
-    <div
-      className="h-full min-h-0 overflow-y-auto"
-      style={{
-        background: '#F4F1EA',
-        color: '#0E1116',
-        fontFamily: "'Plus Jakarta Sans', 'IBM Plex Sans', system-ui, sans-serif",
-      }}
-    >
+    <div className="h-full min-h-0 overflow-y-auto bg-bg-base text-text-primary">
       <div className="grid min-h-full lg:h-full lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,420px)]">
         {/* Left — AgentOS-style dark brand panel */}
         <section
           className="relative hidden min-h-0 overflow-y-auto lg:flex lg:flex-col"
-          style={{ background: '#0E1116', color: '#C8C4BC', borderRight: '1px solid #252B36' }}
+          style={{ background: 'var(--sidebar-bg)', color: 'var(--sidebar-fg)', borderRight: '1px solid var(--sidebar-border)' }}
         >
           <div
             className="pointer-events-none absolute inset-0 opacity-40"
@@ -228,7 +221,7 @@ const Login: React.FC = () => {
               <div className="space-y-4">
                 <h1
                   className="text-[2rem] font-semibold leading-[1.2] tracking-tight xl:text-[2.25rem]"
-                  style={{ color: '#F4F1EA' }}
+                  style={{ color: 'var(--sidebar-title)' }}
                 >
                   See every API. Prove every finding.
                 </h1>
@@ -273,7 +266,7 @@ const Login: React.FC = () => {
           {/* Mobile brand strip */}
           <div
             className="mb-8 rounded-xl p-5 lg:hidden"
-            style={{ background: '#0E1116', color: '#C8C4BC', border: '1px solid #252B36' }}
+            style={{ background: 'var(--sidebar-bg)', color: 'var(--sidebar-fg)', border: '1px solid var(--sidebar-border)' }}
           >
             <BrandMark size="sm" />
             <p className="mt-4 text-[15px] font-semibold leading-snug" style={{ color: '#F4F1EA' }}>
@@ -286,13 +279,10 @@ const Login: React.FC = () => {
 
           <div className="mx-auto w-full max-w-[400px] space-y-7">
             <div className="space-y-1.5 lg:pt-2">
-              <h2
-                className="text-[1.5rem] font-semibold tracking-tight"
-                style={{ color: '#0E1116' }}
-              >
+                <h2 className="text-[1.5rem] font-semibold tracking-tight text-text-primary">
                 {isSignup ? 'Create account' : 'Sign in'}
               </h2>
-              <p className="text-sm leading-6" style={{ color: '#5C5A56' }}>
+              <p className="text-sm leading-6 text-text-secondary">
                 {isSignup
                   ? 'Set up your admin account for a new tenant workspace.'
                   : 'Use your operator credentials to open the workspace.'}
@@ -300,15 +290,10 @@ const Login: React.FC = () => {
             </div>
 
             <div
-              className={`overflow-hidden rounded-xl ${shakeError ? 'animate-[shake_0.5s_ease-in-out]' : ''}`}
-              style={{
-                border: '1px solid #DDD6C8',
-                background: '#FFFCF7',
-                boxShadow: '0 1px 2px rgba(14,17,22,0.04), 0 8px 24px rgba(14,17,22,0.06)',
-              }}
+              className={`overflow-hidden rounded-xl border border-border-subtle bg-bg-surface shadow-sm ${shakeError ? 'animate-[shake_0.5s_ease-in-out]' : ''}`}
             >
-              <div className="px-5 py-3" style={{ borderBottom: '1px solid #DDD6C8', background: 'rgba(235,230,220,0.8)' }}>
-                <p className="text-[11px] font-medium" style={{ color: '#5C5A56' }}>
+              <div className="border-b border-border-subtle bg-bg-elevated px-5 py-3">
+                <p className="text-[11px] font-medium text-text-secondary">
                   {isSignup ? 'New admin credentials' : 'Operator credentials'}
                 </p>
               </div>
@@ -330,14 +315,13 @@ const Login: React.FC = () => {
                 )}
 
                 <div className="space-y-1.5">
-                  <label htmlFor="auth-email" className="text-xs font-medium" style={{ color: '#0E1116' }}>
+                  <label htmlFor="auth-email" className="text-xs font-medium text-text-primary">
                     Work email
                   </label>
                   <div className="relative">
                     <Mail
                       size={15}
-                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"
-                      style={{ color: emailError ? '#DC2626' : '#8A867E' }}
+                      className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 ${emailError ? 'text-sev-critical' : 'text-text-muted'}`}
                     />
                     <input
                       id="auth-email"
@@ -345,28 +329,11 @@ const Login: React.FC = () => {
                       type="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="h-11 w-full rounded-md border pl-10 pr-3 text-sm outline-none transition-shadow"
-                      style={{
-                        background: '#F4F1EA',
-                        borderColor: emailError ? '#DC2626' : '#D4CDC0',
-                        color: '#0E1116',
-                        boxShadow: emailError ? '0 0 0 3px rgba(220,38,38,0.12)' : undefined,
-                      }}
-                      onFocus={(e) => {
-                        if (!emailError) {
-                          e.target.style.borderColor = '#2B4CFF';
-                          e.target.style.boxShadow = '0 0 0 3px rgba(43,76,255,0.12)';
-                        }
-                      }}
-                      onBlur={(e) => {
+                      className={`h-11 w-full rounded-md border bg-bg-elevated pl-10 pr-3 text-sm text-text-primary outline-none transition-shadow placeholder:text-text-muted focus:border-brand-blue focus:shadow-[0_0_0_3px_var(--brand-glow)] ${emailError ? 'border-sev-critical' : 'border-border-default'}`}
+                      onBlur={() => {
                         if (email.trim()) {
                           const result = validateEmail(email);
                           setEmailError(result.valid ? null : result.error || null);
-                          e.target.style.borderColor = result.valid ? '#D4CDC0' : '#DC2626';
-                          e.target.style.boxShadow = result.valid ? 'none' : '0 0 0 3px rgba(220,38,38,0.12)';
-                        } else {
-                          e.target.style.borderColor = '#D4CDC0';
-                          e.target.style.boxShadow = 'none';
                         }
                       }}
                       placeholder="you@company.com"
@@ -379,14 +346,13 @@ const Login: React.FC = () => {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label htmlFor="auth-password" className="text-xs font-medium" style={{ color: '#0E1116' }}>
+                  <label htmlFor="auth-password" className="text-xs font-medium text-text-primary">
                     Password
                   </label>
                   <div className="relative">
                     <Lock
                       size={15}
-                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"
-                      style={{ color: passwordError ? '#DC2626' : '#8A867E' }}
+                      className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 ${passwordError ? 'text-sev-critical' : 'text-text-muted'}`}
                     />
                     <input
                       id="auth-password"
@@ -394,30 +360,12 @@ const Login: React.FC = () => {
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="h-11 w-full rounded-md border pl-10 pr-10 text-sm outline-none transition-shadow"
-                      style={{
-                        background: '#F4F1EA',
-                        borderColor: passwordError ? '#DC2626' : '#D4CDC0',
-                        color: '#0E1116',
-                        boxShadow: passwordError ? '0 0 0 3px rgba(220,38,38,0.12)' : undefined,
-                      }}
-                      onFocus={(e) => {
-                        if (!passwordError) {
-                          e.target.style.borderColor = '#2B4CFF';
-                          e.target.style.boxShadow = '0 0 0 3px rgba(43,76,255,0.12)';
-                        }
-                      }}
-                      onBlur={(e) => {
+                      className={`h-11 w-full rounded-md border bg-bg-elevated pl-10 pr-10 text-sm text-text-primary outline-none transition-shadow placeholder:text-text-muted focus:border-brand-blue focus:shadow-[0_0_0_3px_var(--brand-glow)] ${passwordError ? 'border-sev-critical' : 'border-border-default'}`}
+                      onBlur={() => {
                         if (password) {
                           const result = validatePassword(password);
                           const policy = getPasswordValidationError(password, isSignup);
-                          const err = !result.valid ? result.error : policy;
-                          setPasswordError(err || null);
-                          e.target.style.borderColor = err ? '#DC2626' : '#D4CDC0';
-                          e.target.style.boxShadow = err ? '0 0 0 3px rgba(220,38,38,0.12)' : 'none';
-                        } else {
-                          e.target.style.borderColor = '#D4CDC0';
-                          e.target.style.boxShadow = 'none';
+                          setPasswordError((!result.valid ? result.error : policy) || null);
                         }
                       }}
                       placeholder={isSignup ? 'Min 12 chars, letter, number, symbol' : 'Password'}
@@ -429,8 +377,7 @@ const Login: React.FC = () => {
                       tabIndex={-1}
                       aria-label={showPassword ? 'Hide password' : 'Show password'}
                       onClick={() => setShowPassword((v) => !v)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2"
-                      style={{ color: '#8A867E' }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted"
                     >
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -445,16 +392,16 @@ const Login: React.FC = () => {
                       checked={rememberMe}
                       onChange={(e) => setRememberMe(e.target.checked)}
                       className="h-4 w-4 rounded"
-                      style={{ accentColor: '#FF5B2E' }}
+                      style={{ accentColor: 'var(--brand)' }}
                     />
-                    <span className="text-xs" style={{ color: '#5C5A56' }}>
+                    <span className="text-xs text-text-secondary">
                       Remember me
                     </span>
                   </label>
                 )}
 
                 {isSignup && !passwordError && (
-                  <p className="text-[11px]" style={{ color: '#5C5A56' }}>
+                  <p className="text-[11px] text-text-secondary">
                     Use at least 12 characters and include a letter, number, and symbol.
                   </p>
                 )}
@@ -463,14 +410,7 @@ const Login: React.FC = () => {
                   data-testid="auth-submit"
                   type="submit"
                   disabled={submitting}
-                  className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md px-4 text-[13px] font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                  style={{ background: '#2B4CFF' }}
-                  onMouseEnter={(e) => {
-                    if (!submitting) e.currentTarget.style.background = '#FF5B2E';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = '#2B4CFF';
-                  }}
+                  className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-brand-blue px-4 text-[13px] font-medium text-white transition-colors hover:bg-brand disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
                   {submitting
@@ -484,7 +424,7 @@ const Login: React.FC = () => {
               </form>
             </div>
 
-            <p className="text-center text-[11px] leading-relaxed" style={{ color: '#5C5A56' }}>
+            <p className="text-center text-[11px] leading-relaxed text-text-secondary">
               {isSignup ? (
                 <>
                   Already have an account?{' '}
@@ -526,10 +466,7 @@ const Login: React.FC = () => {
               )}
             </p>
 
-            <div
-              className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 pt-5 text-[10.5px]"
-              style={{ borderTop: '1px solid #DDD6C8', color: '#5C5A56' }}
-            >
+            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-t border-border-subtle pt-5 text-[10.5px] text-text-secondary">
               <span className="inline-flex items-center gap-1.5">
                 <FileSearch className="h-3.5 w-3.5" style={{ color: 'rgba(43,76,255,0.7)' }} />
                 Live inventory

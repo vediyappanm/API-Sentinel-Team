@@ -6,121 +6,131 @@
 
 @layer base {
   :root {
-    /* Base Colors - Wecrew AgentOS paper theme */
-    --bg-base: #F4F1EA;
-    --bg-surface: #FFFCF7;
-    --bg-elevated: #EBE6DC;
-    --bg-sidebar: #FFFCF7;
-    --bg-hover: #E8E3D9;
-    --bg-selected: rgba(255, 91, 46, 0.10);
+    color-scheme: light;
+    /* Cool slate workspace — coral is accent only */
+    --bg-base: #f3f5f8;
+    --bg-surface: #ffffff;
+    --bg-elevated: #eef1f5;
+    --bg-sidebar: #111827;
+    --bg-hover: #e8edf3;
+    --bg-selected: rgba(37, 99, 235, 0.08);
 
-    /* Brand Accent - Wecrew coral (identity) + blue (interactive) */
-    --brand: #FF5B2E;
-    --brand-light: #FF8A5B;
-    --brand-dark: #D94418;
-    --brand-blue: #2B4CFF;
-    --brand-ink: #0E1116;
-    --brand-glow: rgba(255, 91, 46, 0.10);
-    --brand-border: rgba(255, 91, 46, 0.28);
+    --brand: #e24b24;
+    --brand-light: #f06a48;
+    --brand-dark: #c43d1c;
+    --brand-blue: #2563eb;
+    --brand-ink: #111827;
+    --brand-glow: rgba(226, 75, 36, 0.10);
+    --brand-border: rgba(226, 75, 36, 0.26);
 
-    /* Severity Color System */
-    --sev-critical: #D63D2F;
-    --sev-high: #E07B2E;
-    --sev-medium: #D4A017;
-    --sev-low: #2DA44E;
-    --sev-info: #3B82F6;
+    --sev-critical: #dc2626;
+    --sev-high: #ea580c;
+    --sev-medium: #ca8a04;
+    --sev-low: #16a34a;
+    --sev-info: #2563eb;
 
-    /* Text Hierarchy */
-    --text-primary: #0E1116;
-    --text-secondary: #5C5A56;
-    --text-muted: #8A867E;
-    --text-disabled: #B8B3A8;
-    --text-brand: #D94418;
+    --text-primary: #111827;
+    --text-secondary: #4b5563;
+    --text-muted: #6b7280;
+    --text-disabled: #9ca3af;
+    --text-brand: #c43d1c;
 
-    /* Borders and Separators */
-    --border-subtle: #DDD6C8;
-    --border-default: #D4CDC0;
+    --border-subtle: #e5e7eb;
+    --border-default: #d1d5db;
 
-    /* Shadcn/UI HSL Variables (Light Theme) */
-    --background: 42 31% 94%;
-    --foreground: 218 22% 7%;
-    --card: 38 100% 98%;
-    --card-foreground: 218 22% 7%;
-    --popover: 38 100% 98%;
-    --popover-foreground: 218 22% 7%;
-    --primary: 231 100% 58%;
+    --sidebar-bg: #111827;
+    --sidebar-border: #1f2937;
+    --sidebar-title: #f9fafb;
+    --sidebar-muted: #9ca3af;
+    --sidebar-fg: #d1d5db;
+    --sidebar-active: #f06a48;
+
+    --background: 210 20% 96%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 221 83% 53%;
     --primary-foreground: 0 0% 100%;
   }
 
   /* Dark Theme */
   .dark {
-    --bg-base: #0E1116;
-    --bg-surface: #1A1F28;
-    --bg-elevated: #252B36;
-    --bg-sidebar: #0A0C10;
-    --bg-hover: #252B36;
-    --bg-selected: rgba(255, 91, 46, 0.16);
+    color-scheme: dark;
+    --bg-base: #0b0f14;
+    --bg-surface: #141a22;
+    --bg-elevated: #1c2430;
+    --bg-sidebar: #080b10;
+    --bg-hover: #1c2430;
+    --bg-selected: rgba(226, 75, 36, 0.16);
 
-    --brand: #FF5B2E;
-    --brand-light: #FF8A5B;
-    --brand-dark: #D94418;
-    --brand-blue: #6B85FF;
-    --brand-ink: #0E1116;
-    --brand-glow: rgba(255, 91, 46, 0.16);
-    --brand-border: rgba(255, 91, 46, 0.38);
+    --brand: #f06a48;
+    --brand-light: #ff8a5b;
+    --brand-dark: #e24b24;
+    --brand-blue: #60a5fa;
+    --brand-ink: #0b0f14;
+    --brand-glow: rgba(240, 106, 72, 0.16);
+    --brand-border: rgba(240, 106, 72, 0.36);
 
-    --sev-critical: #EF4444;
-    --sev-high: #F97316;
-    --sev-medium: #EAB308;
-    --sev-low: #22C55E;
-    --sev-info: #3B82F6;
+    --sev-critical: #f87171;
+    --sev-high: #fb923c;
+    --sev-medium: #fbbf24;
+    --sev-low: #4ade80;
+    --sev-info: #60a5fa;
 
-    --text-primary: #F4F1EA;
-    --text-secondary: #A8A49C;
-    --text-muted: #8A867E;
-    --text-disabled: #4A4F58;
-    --text-brand: #FF8A5B;
+    --text-primary: #f3f4f6;
+    --text-secondary: #9ca3af;
+    --text-muted: #6b7280;
+    --text-disabled: #4b5563;
+    --text-brand: #ff8a5b;
 
-    --border-subtle: #252B36;
-    --border-default: #2A3140;
+    --border-subtle: #1f2937;
+    --border-default: #2a3441;
 
-    /* Shadcn/UI HSL Variables (Dark Theme) */
-    --background: 218 22% 7%;
-    --foreground: 42 31% 94%;
-    --card: 219 21% 13%;
-    --card-foreground: 42 31% 94%;
-    --popover: 219 21% 13%;
-    --popover-foreground: 42 31% 94%;
-    --primary: 229 100% 71%;
-    --primary-foreground: 218 22% 7%;
+    --sidebar-bg: #080b10;
+    --sidebar-border: #1f2937;
+    --sidebar-title: #f9fafb;
+    --sidebar-muted: #9ca3af;
+    --sidebar-fg: #d1d5db;
+    --sidebar-active: #ff8a5b;
 
-    --secondary: 219 21% 13%;
-    --secondary-foreground: 42 31% 94%;
-    --muted: 219 21% 13%;
-    --muted-foreground: 40 6% 64%;
-    --accent: 18 41% 16%;
-    --accent-foreground: 15 100% 85%;
-    --destructive: 0 91% 71%;
-    --destructive-foreground: 218 22% 7%;
-    --border: 219 19% 18%;
-    --input: 221 21% 21%;
-    --ring: 13 100% 59%;
+    --background: 216 22% 6%;
+    --foreground: 220 14% 96%;
+    --card: 216 22% 11%;
+    --card-foreground: 220 14% 96%;
+    --popover: 216 22% 11%;
+    --popover-foreground: 220 14% 96%;
+    --primary: 217 91% 67%;
+    --primary-foreground: 222 47% 11%;
+
+    --secondary: 216 20% 14%;
+    --secondary-foreground: 220 14% 96%;
+    --muted: 216 20% 14%;
+    --muted-foreground: 218 11% 65%;
+    --accent: 16 40% 16%;
+    --accent-foreground: 16 100% 86%;
+    --destructive: 0 84% 70%;
+    --destructive-foreground: 222 47% 11%;
+    --border: 217 19% 18%;
+    --input: 217 19% 22%;
+    --ring: 221 83% 53%;
   }
 }
 
 @layer base {
   :root {
-    --secondary: 40 27% 89%;
-    --secondary-foreground: 218 22% 7%;
-    --muted: 40 25% 88%;
-    --muted-foreground: 40 3% 35%;
-    --accent: 17 88% 94%;
-    --accent-foreground: 15 79% 34%;
+    --secondary: 214 20% 93%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 214 16% 92%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 214 80% 95%;
+    --accent-foreground: 221 83% 40%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 40 24% 83%;
-    --input: 39 19% 79%;
-    --ring: 231 100% 58%;
+    --border: 214 16% 88%;
+    --input: 214 14% 82%;
+    --ring: 221 83% 53%;
     --radius: 0.5rem;
 
     --severity-critical: 4 72% 51%;
@@ -185,13 +195,13 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #D4CDC0;
+  background: var(--border-default);
   border-radius: 6px;
   transition: background 0.2s;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #FF5B2E;
+  background: var(--brand);
 }
 
 /* ========== Animations & Keyframes ========== */
@@ -379,21 +389,21 @@
   top: 8px;
   bottom: 8px;
   width: 2px;
-  background: #FF5B2E;
+  background: var(--brand);
   border-radius: 0 2px 2px 0;
 }
 
-/* Command sidebar — always ink, even when the workspace is paper. */
+/* Command sidebar stays ink in both themes. */
 .ws-sidebar {
-  background: #0e1116;
-  color: #c8c4bc;
-  border-right: 1px solid #252b36;
+  background: var(--sidebar-bg);
+  color: var(--sidebar-fg);
+  border-right: 1px solid var(--sidebar-border);
 }
 .ws-sidebar .ws-sidebar-title {
-  color: #f4f1ea;
+  color: var(--sidebar-title);
 }
 .ws-sidebar .ws-sidebar-muted {
-  color: #8a867e;
+  color: var(--sidebar-muted);
 }
 .ws-sidebar a,
 .ws-sidebar button {
@@ -402,7 +412,7 @@
 
 /* ========== Table Styles ========== */
 .table-row-hover:hover {
-  background-color: rgba(255, 91, 46, 0.05);
+  background-color: var(--bg-selected);
 }
 
 .data-row-interactive {
@@ -411,12 +421,12 @@
 }
 
 .data-row-interactive:hover {
-  background: rgba(255, 91, 46, 0.05);
-  border-left-color: rgba(255, 91, 46, 0.55);
+  background: var(--bg-selected);
+  border-left-color: var(--brand-border);
 }
 
 .data-table thead th {
-  background: #EBE6DC;
+  background: var(--bg-elevated);
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 600;
@@ -432,7 +442,7 @@
 }
 
 .data-table tbody tr:hover {
-  background: rgba(255, 91, 46, 0.04);
+  background: var(--bg-selected);
 }
 
 /* ========== Status & Indicators ========== */
@@ -486,47 +496,25 @@
    ============================================================ */
 
 .evd-root {
-  /* Light palette — reuses the app's own existing tokens (bg-base/
-     bg-surface/text-primary/severity-*) so it sits flush with the
-     sidebar and topbar instead of reading as a different product. */
-  --evd-void: #f4f1ea;
-  --evd-panel: #fffcf7;
-  --evd-panel-raised: #f7f3eb;
-  --evd-line: #e4ddd0;
-  --evd-line-strong: #d4cdc0;
-  --evd-paper: #0e1116;
-  --evd-ink: #3f4249;
-  --evd-ink-muted: #8a867e;
-  --evd-signal: #d94418;
-  --evd-signal-dim: rgba(255, 91, 46, 0.07);
-  --evd-critical: #d63d2f;
-  --evd-high: #e07b2e;
-  --evd-medium: #d4a017;
-  --evd-low: #2da44e;
-  --evd-info: #3b82f6;
-  --evd-hero-wash: linear-gradient(135deg, rgba(255, 91, 46, 0.05) 0%, transparent 48%, rgba(43, 76, 255, 0.03) 100%);
+  --evd-void: var(--bg-base);
+  --evd-panel: var(--bg-surface);
+  --evd-panel-raised: var(--bg-elevated);
+  --evd-line: var(--border-subtle);
+  --evd-line-strong: var(--border-default);
+  --evd-paper: var(--text-primary);
+  --evd-ink: var(--text-secondary);
+  --evd-ink-muted: var(--text-muted);
+  --evd-signal: var(--brand);
+  --evd-signal-dim: var(--brand-glow);
+  --evd-critical: var(--sev-critical);
+  --evd-high: var(--sev-high);
+  --evd-medium: var(--sev-medium);
+  --evd-low: var(--sev-low);
+  --evd-info: var(--sev-info);
+  --evd-hero-wash: linear-gradient(135deg, var(--brand-glow) 0%, transparent 48%, rgba(37, 99, 235, 0.04) 100%);
 
   font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
   font-size: 14px;
-}
-
-.dark .evd-root {
-  --evd-void: #0e1116;
-  --evd-panel: #1a1f28;
-  --evd-panel-raised: #252b36;
-  --evd-line: #2a3140;
-  --evd-line-strong: #3a4254;
-  --evd-paper: #f4f1ea;
-  --evd-ink: #a8a49c;
-  --evd-ink-muted: #8a867e;
-  --evd-signal: #ff8a5b;
-  --evd-signal-dim: rgba(255, 91, 46, 0.16);
-  --evd-critical: #ef4444;
-  --evd-high: #f97316;
-  --evd-medium: #eab308;
-  --evd-low: #22c55e;
-  --evd-info: #6b85ff;
-  --evd-hero-wash: linear-gradient(135deg, rgba(255, 91, 46, 0.12) 0%, transparent 45%, rgba(107, 133, 255, 0.06) 100%);
 }
 
 /* Hero band — first-viewport posture composition */

@@ -300,7 +300,7 @@ export const TopBar: React.FC<{ workspace: WorkspaceConfig }> = ({ workspace }) 
           <div className="relative">
             <button
               onClick={() => setUserMenuOpen(v => !v)}
-              className="flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-lg hover:bg-black/[0.03] transition-colors outline-none"
+              className="flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-lg hover:bg-bg-hover transition-colors outline-none"
             >
               <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold text-white shadow-sm bg-gradient-to-br from-brand to-brand-dark ring-2 ring-brand/20">
                 {initials}
